@@ -1,0 +1,445 @@
+// ═══════════════════════════════════════════════════════════════
+// hoja_base_instalada.js — Base Instalada de Equipos
+// Depende de: datos.js (APP_DATA), utils.js
+// ═══════════════════════════════════════════════════════════════
+
+let _chBILinea=null, _chBITipos=null, _chBIClientes=null;
+let _biFiltLinea='todos', _biFiltEstado='todos', _biFiltRelacion='todos', _biQuery='';
+let _biSortCol=2, _biSortAsc=false;
+
+// Lookup maps cruzados con panel (facturación) y DATA (contratos activos)
+let _biPanelMap={}, _biContratoMap={};
+
+function _biNorm(s){ return s?s.trim().toUpperCase().replace(/\s+/g,' ').normalize('NFD').replace(/[̀-ͯ]/g,''):''; }
+function _biLookupPanel(nombre){
+  const k=_biNorm(nombre);
+  if(_biPanelMap[k]) return _biPanelMap[k];
+  // búsqueda parcial (uno contiene al otro, mínimo 8 chars)
+  if(k.length>=8){
+    const found=Object.keys(_biPanelMap).find(pk=>pk.includes(k)||k.includes(pk));
+    if(found) return _biPanelMap[found];
+  }
+  return null;
+}
+function _biLookupContrato(nombre){
+  const k=_biNorm(nombre);
+  if(_biContratoMap[k]) return _biContratoMap[k];
+  if(k.length>=8){
+    const found=Object.keys(_biContratoMap).find(ck=>ck.includes(k)||k.includes(ck));
+    if(found) return _biContratoMap[found];
+  }
+  return null;
+}
+
+// Badge de estado relación (desde panel de facturación)
+function _biRelBadge(p,d){
+  if(!p&&!d) return '<span class="badge bgy">Sin datos</span>';
+  if(d&&d.n>0){
+    if(d.tipos.includes('Comercial'))return'<span class="badge bok">Contrato activo</span>';
+    return'<span class="badge bte">Garantía activa</span>';
+  }
+  if(p){
+    const er=p.estado_relacion||'';
+    if(er==='Nuevo')    return'<span class="badge bte">Nuevo</span>';
+    if(er==='Renovado') return'<span class="badge bok">Renovado</span>';
+    if(er==='Perdido')  return'<span class="badge brd">Perdido</span>';
+    if(p.tiene_contrato)return'<span class="badge bok">Con contrato</span>';
+    return'<span class="badge bgy">Sin contrato</span>';
+  }
+  return'<span class="badge bgy">Sin contrato</span>';
+}
+
+// Colores por línea de negocio
+const _BI_LINEA_COLORES = {
+  'DENTAL':            '#FFC000',
+  'ESTERILIZACIÓN':    '#002D73',
+  'ESTERILIZACION':    '#002D73',
+  'INCARDIA':          '#D46000',
+  'ENDOSCOPIA':        '#28D2C3',
+  'MOBILIARIO CLINICO':'#7B2FBE',
+  'MMQ':               '#00832F',
+  'REAS':              '#C00000',
+};
+function _biLineaColor(l){ return _BI_LINEA_COLORES[l] || '#B8C1D8'; }
+
+function _biEstadoBadge(estado){
+  if(estado==='Contrato')     return `<span class="badge bok">Contrato</span>`;
+  if(estado==='Garantia')     return `<span class="badge bte">Garantía</span>`;
+  if(estado==='Sin garantia') return `<span class="badge bgy">Sin garantía</span>`;
+  return `<span class="badge bgy">Sin clasificar</span>`;
+}
+
+function _biClientesFiltrados(){
+  const bi = APP_DATA.base_instalada || {};
+  let list = bi.clientes || [];
+
+  if(_biFiltEstado !== 'todos'){
+    list = list.filter(c => c.estado === _biFiltEstado);
+  }
+  if(_biFiltRelacion !== 'todos'){
+    list = list.filter(c => {
+      const d = _biLookupContrato(c.nombre);
+      const tieneContrato = d && d.n > 0;
+      return _biFiltRelacion === 'con' ? tieneContrato : !tieneContrato;
+    });
+  }
+  if(_biFiltLinea !== 'todos'){
+    const linea = _biFiltLinea;
+    list = list.filter(c => {
+      if(linea==='dental')        return c.dental > 0;
+      if(linea==='esterilizacion') return c.esterilizacion > 0;
+      if(linea==='incardia')      return c.incardia > 0;
+      if(linea==='endoscopia')    return c.endoscopia > 0;
+      if(linea==='mobiliario')    return c.mobiliario > 0;
+      if(linea==='mmq_reas')      return c.mmq_reas > 0;
+      return true;
+    });
+  }
+  if(_biQuery){
+    const q = _biQuery.toLowerCase();
+    list = list.filter(c => c.nombre.toLowerCase().includes(q));
+  }
+
+  // Sort
+  const cols = ['nombre','nombre','total','dental','esterilizacion','incardia','endoscopia','mobiliario','mmq_reas','estado'];
+  const colKey = cols[_biSortCol] || 'total';
+  list = [...list].sort((a,b)=>{
+    const va = a[colKey], vb = b[colKey];
+    if(typeof va === 'number' && typeof vb === 'number')
+      return _biSortAsc ? va-vb : vb-va;
+    return _biSortAsc
+      ? String(va).localeCompare(String(vb),'es')
+      : String(vb).localeCompare(String(va),'es');
+  });
+  return list;
+}
+
+function _biRenderTabla(){
+  const list = _biClientesFiltrados();
+  const tb = document.getElementById('tb-bi-cli');
+  if(!tb) return;
+
+  if(list.length === 0){
+    tb.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--mut);padding:1.2rem;font-style:italic">Sin resultados para los filtros seleccionados</td></tr>`;
+  } else {
+    tb.innerHTML = list.map((c,i)=>{
+      const p=_biLookupPanel(c.nombre);
+      const d=_biLookupContrato(c.nombre);
+      const fac2026=p?(mm(p.real_ytd||0)):'—';
+      const facContr=p?(mm(p.presup_contr_ytd||0)):'—';
+      return `<tr>
+      <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">${i+1}</td>
+      <td><strong style="font-size:.7rem">${shortN(c.nombre)}</strong></td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;font-weight:700;color:var(--az1)">${c.total.toLocaleString('es-CL')}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--am)">${c.dental||'—'}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--az2)">${c.esterilizacion||'—'}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--or)">${c.incardia||'—'}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--teal)">${c.endoscopia||'—'}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:#7B2FBE">${c.mobiliario||'—'}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--gn)">${c.mmq_reas||'—'}</td>
+      <td style="text-align:right;color:var(--az1);font-weight:700">${fac2026}</td>
+      <td style="text-align:right;color:var(--teal)">${facContr}</td>
+      <td>${_biRelBadge(p,d)}</td>
+    </tr>`;
+    }).join('');
+  }
+
+  // Footer
+  const foot = document.getElementById('tfoot-bi-cli');
+  if(foot){
+    const tot  = list.reduce((s,c)=>s+c.total,0);
+    const dent = list.reduce((s,c)=>s+c.dental,0);
+    const este = list.reduce((s,c)=>s+c.esterilizacion,0);
+    const inc  = list.reduce((s,c)=>s+c.incardia,0);
+    const endo = list.reduce((s,c)=>s+c.endoscopia,0);
+    const mob  = list.reduce((s,c)=>s+c.mobiliario,0);
+    const mmq  = list.reduce((s,c)=>s+c.mmq_reas,0);
+    const facTotal = list.reduce((s,c)=>{const p=_biLookupPanel(c.nombre);return s+(p&&p.real_ytd?p.real_ytd:0);},0);
+    const conContr = list.filter(c=>{const d=_biLookupContrato(c.nombre);return d&&d.n>0;}).length;
+    const st='text-align:right;font-family:\'Roboto Mono\',monospace;color:rgba(255,255,255,.75)';
+    foot.innerHTML = `<td colspan="2" style="font-weight:700;font-size:.62rem;color:rgba(255,255,255,.85)">${list.length} clientes · ${conContr} con contrato activo</td>
+      <td style="${st};font-weight:700;color:#fff">${tot.toLocaleString('es-CL')}</td>
+      <td style="${st}">${dent}</td><td style="${st}">${este}</td>
+      <td style="${st}">${inc}</td><td style="${st}">${endo}</td>
+      <td style="${st}">${mob}</td><td style="${st}">${mmq}</td>
+      <td style="${st};font-weight:700;color:#FFC000">${mm(facTotal)}</td>
+      <td></td><td></td>`;
+  }
+}
+
+function biFiltrarLinea(btn){
+  document.querySelectorAll('#bi-filt-linea .btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  _biFiltLinea = btn.dataset.bfl;
+  _biRenderTabla();
+}
+function biFiltrarEstado(btn){
+  document.querySelectorAll('#bi-filt-estado .btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  _biFiltEstado = btn.dataset.bfe;
+  _biRenderTabla();
+}
+function biFiltrarRelacion(btn){
+  document.querySelectorAll('#bi-filt-relacion .btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  _biFiltRelacion = btn.dataset.bfr;
+  _biRenderTabla();
+}
+function biSearch(val){
+  _biQuery = val;
+  _biRenderTabla();
+}
+function biSortCol(col, th){
+  if(_biSortCol === col) _biSortAsc = !_biSortAsc;
+  else { _biSortCol = col; _biSortAsc = false; }
+  if(th){
+    const tbl = th.closest('table');
+    tbl.querySelectorAll('th').forEach(h=>h.classList.remove('th-asc','th-desc'));
+    th.classList.add(_biSortAsc ? 'th-asc' : 'th-desc');
+  }
+  _biRenderTabla();
+}
+
+function initBaseInstalada(){
+  const bi = APP_DATA.base_instalada || {};
+  const clientes = bi.clientes || [];
+  const porLinea = bi.por_linea || {};
+  const porEstado = bi.por_estado || {};
+  const porTipo   = bi.por_tipo   || [];
+  const total     = bi.total || 0;
+
+  // ── Construir mapas cruzados con panel y DATA ─────────────────────────────
+  _biPanelMap = {};
+  (APP_DATA.panel||[]).forEach(p=>{
+    const k=_biNorm(p.cliente);
+    if(k) _biPanelMap[k]=p;
+  });
+  _biContratoMap = {};
+  (typeof DATA!=='undefined'?DATA:[]).forEach(d=>{
+    const k=_biNorm(d.cliente);
+    if(!_biContratoMap[k]) _biContratoMap[k]={n:0,tipos:[],coords:[]};
+    _biContratoMap[k].n++;
+    if(!_biContratoMap[k].tipos.includes(d.tipo)) _biContratoMap[k].tipos.push(d.tipo);
+    if(d.coord&&!_biContratoMap[k].coords.includes(d.coord)) _biContratoMap[k].coords.push(d.coord);
+  });
+
+  // ── KPIs ──────────────────────────────────────────────────────────────────
+  const conContrato = (porEstado['Contrato']||0) + (porEstado['Garantia']||0);
+  const lineasActivas = Object.keys(porLinea).length;
+  // Clientes BI que tienen contrato activo en DATA
+  const biConContratoActivo = clientes.filter(c=>{ const d=_biLookupContrato(c.nombre); return d&&d.n>0; }).length;
+  // Facturación 2026 de clientes BI que están en el panel
+  const facBITotal = clientes.reduce((s,c)=>{ const p=_biLookupPanel(c.nombre); return s+(p&&p.real_ytd?p.real_ytd:0); },0);
+
+  // ── Helpers de líneas para cards ─────────────────────────────────────────
+  const _LINEAS_DEF = [
+    {key:'dental',       label:'Dental',           color:'#FFC000', icon:'🦷', prop:'dental'},
+    {key:'esterilizacion',label:'Esterilización',  color:'#002D73', icon:'⚗️',  prop:'esterilizacion'},
+    {key:'incardia',     label:'Incardia',          color:'#D46000', icon:'🫀', prop:'incardia'},
+    {key:'endoscopia',   label:'Endoscopía',        color:'#28D2C3', icon:'🔭', prop:'endoscopia'},
+    {key:'mobiliario',   label:'Mobiliario Clínico',color:'#7B2FBE', icon:'🛏️', prop:'mobiliario'},
+    {key:'mmq_reas',     label:'MMQ / REAS',        color:'#00832F', icon:'🔧', prop:'mmq_reas'},
+  ];
+  const porTipoLinea = bi.por_tipo_linea || {};
+
+  // Mapa normalizado de porLinea (sin acentos, mayúsculas) para lookup robusto
+  const _plNorm = {};
+  Object.keys(porLinea).forEach(k => {
+    const nk = k.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+    _plNorm[nk] = (porLinea[k]||0);
+  });
+  _plNorm['MMQ_REAS'] = (_plNorm['MMQ']||0) + (_plNorm['REAS']||0);
+  function _normKey(s){ return s.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,''); }
+
+  function _biTopCliLine(prop, n=3){
+    return [...clientes].filter(c=>c[prop]>0).sort((a,b)=>b[prop]-a[prop]).slice(0,n);
+  }
+  function _biLineCard(def){
+    // Busca total en porLinea normalizado (clave por key, luego por label completo)
+    const nTotal = _plNorm[_normKey(def.key)] != null && _plNorm[_normKey(def.key)] > 0
+      ? _plNorm[_normKey(def.key)]
+      : _plNorm[_normKey(def.label)] != null && _plNorm[_normKey(def.label)] > 0
+        ? _plNorm[_normKey(def.label)]
+        : clientes.reduce((s,c)=>s+(c[def.prop]||0),0);
+    const nCli   = clientes.filter(c=>c[def.prop]>0).length;
+    const nContr = clientes.filter(c=>c[def.prop]>0 && _biLookupContrato(c.nombre)?.n>0).length;
+    const pctCon = nCli>0?(nContr/nCli*100).toFixed(0):0;
+    const topTip = (porTipoLinea[def.label.toUpperCase()]||porTipoLinea[def.label.split(' ')[0].toUpperCase()]||[]).slice(0,4);
+    const topCli = _biTopCliLine(def.prop, 3);
+    const tipoRows = topTip.map(t=>{
+      const pct = nTotal>0?Math.round(t.n/nTotal*100):0;
+      const barW = Math.max(2,Math.round(pct*0.8));
+      return `<div style="display:flex;align-items:center;gap:.4rem;font-size:.6rem;margin:.12rem 0">
+        <div style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--mut)">${t.tipo.length>28?t.tipo.slice(0,26)+'…':t.tipo}</div>
+        <div style="width:60px;height:4px;background:var(--gy2);border-radius:2px;flex-shrink:0">
+          <div style="width:${barW}%;height:100%;background:${def.color};border-radius:2px"></div>
+        </div>
+        <div style="font-family:'Roboto Mono',monospace;width:36px;text-align:right;color:var(--txt);flex-shrink:0">${t.n}</div>
+      </div>`;
+    }).join('');
+    const cliRows = topCli.map(c=>
+      `<div style="display:flex;justify-content:space-between;font-size:.6rem;padding:.1rem 0;border-bottom:1px solid var(--gy2)">
+        <span style="color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${c.nombre.length>28?c.nombre.slice(0,26)+'…':c.nombre}</span>
+        <span style="font-family:'Roboto Mono',monospace;font-weight:700;color:${def.color};flex-shrink:0">${c[def.prop]}</span>
+      </div>`).join('');
+    return `<div class="card" style="border-top:3px solid ${def.color};padding:0;overflow:hidden">
+      <div style="padding:.65rem .8rem;background:linear-gradient(135deg,${def.color}18,transparent)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.3rem">
+          <div>
+            <div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);font-weight:700">${def.icon} ${def.label}</div>
+            <div style="font-family:'Roboto Condensed',sans-serif;font-weight:900;font-size:1.6rem;color:${def.color};line-height:1.1">${nTotal.toLocaleString('es-CL')}</div>
+            <div style="font-size:.58rem;color:var(--mut)">equipos · ${nCli} clientes</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-family:'Roboto Condensed',sans-serif;font-weight:900;font-size:1.1rem;color:var(--gn)">${pctCon}%</div>
+            <div style="font-size:.55rem;color:var(--mut)">con contrato</div>
+          </div>
+        </div>
+        <div style="height:4px;background:var(--gy2);border-radius:2px;margin:.4rem 0">
+          <div style="width:${pctCon}%;height:100%;background:var(--gn);border-radius:2px;transition:width .6s"></div>
+        </div>
+      </div>
+      <div style="padding:.4rem .8rem .55rem;border-top:1px solid var(--brd)">
+        <div style="font-size:.58rem;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.28rem">Top equipos</div>
+        ${tipoRows||'<div style="font-size:.6rem;color:var(--mut)">Sin datos</div>'}
+      </div>
+      <div style="padding:.4rem .8rem .55rem;border-top:1px solid var(--brd)">
+        <div style="font-size:.58rem;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.28rem">Top clientes</div>
+        ${cliRows||'<div style="font-size:.6rem;color:var(--mut)">Sin datos</div>'}
+      </div>
+    </div>`;
+  }
+
+  // ── Vista regional con MAPA_DATA ──────────────────────────────────────────
+  const mapaCli = typeof MAPA_DATA!=='undefined'?MAPA_DATA:[];
+  const regionMap={};
+  mapaCli.forEach(c=>{
+    const r=c.region||'Sin región';
+    if(!regionMap[r])regionMap[r]={n:0,bi:0,cc:0,ing:0,pot:0};
+    regionMap[r].n++;
+    regionMap[r].bi+=c.bi||0;
+    regionMap[r].ing+=c.ingreso||0;
+    regionMap[r].pot+=c.pot||0;
+    if(c.cc)regionMap[r].cc++;
+  });
+  const regArr=Object.entries(regionMap).sort((a,b)=>b[1].bi-a[1].bi).slice(0,14);
+
+  const v = document.getElementById('view-base');
+  v.innerHTML = `
+  <div class="sh">
+    <h2>Base Instalada · Equipos TECSERVICE</h2>
+    <div class="sh-line"></div>
+    <span class="sh-tag">${total.toLocaleString('es-CL')} equipos activos · ${clientes.length} clientes · ${lineasActivas} líneas de negocio</span>
+  </div>
+
+  <!-- KPIs compactos -->
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.55rem;margin-bottom:1rem">
+    <div class="kpi" style="--kc:var(--az1)"><div class="kpi-lbl">Total Equipos</div><div class="kpi-val">${total.toLocaleString('es-CL')}</div><div class="kpi-sub">activos en servicio</div></div>
+    <div class="kpi" style="--kc:var(--az2)"><div class="kpi-lbl">Clientes</div><div class="kpi-val">${clientes.length.toLocaleString('es-CL')}</div><div class="kpi-sub">instituciones</div></div>
+    <div class="kpi" style="--kc:var(--gn)"><div class="kpi-lbl">Con Contrato Activo</div><div class="kpi-val">${biConContratoActivo}</div><div class="kpi-sub">${clientes.length>0?((biConContratoActivo/clientes.length)*100).toFixed(1):'0'}% clientes BI</div></div>
+    <div class="kpi" style="--kc:var(--teal)"><div class="kpi-lbl">Contr./Garantía BI</div><div class="kpi-val">${conContrato.toLocaleString('es-CL')}</div><div class="kpi-sub">${total>0?((conContrato/total)*100).toFixed(1):'0'}% equipos</div></div>
+    <div class="kpi" style="--kc:var(--or)"><div class="kpi-lbl">Tipos de Equipo</div><div class="kpi-val">${porTipo.length}</div><div class="kpi-sub">tipos distintos</div></div>
+  </div>
+
+  <!-- Cards por línea de negocio (2×3) -->
+  <div class="sh" style="margin-bottom:.6rem"><h2>Por Línea de Negocio</h2><div class="sh-line"></div><span class="sh-tag">Distribución de equipos · top tipos · clientes · % con contrato activo</span></div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1.1rem" id="bi-linea-cards"></div>
+
+  <!-- Vista regional + Top tipos global -->
+  <div class="g6040" style="margin-bottom:1rem">
+    <div class="card">
+      <div class="ch"><span class="ct">Distribución Regional · Clientes y Equipos (MAPA DATA)</span></div>
+      <div class="cb" style="position:relative;height:320px"><canvas id="cBIRegion"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="ch"><span class="ct">Top 12 Tipos de Equipo</span></div>
+      <div class="cb" style="position:relative;height:320px"><canvas id="cBITipos"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Filtros + Tabla compacta -->
+  <div class="sh" style="margin-bottom:.5rem"><h2>Detalle por Cliente</h2><div class="sh-line"></div>
+    <span class="sh-tag">Filtro: <span id="bi-filter-info">Todos</span></span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:.45rem;margin-bottom:.6rem;align-items:center">
+    <div id="bi-filt-linea" style="display:flex;gap:.25rem;flex-wrap:wrap">
+      <button class="btn on" data-bfl="todos" onclick="biFiltrarLinea(this)">Todas</button>
+      <button class="btn" data-bfl="dental" onclick="biFiltrarLinea(this)" style="border-left:2px solid #FFC000">Dental</button>
+      <button class="btn" data-bfl="esterilizacion" onclick="biFiltrarLinea(this)" style="border-left:2px solid #002D73">Esteril.</button>
+      <button class="btn" data-bfl="incardia" onclick="biFiltrarLinea(this)" style="border-left:2px solid #D46000">Incardia</button>
+      <button class="btn" data-bfl="endoscopia" onclick="biFiltrarLinea(this)" style="border-left:2px solid #28D2C3">Endosc.</button>
+      <button class="btn" data-bfl="mobiliario" onclick="biFiltrarLinea(this)" style="border-left:2px solid #7B2FBE">Mobil.</button>
+      <button class="btn" data-bfl="mmq_reas" onclick="biFiltrarLinea(this)" style="border-left:2px solid #00832F">MMQ/REAS</button>
+    </div>
+    <div id="bi-filt-relacion" style="display:flex;gap:.25rem;flex-wrap:wrap;border-left:1px solid var(--brd);padding-left:.5rem">
+      <button class="btn on" data-bfr="todos" onclick="biFiltrarRelacion(this)">Todos</button>
+      <button class="btn" data-bfr="con" onclick="biFiltrarRelacion(this)" style="border-left:2px solid var(--gn)">Con contrato</button>
+      <button class="btn" data-bfr="sin" onclick="biFiltrarRelacion(this)" style="border-left:2px solid var(--rd)">Sin contrato</button>
+    </div>
+    <input type="search" placeholder="🔍 Buscar cliente…" oninput="biSearch(this.value)"
+      style="margin-left:auto;border:1px solid var(--brd);border-radius:20px;padding:.28rem .8rem;font-size:.65rem;outline:none;width:190px;font-family:'Roboto',sans-serif">
+  </div>
+  <div class="card" style="overflow-x:auto">
+    <table class="tbl" style="font-size:.65rem">
+      <thead><tr>
+        <th style="width:2rem">#</th>
+        <th onclick="biSortCol(1,this)">Cliente</th>
+        <th onclick="biSortCol(2,this)" class="num th-desc">Total</th>
+        <th onclick="biSortCol(3,this)" class="num" style="color:#FFC000">Dental</th>
+        <th onclick="biSortCol(4,this)" class="num" style="color:#A0B8F0">Esteril.</th>
+        <th onclick="biSortCol(5,this)" class="num" style="color:#F0A060">Incardia</th>
+        <th onclick="biSortCol(6,this)" class="num" style="color:#28D2C3">Endosc.</th>
+        <th onclick="biSortCol(7,this)" class="num" style="color:#C0A0F0">Mobil.</th>
+        <th onclick="biSortCol(8,this)" class="num" style="color:#80D080">MMQ/REAS</th>
+        <th onclick="biSortCol(9,this)">Estado BI</th>
+        <th onclick="biSortCol(10,this)" class="num" style="color:#FFC000">Fac. 2026</th>
+        <th class="num">F. Contr.</th>
+        <th>Relación</th>
+      </tr></thead>
+      <tbody id="tb-bi-cli"></tbody>
+      <tfoot><tr id="tfoot-bi-cli" style="background:var(--az3);font-size:.62rem"></tr></tfoot>
+    </table>
+  </div>`;
+
+  // ── Renderizar cards por línea ────────────────────────────────────────────
+  const cardsContainer = document.getElementById('bi-linea-cards');
+  if(cardsContainer) cardsContainer.innerHTML = _LINEAS_DEF.map(def=>_biLineCard(def)).join('');
+
+  // ── Gráfico regional ──────────────────────────────────────────────────────
+  const ctxReg = document.getElementById('cBIRegion');
+  if(ctxReg && regArr.length > 0){
+    safeChart(ctxReg.getContext('2d'),{
+      type:'bar',
+      data:{
+        labels:regArr.map(([r])=>r.length>20?r.slice(0,18)+'…':r),
+        datasets:[
+          {label:'Equipos BI',data:regArr.map(([,d])=>d.bi),backgroundColor:'#002D73',stack:'s',borderRadius:3},
+          {label:'Con Contrato',data:regArr.map(([,d])=>d.cc*10),backgroundColor:'#28D2C3',stack:'cc',borderRadius:3,type:'bar'},
+        ]
+      },
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{position:'top',labels:{boxWidth:10,font:{size:10},padding:8}},
+          tooltip:{callbacks:{label:c=>c.datasetIndex===0?` ${c.parsed.x} equipos BI`:` ${Math.round(c.parsed.x/10)} con contrato MAPA`}}},
+        scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{font:{size:9}}},y:{grid:{display:false},ticks:{font:{size:9}}}}}
+    });
+  }
+
+  // ── Gráfico top tipos global ──────────────────────────────────────────────
+  const top12Tipos = porTipo.slice(0, 12);
+  const ctxTipos = document.getElementById('cBITipos');
+  if(ctxTipos){
+    if(_chBITipos) _chBITipos.destroy();
+    _chBITipos = safeChart(ctxTipos.getContext('2d'),{
+      type:'bar',
+      data:{labels:top12Tipos.map(x=>x.tipo.length>28?x.tipo.slice(0,26)+'…':x.tipo),
+        datasets:[{label:'Equipos',data:top12Tipos.map(x=>x.n),
+          backgroundColor:top12Tipos.map((_,i)=>{const c=['#FFC000','#002D73','#D46000','#28D2C3','#7B2FBE','#00832F'];return c[i%c.length];}),
+          borderRadius:4}]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw.toLocaleString('es-CL')} equipos`}}},
+        scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{font:{size:10}}},y:{grid:{display:false},ticks:{font:{size:9}}}}}
+    });
+  }
+
+  _biRenderTabla();
+}

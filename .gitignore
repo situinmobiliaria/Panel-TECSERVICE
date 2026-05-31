@@ -1,0 +1,5 @@
+# Versiones antiguas
+old/
+
+# Claude Code
+.claude/settings.local.json
