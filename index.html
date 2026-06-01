@@ -4006,24 +4006,27 @@ function renderFcVsPpto(){
   const barT=document.getElementById('fc-vsp-tot-bar'),wTot=Math.min(pctTot,100);barT.style.width=wTot.toFixed(1)+'%';barT.textContent=wTot>10?pctTot.toFixed(1)+'%':'';
   document.getElementById('fc-vsp-tot-gap').textContent=gapTot>0?'Falta '+mm(gapTot):'Superado +'+mm(-gapTot);
 
-  // ── Ppto acumulado a la fecha (real de GD-PPTO, no lineal) ─────────────────
+  // ── Ppto acumulado a la fecha (real de GD-PPTO) ──────────────────────────────
+  // MES_CORTE = último mes con datos de facturación (puede ser menor al mes calendario)
+  // MES_PPTO  = mes calendario actual → siempre acumula el ppto correcto
   const _pmFc = APP_DATA.analisis_fac && APP_DATA.analisis_fac.ppto_mensual;
   const _usePMFc = _pmFc && _pmFc.some(v=>v>0);
-  // Para 2026: suma real Ene–MES_CORTE desde GD-PPTO. Para otros años: lineal.
+  const MES_PPTO = Math.min(new Date().getMonth() + 1, 12);
+  const MES_PPTO_NOMBRE = MESES_FULL[MES_PPTO - 1];
   const _pptoYTDTotal = (fcYrF==='2026' && _usePMFc)
-    ? _pmFc.slice(0, MES_CORTE).reduce((s,v)=>s+v, 0)
-    : pptoTot * (fcYrF==='todos' ? (24+MES_CORTE)/36 : fcYrF==='2026' ? MES_CORTE/12 : 1);
+    ? _pmFc.slice(0, MES_PPTO).reduce((s,v)=>s+v, 0)
+    : pptoTot * (fcYrF==='todos' ? (24+MES_PPTO)/36 : fcYrF==='2026' ? MES_PPTO/12 : 1);
   // Ppto contratos a la fecha = 50% del ppto total a la fecha
   const _pptoYTDContr = _pptoYTDTotal / 2;
 
   const pptoFecha=_pptoYTDTotal,pctTotFecha=pptoFecha>0?(totFact/pptoFecha*100):0,gapFecha=pptoFecha-totFact;
   const barT2=document.getElementById('fc-vsp-tot-bar2'),wTotF=Math.min(pctTotFecha,100);barT2.style.width=wTotF.toFixed(1)+'%';barT2.textContent=wTotF>10?pctTotFecha.toFixed(1)+'%':'';
   const gap2El=document.getElementById('fc-vsp-tot-gap2');gap2El.textContent=gapFecha>0?'Falta '+mm(gapFecha):'Adelanto +'+mm(-gapFecha);gap2El.style.color=gapFecha<=0?'#28d2c3':'#FFC000';
-  const periodoDesc=fcYrF==='2026'?'Ppto acum. Ene–'+MES_CORTE_NOMBRE:fcYrF==='todos'?(24+MES_CORTE)+' de 36 meses':'12 de 12 meses';
+  const periodoDesc=fcYrF==='2026'?'Ppto acum. Ene–'+MES_PPTO_NOMBRE:fcYrF==='todos'?(24+MES_PPTO)+' de 36 meses':'12 de 12 meses';
   document.getElementById('fc-vsp-tot-bar2-info').textContent='Meta a la fecha ('+periodoDesc+'): '+mm(pptoFecha);
   let notaT;
   if(isAll){notaT='Facturación 2024-2026: <strong style="color:#FFC000">'+mm(totFact)+'</strong> de presupuesto acumulado <strong>'+mm(pptoTot)+'</strong> (3 años × ppto anual). Cumplimiento <strong>'+pctTot.toFixed(1)+'%</strong>.';}
-  else if(fcYrF==='2026'){const adelanto=totFact-pptoFecha;notaT='Ppto acumulado Ene–'+MES_CORTE_NOMBRE+' '+ANO_ACTUAL+' (GD-PPTO): '+mm(pptoFecha)+'. Real: <strong style="color:#FFC000">'+mm(totFact)+'</strong>. '+(adelanto>=0?'<strong style="color:var(--teal)">Adelanto de '+mm(adelanto)+'</strong>':'<strong style="color:var(--rd)">Atraso de '+mm(-adelanto)+'</strong>')+'.';}
+  else if(fcYrF==='2026'){const adelanto=totFact-pptoFecha;notaT='Ppto acumulado Ene–'+MES_PPTO_NOMBRE+' '+ANO_ACTUAL+' (GD-PPTO): '+mm(pptoFecha)+'. Real: <strong style="color:#FFC000">'+mm(totFact)+'</strong>. '+(adelanto>=0?'<strong style="color:var(--teal)">Adelanto de '+mm(adelanto)+'</strong>':'<strong style="color:var(--rd)">Atraso de '+mm(-adelanto)+'</strong>')+'.';}
   else{notaT='Año '+fcYrF+' completo. Facturado: <strong style="color:#FFC000">'+mm(totFact)+'</strong> de meta anual <strong>'+mm(pptoTot)+'</strong>. Cumplimiento <strong>'+pctTot.toFixed(1)+'%</strong>.';}
   document.getElementById('fc-vsp-tot-nota').innerHTML=notaT;
 
@@ -4038,7 +4041,7 @@ function renderFcVsPpto(){
   document.getElementById('fc-vsp-con-bar2-info').textContent='Meta contratos ('+periodoDesc+', 50% ppto): '+mm(pptoConFecha);
   let notaC;
   if(isAll){notaC='F. Contratos 2024-2026: <strong style="color:#FFC000">'+mm(totContr)+'</strong> de presupuesto contratos acumulado <strong>'+mm(pptoCon)+'</strong>. Cumplimiento <strong>'+pctCon.toFixed(1)+'%</strong>.';}
-  else if(fcYrF==='2026'){const adelanto=totContr-pptoConFecha;notaC='Ppto contratos Ene–'+MES_CORTE_NOMBRE+' (50% de '+mm(pptoFecha)+'): <strong>'+mm(pptoConFecha)+'</strong>. Real: <strong style="color:#FFC000">'+mm(totContr)+'</strong>. '+(adelanto>=0?'<strong style="color:var(--teal)">Adelanto de '+mm(adelanto)+'</strong>':'<strong style="color:var(--rd)">Atraso de '+mm(-adelanto)+'</strong>')+'.';}
+  else if(fcYrF==='2026'){const adelanto=totContr-pptoConFecha;notaC='Ppto contratos Ene–'+MES_PPTO_NOMBRE+' (50% de '+mm(pptoFecha)+'): <strong>'+mm(pptoConFecha)+'</strong>. Real: <strong style="color:#FFC000">'+mm(totContr)+'</strong>. '+(adelanto>=0?'<strong style="color:var(--teal)">Adelanto de '+mm(adelanto)+'</strong>':'<strong style="color:var(--rd)">Atraso de '+mm(-adelanto)+'</strong>')+'.';}
   else{notaC='Año '+fcYrF+' completo. F. Contratos: <strong style="color:#FFC000">'+mm(totContr)+'</strong> de meta anual contratos <strong>'+mm(pptoCon)+'</strong>. Cumplimiento <strong>'+pctCon.toFixed(1)+'%</strong>.';}
   document.getElementById('fc-vsp-con-nota').innerHTML=notaC;
 }
