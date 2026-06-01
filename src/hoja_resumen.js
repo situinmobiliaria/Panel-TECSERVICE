@@ -95,6 +95,8 @@
     return Math.round(v * _kPrev);
   });
 
+  const _pmRs=(APP_DATA.analisis_fac&&APP_DATA.analisis_fac.ppto_mensual&&APP_DATA.analisis_fac.ppto_mensual.some(v=>v>0))
+    ? APP_DATA.analisis_fac.ppto_mensual : null;
   new Chart(document.getElementById('cMes').getContext('2d'),{
     type:'bar',
     data:{labels:MESES_ABR,
@@ -102,14 +104,18 @@
         {label:'Real facturado',
          data:_RS_MENS_SCALED.map(v=>v/1e6),
          backgroundColor:MESES_ABR.map((_,i)=>i<MES_CORTE?C.az3:'#B8BFCB'),
-         borderRadius:5,borderSkipped:false,order:2},
+         borderRadius:5,borderSkipped:false,order:3},
+        {label:'Ppto total TS',
+         data:_pmRs ? _pmRs.map(v=>v/1e6) : MESES_ABR.map(()=>TOTAL_PRESUP/12/1e6),
+         type:'line',
+         borderColor:C.am,backgroundColor:'rgba(255,192,0,.07)',
+         borderWidth:2, tension:0.3, pointRadius:3, pointBackgroundColor:C.am,
+         borderDash:[5,3], order:1, fill:false},
         {label:'Ppto contratos',
-         data:((APP_DATA.analisis_fac&&APP_DATA.analisis_fac.ppto_mensual&&APP_DATA.analisis_fac.ppto_mensual.some(v=>v>0))
-           ? APP_DATA.analisis_fac.ppto_mensual.map(v=>v/2/1e6)
-           : APP_DATA.mensual.presup_contr.map(v=>v/1e6)),
+         data:_pmRs ? _pmRs.map(v=>v/2/1e6) : APP_DATA.mensual.presup_contr.map(v=>v/1e6),
          type:'line',
          borderColor:C.te,backgroundColor:'rgba(40,210,195,.1)',
-         borderWidth:2.5, tension:0.3, pointRadius:4, pointBackgroundColor:C.te, order:1, fill:false}
+         borderWidth:2.5, tension:0.3, pointRadius:4, pointBackgroundColor:C.te, order:2, fill:false}
       ]},
     options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},
       tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`}}},
@@ -204,7 +210,6 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
         <td style="font-size:.67rem">${r.linea}</td>
         <td class="num">${_mm(r.ingresos)}</td>
         <td class="num" style="${_col(r.provision)}">${_mm(r.provision)}</td>
-        <td class="num" style="${_col(r.gd)}">${_mm(r.gd)}</td>
         <td class="num" style="font-weight:700;color:var(--teal)">${_mm(r.total_ytd)}</td>
         <td class="num">${_mm(r.ppto_acum)}</td>
         <td class="num" style="${_col(r.delta_ppto)}">${_mm(r.delta_ppto)}</td>
