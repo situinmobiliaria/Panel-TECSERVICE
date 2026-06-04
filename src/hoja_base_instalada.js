@@ -6,6 +6,7 @@
 let _chBILinea=null, _chBITipos=null, _chBIClientes=null, _chBIRegion=null;
 let _biFiltLinea='todos', _biFiltEstado='todos', _biFiltRelacion='todos', _biQuery='';
 let _biFiltPotencial='todos';
+let _biLineasFiltroTipos='todos';
 let _biSortCol=2, _biSortAsc=false;
 let _biAllClientes=[]; // lista completa para re-filtrar con potencial
 
@@ -193,6 +194,12 @@ function biFiltrarRelacion(btn){
   _biFiltRelacion = btn.dataset.bfr;
   _biRenderTabla();
 }
+function biFiltrarLineasTipos(btn){
+  document.querySelectorAll('#bi-tipos-linea-filt .btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  _biLineasFiltroTipos = btn.dataset.blt;
+  _biRefreshDynamic();
+}
 function biFiltrarPotencial(btn){
   document.querySelectorAll('#bi-filt-potencial .btn').forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');
@@ -272,45 +279,68 @@ function _biRefreshDynamic(){
     }).join('');
   }
 
-  // ── Gráfico Top 12 Tipos ──────────────────────────────────────────────────
+  // ── Torta: Distribución por Línea de Negocio (desde clientes filtrados) ───
+  const _LINEA_MAP = [
+    {label:'Dental',            prop:'dental',          color:'#FFC000'},
+    {label:'Esterilización',    prop:'esterilizacion',  color:'#002D73'},
+    {label:'Incardia',          prop:'incardia',        color:'#D46000'},
+    {label:'Endoscopía',        prop:'endoscopia',      color:'#28D2C3'},
+    {label:'Mobiliario Clínico',prop:'mobiliario',      color:'#7B2FBE'},
+    {label:'MMQ / REAS',        prop:'mmq_reas',        color:'#00832F'},
+    {label:'Otros',             prop:'otros',           color:'#B8C1D8'},
+  ];
+  const _lineaTotals = _LINEA_MAP.map(l=>({...l, n: base.reduce((s,c)=>s+(c[l.prop]||0),0)})).filter(l=>l.n>0);
+  const _ctxLineas = document.getElementById('cBILineas');
+  if(_ctxLineas){
+    if(_chBIRegion) _chBIRegion.destroy();
+    _chBIRegion = safeChart(_ctxLineas.getContext('2d'),{
+      type:'doughnut',
+      data:{
+        labels:_lineaTotals.map(l=>l.label),
+        datasets:[{data:_lineaTotals.map(l=>l.n),backgroundColor:_lineaTotals.map(l=>l.color),borderWidth:2,borderColor:'#fff'}]
+      },
+      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',
+        plugins:{
+          legend:{position:'right',labels:{boxWidth:12,font:{size:10},padding:10}},
+          tooltip:{callbacks:{label:c=>{const tot=_lineaTotals.reduce((s,l)=>s+l.n,0);return ` ${c.label}: ${c.raw.toLocaleString('es-CL')} (${tot>0?(c.raw/tot*100).toFixed(1):0}%)`;} }}
+        }
+      }
+    });
+  }
+
+  // ── Gráfico Top 12 Tipos (segmentable por línea) ──────────────────────────
   const _biRef = APP_DATA.base_instalada || {};
-  const _tiposData = _biFiltPotencial==='si' ? (_biRef.por_tipo_si||_biRef.por_tipo)
-                   : _biFiltPotencial==='no' ? (_biRef.por_tipo_no||_biRef.por_tipo)
-                   : _biRef.por_tipo;
+  const _porTipoLinea = _biRef.por_tipo_linea || {};
+  const _LINEA_KEY_MAP = {
+    dental:'DENTAL', esterilizacion:'ESTERILIZACIÓN', incardia:'INCARDIA',
+    endoscopia:'ENDOSCOPIA', mobiliario:'MOBILIARIO CLINICO', mmq_reas:'MMQ'
+  };
+  let _tiposData;
+  if(_biLineasFiltroTipos !== 'todos'){
+    const lineaKey = _LINEA_KEY_MAP[_biLineasFiltroTipos] || _biLineasFiltroTipos.toUpperCase();
+    // Buscar la clave exacta en por_tipo_linea (con o sin acento)
+    const foundKey = Object.keys(_porTipoLinea).find(k =>
+      k.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').includes(lineaKey.normalize('NFD').replace(/[̀-ͯ]/g,''))
+    );
+    _tiposData = foundKey ? _porTipoLinea[foundKey] : [];
+  } else {
+    _tiposData = _biFiltPotencial==='si' ? (_biRef.por_tipo_si||_biRef.por_tipo)
+               : _biFiltPotencial==='no' ? (_biRef.por_tipo_no||_biRef.por_tipo)
+               : _biRef.por_tipo;
+  }
   const _top12 = (_tiposData||[]).slice(0,12);
   const _ctxTipos = document.getElementById('cBITipos');
   if(_ctxTipos){
     if(_chBITipos) _chBITipos.destroy();
     _chBITipos = safeChart(_ctxTipos.getContext('2d'),{
       type:'bar',
-      data:{labels:_top12.map(x=>x.tipo.length>28?x.tipo.slice(0,26)+'…':x.tipo),
+      data:{labels:_top12.map(x=>x.tipo.length>30?x.tipo.slice(0,28)+'…':x.tipo),
         datasets:[{label:'Equipos',data:_top12.map(x=>x.n),
           backgroundColor:_top12.map((_,i)=>{const cols=['#FFC000','#002D73','#D46000','#28D2C3','#7B2FBE','#00832F'];return cols[i%cols.length];}),
           borderRadius:4}]},
       options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
         plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw.toLocaleString('es-CL')} equipos`}}},
         scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{font:{size:10}}},y:{grid:{display:false},ticks:{font:{size:9}}}}}
-    });
-  }
-
-  // ── Gráfico Distribución Regional ─────────────────────────────────────────
-  const _regArr = _biRegionFromClients(base);
-  const _ctxReg = document.getElementById('cBIRegion');
-  if(_ctxReg && _regArr.length > 0){
-    if(_chBIRegion) _chBIRegion.destroy();
-    _chBIRegion = safeChart(_ctxReg.getContext('2d'),{
-      type:'bar',
-      data:{
-        labels:_regArr.map(([r])=>r.length>20?r.slice(0,18)+'…':r),
-        datasets:[
-          {label:'Equipos BI',data:_regArr.map(([,d])=>d.bi),backgroundColor:'#002D73',stack:'s',borderRadius:3},
-          {label:'Clientes',data:_regArr.map(([,d])=>d.n*10),backgroundColor:'#28D2C3',stack:'cc',borderRadius:3,type:'bar'},
-        ]
-      },
-      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{position:'top',labels:{boxWidth:10,font:{size:10},padding:8}},
-          tooltip:{callbacks:{label:c=>c.datasetIndex===0?` ${c.parsed.x} equipos BI`:` ${Math.round(c.parsed.x/10)} clientes`}}},
-        scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{font:{size:9}}},y:{grid:{display:false},ticks:{font:{size:9}}}}}
     });
   }
 
@@ -491,15 +521,24 @@ function initBaseInstalada(){
   <div class="sh" style="margin-bottom:.6rem"><h2>Por Línea de Negocio</h2><div class="sh-line"></div><span class="sh-tag">Distribución de equipos · top tipos · clientes · % con contrato activo</span></div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1.1rem" id="bi-linea-cards"></div>
 
-  <!-- Vista regional + Top tipos global -->
+  <!-- Distribución por Línea + Top tipos por línea -->
   <div class="g6040" style="margin-bottom:1rem">
     <div class="card">
-      <div class="ch"><span class="ct">Distribución Regional · Clientes y Equipos (MAPA DATA)</span></div>
-      <div class="cb" style="position:relative;height:320px"><canvas id="cBIRegion"></canvas></div>
+      <div class="ch"><span class="ct">Distribución por Línea de Negocio</span></div>
+      <div class="cb" style="position:relative;height:320px"><canvas id="cBILineas"></canvas></div>
     </div>
     <div class="card">
       <div class="ch"><span class="ct">Top 12 Tipos de Equipo</span></div>
-      <div class="cb" style="position:relative;height:320px"><canvas id="cBITipos"></canvas></div>
+      <div style="display:flex;flex-wrap:wrap;gap:.25rem;padding:.4rem .8rem;border-bottom:1px solid var(--brd)" id="bi-tipos-linea-filt">
+        <button class="btn on" data-blt="todos" onclick="biFiltrarLineasTipos(this)">Todas</button>
+        <button class="btn" data-blt="dental"          onclick="biFiltrarLineasTipos(this)" style="border-left:2px solid #FFC000">Dental</button>
+        <button class="btn" data-blt="esterilizacion"  onclick="biFiltrarLineasTipos(this)" style="border-left:2px solid #002D73">Esteril.</button>
+        <button class="btn" data-blt="incardia"        onclick="biFiltrarLineasTipos(this)" style="border-left:2px solid #D46000">Incardia</button>
+        <button class="btn" data-blt="endoscopia"      onclick="biFiltrarLineasTipos(this)" style="border-left:2px solid #28D2C3">Endosc.</button>
+        <button class="btn" data-blt="mobiliario"      onclick="biFiltrarLineasTipos(this)" style="border-left:2px solid #7B2FBE">Mobil.</button>
+        <button class="btn" data-blt="mmq_reas"        onclick="biFiltrarLineasTipos(this)" style="border-left:2px solid #00832F">MMQ/REAS</button>
+      </div>
+      <div class="cb" style="position:relative;height:280px"><canvas id="cBITipos"></canvas></div>
     </div>
   </div>
 
