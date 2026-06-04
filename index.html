@@ -5434,7 +5434,8 @@ function _renderSatDetBI(){
   if(!satView) return;
 
   const bi   = APP_DATA.base_instalada || {};
-  const biCli = bi.clientes || [];
+  // Solo equipos con Potencial ST = Sí (marcas que TECSERVICE representa)
+  const biCli = (bi.clientes || []).filter(c => c.potencial_st);
   const inst  = (APP_DATA.satisf && APP_DATA.satisf.instituciones) || [];
 
   // Detractores: recom < 7 (NPS score ≤ 6)
@@ -5573,6 +5574,9 @@ function _renderSatDetBI(){
         ${rows || `<tr><td colspan="13" style="text-align:center;color:var(--gn);padding:1rem">No hay detractores registrados</td></tr>`}
       </tbody>
     </table>
+  </div>
+  <div style="margin-top:.5rem;padding:.45rem .7rem;background:rgba(255,192,0,.08);border-left:3px solid var(--am);border-radius:4px;font-size:.6rem;color:var(--mut);line-height:1.5">
+    ℹ️ <strong style="color:var(--am)">Nota Base Instalada:</strong> Los equipos mostrados consideran únicamente marcas con <strong>Potencial ST = Sí</strong>, es decir, marcas que TECSERVICE actualmente representa y para las cuales podría ofrecer servicios de mantención. Equipos de marcas no representadas quedan excluidos de este cruce.
   </div>`;
 }
 </script>
