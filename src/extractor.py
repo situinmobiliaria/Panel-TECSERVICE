@@ -701,6 +701,8 @@ def read_base_instalada(wb):
 
     por_linea      = defaultdict(int)
     por_tipo       = defaultdict(int)
+    por_tipo_si    = defaultdict(int)   # solo filas con Potencial ST = Si
+    por_tipo_no    = defaultdict(int)   # solo filas con Potencial ST = No
     por_estado     = defaultdict(int)
     tipo_por_linea = defaultdict(lambda: defaultdict(int))
     cli_map        = {}  # cliente → {total, lineas:{}, estados:{}}
@@ -733,6 +735,8 @@ def read_base_instalada(wb):
         total += 1
         por_linea[linea] += 1
         por_tipo[tipo]   += 1
+        if es_potencial: por_tipo_si[tipo] += 1
+        else:            por_tipo_no[tipo] += 1
         por_estado[estado] += 1
         tipo_por_linea[linea][tipo] += 1
 
@@ -750,11 +754,10 @@ def read_base_instalada(wb):
         if es_potencial:
             d["_potencial_st"] = True
 
-    # Top 20 tipos
-    top_tipos = sorted(
-        [{"tipo": t, "n": n} for t, n in por_tipo.items()],
-        key=lambda x: -x["n"]
-    )[:20]
+    # Top 20 tipos (global y por potencial)
+    top_tipos    = sorted([{"tipo": t, "n": n} for t, n in por_tipo.items()],    key=lambda x: -x["n"])[:20]
+    top_tipos_si = sorted([{"tipo": t, "n": n} for t, n in por_tipo_si.items()], key=lambda x: -x["n"])[:20]
+    top_tipos_no = sorted([{"tipo": t, "n": n} for t, n in por_tipo_no.items()], key=lambda x: -x["n"])[:20]
 
     # Construir lista de clientes
     clientes = []
@@ -801,6 +804,8 @@ def read_base_instalada(wb):
         "total":          total,
         "por_linea":      dict(por_linea),
         "por_tipo":       top_tipos,
+        "por_tipo_si":    top_tipos_si,
+        "por_tipo_no":    top_tipos_no,
         "por_tipo_linea": por_tipo_linea_out,
         "por_estado":     dict(por_estado),
         "clientes":       clientes,

@@ -3,7 +3,7 @@
 // Depende de: datos.js (APP_DATA), utils.js
 // ═══════════════════════════════════════════════════════════════
 
-let _chBILinea=null, _chBITipos=null, _chBIClientes=null;
+let _chBILinea=null, _chBITipos=null, _chBIClientes=null, _chBIRegion=null;
 let _biFiltLinea='todos', _biFiltEstado='todos', _biFiltRelacion='todos', _biQuery='';
 let _biFiltPotencial='todos';
 let _biSortCol=2, _biSortAsc=false;
@@ -505,45 +505,28 @@ function initBaseInstalada(){
     </table>
   </div>`;
 
-  // ── Renderizar cards por línea ────────────────────────────────────────────
-  const cardsContainer = document.getElementById('bi-linea-cards');
-  if(cardsContainer) cardsContainer.innerHTML = _LINEAS_DEF.map(def=>_biLineCard(def)).join('');
+  // KPIs, cards por línea, gráficos y tabla se delegan a _biRefreshDynamic
+  // para que reaccionen al filtro Potencial ST
+  _biRefreshDynamic();
+}
 
-  // ── Gráfico regional ──────────────────────────────────────────────────────
-  const ctxReg = document.getElementById('cBIRegion');
-  if(ctxReg && regArr.length > 0){
-    safeChart(ctxReg.getContext('2d'),{
-      type:'bar',
-      data:{
-        labels:regArr.map(([r])=>r.length>20?r.slice(0,18)+'…':r),
-        datasets:[
-          {label:'Equipos BI',data:regArr.map(([,d])=>d.bi),backgroundColor:'#002D73',stack:'s',borderRadius:3},
-          {label:'Con Contrato',data:regArr.map(([,d])=>d.cc*10),backgroundColor:'#28D2C3',stack:'cc',borderRadius:3,type:'bar'},
-        ]
-      },
-      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{position:'top',labels:{boxWidth:10,font:{size:10},padding:8}},
-          tooltip:{callbacks:{label:c=>c.datasetIndex===0?` ${c.parsed.x} equipos BI`:` ${Math.round(c.parsed.x/10)} con contrato MAPA`}}},
-        scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{font:{size:9}}},y:{grid:{display:false},ticks:{font:{size:9}}}}}
-    });
+// Helper: agrega región a cada cliente buscando en MAPA_DATA por nombre normalizado
+function _biRegionFromClients(clients){
+  const mapaArr = typeof MAPA_DATA !== 'undefined' ? MAPA_DATA : [];
+  const lookup = {};
+  mapaArr.forEach(c => { if(c.nombre) lookup[_biNorm(c.nombre)] = c.region||'Sin región'; });
+  function findRegion(nombre){
+    const k = _biNorm(nombre);
+    if(lookup[k]) return lookup[k];
+    const found = Object.keys(lookup).find(mk => mk.length >= 6 && (mk.includes(k)||k.includes(mk)));
+    return found ? lookup[found] : 'Sin región';
   }
-
-  // ── Gráfico top tipos global ──────────────────────────────────────────────
-  const top12Tipos = porTipo.slice(0, 12);
-  const ctxTipos = document.getElementById('cBITipos');
-  if(ctxTipos){
-    if(_chBITipos) _chBITipos.destroy();
-    _chBITipos = safeChart(ctxTipos.getContext('2d'),{
-      type:'bar',
-      data:{labels:top12Tipos.map(x=>x.tipo.length>28?x.tipo.slice(0,26)+'…':x.tipo),
-        datasets:[{label:'Equipos',data:top12Tipos.map(x=>x.n),
-          backgroundColor:top12Tipos.map((_,i)=>{const c=['#FFC000','#002D73','#D46000','#28D2C3','#7B2FBE','#00832F'];return c[i%c.length];}),
-          borderRadius:4}]},
-      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw.toLocaleString('es-CL')} equipos`}}},
-        scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{font:{size:10}}},y:{grid:{display:false},ticks:{font:{size:9}}}}}
-    });
-  }
-
-  _biRenderTabla();
+  const regionMap = {};
+  clients.forEach(c => {
+    const r = findRegion(c.nombre);
+    if(!regionMap[r]) regionMap[r] = {n:0, bi:0};
+    regionMap[r].n++;
+    regionMap[r].bi += c.total;
+  });
+  return Object.entries(regionMap).sort((a,b)=>b[1].bi-a[1].bi).slice(0,14);
 }
