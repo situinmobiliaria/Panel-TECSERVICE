@@ -72,10 +72,10 @@ function _biEstadoBadge(estado){
   return `<span class="badge bgy">Sin clasificar</span>`;
 }
 
-// Lista base filtrada por potencial (afecta toda la hoja)
+// Lista base para KPIs, cards y gráficos — siempre todos los clientes.
+// _biVal() se encarga de devolver el conteo correcto (total/total_si/total_no)
+// según el filtro activo, sin necesidad de excluir clientes.
 function _biBaseList(){
-  if(_biFiltPotencial === 'si')  return _biAllClientes.filter(c => c.potencial_st);
-  if(_biFiltPotencial === 'no')  return _biAllClientes.filter(c => !c.potencial_st);
   return _biAllClientes;
 }
 // Obtiene el valor correcto de total/línea según filtro potencial activo
@@ -87,6 +87,11 @@ function _biVal(c, prop){
 
 function _biClientesFiltrados(){
   let list = _biBaseList();
+
+  // Para filtros de potencial, ocultar clientes con 0 equipos en la vista activa
+  if(_biFiltPotencial !== 'todos'){
+    list = list.filter(c => _biVal(c,'total') > 0);
+  }
 
   if(_biFiltEstado !== 'todos'){
     list = list.filter(c => c.estado === _biFiltEstado);

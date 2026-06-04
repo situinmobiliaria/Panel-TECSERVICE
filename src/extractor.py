@@ -834,14 +834,21 @@ def read_base_instalada(wb):
     # Ordenar clientes por total desc
     clientes.sort(key=lambda x: -x["total"])
 
-    print(f"       Base Instalada: {total} activos | {len(clientes)} clientes | {len(por_tipo)} tipos")
+    # Recalcular total sin GEMCO (para que KPIs sean consistentes)
+    total_sin_gemco    = sum(c["total"]    for c in clientes)
+    total_si_sin_gemco = sum(c["total_si"] for c in clientes)
+    total_no_sin_gemco = sum(c["total_no"] for c in clientes)
+
+    print(f"       Base Instalada: {total_sin_gemco} activos (sin GEMCO) | {len(clientes)} clientes | {len(por_tipo)} tipos")
     por_tipo_linea_out = {
         linea: sorted([{"tipo": t, "n": n} for t, n in ctr.items()], key=lambda x: -x["n"])[:6]
         for linea, ctr in tipo_por_linea.items()
     }
 
     return {
-        "total":          total,
+        "total":          total_sin_gemco,
+        "total_si":       total_si_sin_gemco,
+        "total_no":       total_no_sin_gemco,
         "por_linea":      dict(por_linea),
         "por_tipo":       top_tipos,
         "por_tipo_si":    top_tipos_si,
