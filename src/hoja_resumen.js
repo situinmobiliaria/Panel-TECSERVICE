@@ -357,27 +357,34 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
   const ejecutivos = Object.keys(porEje).filter(e => e && e !== 'nan' && e !== 'None');
   if(!ejecutivos.length){ ctx.parentElement.innerHTML='<div style="text-align:center;color:var(--mut);padding:2rem;font-style:italic">Sin datos de ejecutivo en la BBDD</div>'; return; }
 
+  // Factor de escala por mes: el mismo que usa el gráfico de Real Facturado (_RS_MENS_SCALED)
+  // _RS_MENS_SCALED ya está calculado arriba y es window._RS_MENS_SCALED
+  const _bbddTotal = APP_DATA.mensual.total[String(ANO_ACTUAL)] || Array(12).fill(0);
+  const _scaled = window._RS_MENS_SCALED || _bbddTotal;
+  const _scalePerMes = _bbddTotal.map((v, i) => (v > 0 ? (_scaled[i] || 0) / v : 1));
+
   // Paleta para ejecutivos
   const _PAL=['#002D73','#33448D','#28D2C3','#D46000','#FFC000','#00832F','#C00000','#7B2FBE','#5090D0','#E87722'];
   const labels = MESES_ABR.slice(0, MES_CORTE);
   const anoStr = String(ANO_ACTUAL);
 
   // Construir datasets: un dataset por ejecutivo, solo meses hasta MES_CORTE
+  // Se aplica el mismo factor de escala que usa el gráfico de Real Facturado
   const datasets = ejecutivos.map((eje, i) => {
     const mensArr = (porEje[eje] && porEje[eje][anoStr]) || Array(12).fill(0);
     return {
-      label: eje.split(' ').slice(0, 2).join(' '),  // nombre corto
-      data: mensArr.slice(0, MES_CORTE).map(v => v / 1e6),
+      label: eje.split(' ').slice(0, 2).join(' '),
+      data: mensArr.slice(0, MES_CORTE).map((v, i) => Math.round(v * _scalePerMes[i]) / 1e6),
       backgroundColor: _PAL[i % _PAL.length],
       borderRadius: 3,
       stack: 's'
     };
   });
 
-  // Totales YTD por ejecutivo para el footer
+  // Totales YTD por ejecutivo para el footer (con escala aplicada)
   const totales = ejecutivos.map(eje => {
     const arr = (porEje[eje] && porEje[eje][anoStr]) || Array(12).fill(0);
-    return arr.slice(0, MES_CORTE).reduce((s, v) => s + v, 0);
+    return arr.slice(0, MES_CORTE).reduce((s, v, i) => s + Math.round(v * _scalePerMes[i]), 0);
   });
   const totalGlobal = totales.reduce((s, v) => s + v, 0);
 
