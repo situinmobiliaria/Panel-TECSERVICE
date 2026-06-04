@@ -140,10 +140,21 @@ function renderSatCom(){
 function _satGetBICliPot(){
   return ((APP_DATA.base_instalada||{}).clientes||[]).filter(c=>c.potencial_st);
 }
-function _satLookupBICliente(nombre, biCliPot){
-  const k=_normBI(nombre);
-  let f=biCliPot.find(c=>_normBI(c.nombre)===k);
-  if(!f&&k.length>=5) f=biCliPot.find(c=>{const ck=_normBI(c.nombre);return ck.includes(k)||k.includes(ck);});
+// Usa nombre_bi (col 16 de SATISFACCION) para cruce exacto con Base Instalada
+// Si nombre_bi está vacío, cae a fuzzy matching por nombre normalizado
+function _satLookupBICliente(inst, biCliPot){
+  // inst puede ser el objeto institución (con .nombre_bi) o solo el string nombre
+  const nombreBi = (typeof inst === 'object') ? (inst.nombre_bi||'') : '';
+  const nombreFallback = (typeof inst === 'object') ? inst.institucion : inst;
+  if(nombreBi){
+    // Búsqueda exacta por NombreBI del Excel
+    const f = biCliPot.find(c => _normBI(c.nombre) === _normBI(nombreBi));
+    if(f) return f;
+  }
+  // Fallback: fuzzy por nombre institución
+  const k = _normBI(nombreFallback);
+  let f = biCliPot.find(c => _normBI(c.nombre) === k);
+  if(!f && k.length >= 5) f = biCliPot.find(c=>{const ck=_normBI(c.nombre);return ck.includes(k)||k.includes(ck);});
   return f||null;
 }
 
@@ -155,11 +166,11 @@ function renderSatBI(){
   // Lookup base instalada Potencial ST para instituciones encuestadas
   const _biCliPot = _satGetBICliPot();
   const _biSurveyTotals = inst.reduce((acc,d)=>{
-    const rec=_satLookupBICliente(d.institucion,_biCliPot);
+    const rec=_satLookupBICliente(d,_biCliPot);
     if(rec) acc.total+=rec.total;
     return acc;
   },{total:0});
-  const _biSurveyN = inst.filter(d=>_satLookupBICliente(d.institucion,_biCliPot)).length;
+  const _biSurveyN = inst.filter(d=>_satLookupBICliente(d,_biCliPot)).length;
 
   // ── KPI cards ──────────────────────────────────────────────────────────────
   const kpis=document.getElementById('sat-bi-kpis');
@@ -211,7 +222,7 @@ function renderSatBI(){
   // Tramos basados en BI real de base instalada (Potencial ST), no en survey
   const tramoMap={};
   inst.forEach(d=>{
-    const biRec=_satLookupBICliente(d.institucion,_biCliPot);
+    const biRec=_satLookupBICliente(d,_biCliPot);
     const biReal=biRec?biRec.total:0;
     const t=_biTramo(biReal);
     if(!t)return;
@@ -238,7 +249,7 @@ function renderSatBI(){
   const _biLineaSat={};
   _BI_LINEAS.forEach(l=>{ _biLineaSat[l.prop]=0; });
   inst.forEach(d=>{
-    const biRec=_satLookupBICliente(d.institucion,_biCliPot);
+    const biRec=_satLookupBICliente(d,_biCliPot);
     if(!biRec)return;
     _BI_LINEAS.forEach(l=>{ _biLineaSat[l.prop]+=(biRec[l.prop]||0); });
   });
@@ -334,7 +345,7 @@ function _renderSatBIScatter(){
   };
   const pts=inst
     .map(d=>{
-      const biRec=_satLookupBICliente(d.institucion,_biCliPotSc);
+      const biRec=_satLookupBICliente(d,_biCliPotSc);
       const biReal=biRec?biRec.total:0;
       if(!biReal||!_inTramo(biReal,_satBIFiltTramo))return null;
       return {
@@ -564,10 +575,17 @@ function _renderSatDetBI(){
   // Detractores: recom < 7 (NPS score ≤ 6)
   const detractores = inst.filter(d => d.recom < 7).sort((a,b) => a.recom - b.recom);
 
-  // Match parcial case-insensitive normalizado
-  function matchBI(nombre){
+  // Match usando nombre_bi del Excel (col 16 SATISFACCION) con fallback fuzzy
+  function matchBI(inst){
+    const nombreBi = (inst && inst.nombre_bi) ? inst.nombre_bi : '';
+    const nombre   = (inst && inst.institucion) ? inst.institucion : (inst||'');
+    // 1. Búsqueda exacta por NombreBI del Excel
+    if(nombreBi){
+      const f = biCli.find(c => _normBI(c.nombre) === _normBI(nombreBi));
+      if(f) return f;
+    }
+    // 2. Fallback: búsqueda exacta por nombre institución
     const nk = _normBI(nombre);
-    // Buscar coincidencia exacta primero
     let found = biCli.find(c => _normBI(c.nombre) === nk);
     if(found) return found;
     // Luego buscar si uno contiene al otro (min 5 chars)
@@ -625,7 +643,7 @@ function _renderSatDetBI(){
 
   const rows = detractores.map((d,i) => {
     const rcol = 'var(--rd)';
-    const biRec = matchBI(d.institucion);
+    const biRec = matchBI(d);
     const panelRec = _findPanel(d.institucion);
     const contrRec = _findContrato(d.institucion);
     const totalEq  = biRec ? biRec.total.toLocaleString('es-CL') : '—';

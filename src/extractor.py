@@ -479,6 +479,9 @@ def read_satisfaccion(wb):
         # Corregir errores tipográficos y nombres abreviados
         nombre_analisis = _NOMBRE_FIXES.get(nombre_analisis, nombre_analisis)
 
+        # col[16] = NombreBI: nombre exacto para cruzar con Base Instalada
+        nombre_bi = safe_str(row[16]).strip().upper() if len(row) > 16 and row[16] else ""
+
         email   = safe_str(row[8])
         dominio = email.split("@")[1].lower() if "@" in email else "desconocido"
 
@@ -500,6 +503,7 @@ def read_satisfaccion(wb):
 
         respuestas.append({
             "institucion":    nombre_analisis,
+            "nombre_bi":      nombre_bi,
             "dominio":        dominio,
             "categoria":      _dom_cat(dominio),
             "calidad":        calidad,
@@ -599,7 +603,9 @@ def read_satisfaccion(wb):
         if key not in inst_data:
             inst_data[key] = {
                 "n": 0, "cal": [], "tie": [], "rec": [],
-                "_bi": None, "_bi_det": None, "_contr": None, "_fac2026": None, "categoria": r["categoria"]
+                "_bi": None, "_bi_det": None, "_contr": None, "_fac2026": None,
+                "_nombre_bi": r.get("nombre_bi", ""),
+                "categoria": r["categoria"]
             }
         d = inst_data[key]
         d["n"] += 1
@@ -619,6 +625,9 @@ def read_satisfaccion(wb):
         # fac_2026: primer valor no-nulo de columna AC
         if d["_fac2026"] is None and r.get("fac_2026", 0) > 0:
             d["_fac2026"] = r["fac_2026"]
+        # nombre_bi: primer valor no vacío (mismo cliente = mismo valor)
+        if not d["_nombre_bi"] and r.get("nombre_bi"):
+            d["_nombre_bi"] = r["nombre_bi"]
         if _CAT_PRIO.get(r["categoria"], 9) < _CAT_PRIO.get(d["categoria"], 9):
             d["categoria"] = r["categoria"]
 
@@ -633,6 +642,7 @@ def read_satisfaccion(wb):
             "bi_detalle":     d["_bi_det"] or dict(_BD_EMPTY),
             "contr_asociados": d["_contr"] or 0,
             "fac_2026":       d["_fac2026"] or 0,
+            "nombre_bi":      d["_nombre_bi"] or "",
             "categoria":      d["categoria"],
         }
         for key, d in inst_data.items()
