@@ -1789,7 +1789,10 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
 
   <!-- Cobertura en Base Instalada -->
   <div class="sh" style="margin-top:.5rem"><h2 style="font-size:.82rem">Cobertura en Base Instalada</h2><div class="sh-line"></div>
-    <span class="sh-tag">Instituciones que respondieron la encuesta · Equipos instalados por cliente · Ordenado por mayor base instalada</span>
+    <span class="sh-tag">Instituciones que respondieron la encuesta · Equipos instalados por cliente · Solo marcas con Potencial ST</span>
+  </div>
+  <div style="margin-bottom:.6rem;padding:.4rem .7rem;background:rgba(255,192,0,.08);border-left:3px solid var(--am);border-radius:4px;font-size:.6rem;color:var(--mut);line-height:1.5">
+    ℹ️ <strong style="color:var(--am)">Nota:</strong> Los gráficos de esta sección cruzan los encuestados con la <strong>base instalada real</strong> (Base Instalada · Potencial ST = Sí). Muestra qué cantidad y distribución de equipamiento representado por TECSERVICE está presente en las instituciones que respondieron la encuesta.
   </div>
   <div id="sat-bi-kpis" style="display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem;margin-bottom:.7rem"></div>
   <div class="card">
@@ -5061,18 +5064,38 @@ function renderSatCom(){
   }).join('');
 }
 
+// Helpers: base instalada filtrada por Potencial ST para cruce con satisfacción
+function _satGetBICliPot(){
+  return ((APP_DATA.base_instalada||{}).clientes||[]).filter(c=>c.potencial_st);
+}
+function _satLookupBICliente(nombre, biCliPot){
+  const k=_normBI(nombre);
+  let f=biCliPot.find(c=>_normBI(c.nombre)===k);
+  if(!f&&k.length>=5) f=biCliPot.find(c=>{const ck=_normBI(c.nombre);return ck.includes(k)||k.includes(ck);});
+  return f||null;
+}
+
 function renderSatBI(){
   const s=APP_DATA.satisf;
   const inst=s.instituciones||[];
   const bi=s.bi_resumen||{};
 
+  // Lookup base instalada Potencial ST para instituciones encuestadas
+  const _biCliPot = _satGetBICliPot();
+  const _biSurveyTotals = inst.reduce((acc,d)=>{
+    const rec=_satLookupBICliente(d.institucion,_biCliPot);
+    if(rec) acc.total+=rec.total;
+    return acc;
+  },{total:0});
+  const _biSurveyN = inst.filter(d=>_satLookupBICliente(d.institucion,_biCliPot)).length;
+
   // ── KPI cards ──────────────────────────────────────────────────────────────
   const kpis=document.getElementById('sat-bi-kpis');
   if(kpis){
     const items=[
-      {val:bi.n_inst||0,           lbl:'Instituciones encuestadas',     col:'var(--az1)'},
-      {val:bi.n_con_bi||0,         lbl:'Con Base Instalada registrada', col:'var(--az2)'},
-      {val:(bi.total_bi||0).toLocaleString('es-CL'), lbl:'Equipos BI representados', col:'var(--te)'},
+      {val:bi.n_inst||0,                              lbl:'Instituciones encuestadas',               col:'var(--az1)'},
+      {val:_biSurveyN,                                lbl:'Con BI (Potencial ST) en base instalada', col:'var(--az2)'},
+      {val:_biSurveyTotals.total.toLocaleString('es-CL'), lbl:'Equipos BI · marcas representadas',  col:'var(--te)'},
     ];
     kpis.innerHTML=items.map(k=>`
       <div style="background:var(--gy);border-radius:6px;padding:.9rem 1rem;text-align:center;border-top:3px solid ${k.col}">
@@ -5113,9 +5136,12 @@ function renderSatBI(){
   // ── Calcular tramos y tipos a partir de instituciones ─────────────────────
   const _biTramo=v=>v==null||v<=0?null:v<=10?'Pequeño (1-10)':v<=50?'Mediano (11-50)':v<=150?'Grande (51-150)':'Enterprise (150+)';
   const TRAMO_ORDER=['Pequeño (1-10)','Mediano (11-50)','Grande (51-150)','Enterprise (150+)'];
+  // Tramos basados en BI real de base instalada (Potencial ST), no en survey
   const tramoMap={};
   inst.forEach(d=>{
-    const t=_biTramo(d.bi_total);
+    const biRec=_satLookupBICliente(d.institucion,_biCliPot);
+    const biReal=biRec?biRec.total:0;
+    const t=_biTramo(biReal);
     if(!t)return;
     if(!tramoMap[t])tramoMap[t]={n:0,recs:[]};
     tramoMap[t].n++;
@@ -5126,7 +5152,24 @@ function renderSatBI(){
     recom_avg:tramoMap[t].recs.reduce((a,b)=>a+b,0)/tramoMap[t].n
   }));
 
-  const tipoTotals=_BD_KEYS.map(k=>inst.reduce((s,d)=>s+(d.bi_detalle?d.bi_detalle[k]||0:0),0));
+  // Composición BI por línea de negocio desde base instalada real (Potencial ST)
+  // Solo considera instituciones encuestadas que tienen registro en base instalada
+  const _BI_LINEAS=[
+    {prop:'dental',        lbl:'Dental',            col:'#FFC000'},
+    {prop:'esterilizacion',lbl:'Esterilización',    col:'#002D73'},
+    {prop:'incardia',      lbl:'Incardia',           col:'#D46000'},
+    {prop:'endoscopia',    lbl:'Endoscopía',         col:'#28D2C3'},
+    {prop:'mobiliario',    lbl:'Mobiliario Clínico', col:'#7B2FBE'},
+    {prop:'mmq_reas',      lbl:'MMQ / REAS',         col:'#00832F'},
+    {prop:'otros',         lbl:'Otros',              col:'#B8C1D8'},
+  ];
+  const _biLineaSat={};
+  _BI_LINEAS.forEach(l=>{ _biLineaSat[l.prop]=0; });
+  inst.forEach(d=>{
+    const biRec=_satLookupBICliente(d.institucion,_biCliPot);
+    if(!biRec)return;
+    _BI_LINEAS.forEach(l=>{ _biLineaSat[l.prop]+=(biRec[l.prop]||0); });
+  });
 
   // ── Gráfico 1: Recom promedio por tramo de BI ─────────────────────────────
   const ctxT=document.getElementById('cSatBITramos');
@@ -5159,30 +5202,31 @@ function renderSatBI(){
     });
   }
 
-  // ── Gráfico 2: Composición BI por tipo de equipo ──────────────────────────
+  // ── Gráfico 2: Composición BI por línea de negocio (base instalada real) ───
   const ctxP=document.getElementById('cSatBITipos');
   if(ctxP){
     if(_chSatBITipos)_chSatBITipos.destroy();
-    const tipoData=tipoTotals.map((v,i)=>({v,lbl:_BD_LABELS[i],col:_BD_COLORS[i]})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
+    const lineaData=_BI_LINEAS.map(l=>({v:_biLineaSat[l.prop],lbl:l.lbl,col:l.col})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
+    const lineaTotal=lineaData.reduce((s,x)=>s+x.v,0);
     _chSatBITipos=safeChart(ctxP.getContext('2d'),{
       type:'doughnut',
       data:{
-        labels:tipoData.map(x=>x.lbl),
-        datasets:[{data:tipoData.map(x=>x.v),backgroundColor:tipoData.map(x=>x.col),borderWidth:2,borderColor:'#fff'}]
+        labels:lineaData.map(x=>x.lbl),
+        datasets:[{data:lineaData.map(x=>x.v),backgroundColor:lineaData.map(x=>x.col),borderWidth:2,borderColor:'#fff'}]
       },
       options:{
         cutout:'60%',responsive:true,maintainAspectRatio:true,
         plugins:{
           legend:{display:false},
-          tooltip:{callbacks:{label:c=>`${c.label}: ${c.raw} equipos (${((c.raw/tipoData.reduce((s,x)=>s+x.v,0))*100).toFixed(1)}%)`}}
+          tooltip:{callbacks:{label:c=>`${c.label}: ${c.raw.toLocaleString('es-CL')} equipos (${lineaTotal>0?(c.raw/lineaTotal*100).toFixed(1):0}%)`}}
         }
       }
     });
     const leg=document.getElementById('sat-bi-tipos-legend');
-    if(leg)leg.innerHTML=tipoData.map(x=>`
+    if(leg)leg.innerHTML=lineaData.map(x=>`
       <div style="display:flex;align-items:center;gap:.3rem;font-size:.58rem;color:var(--txt)">
         <span style="width:10px;height:10px;border-radius:2px;background:${x.col};flex-shrink:0"></span>
-        <span>${x.lbl} (${x.v})</span>
+        <span>${x.lbl} (${x.v.toLocaleString('es-CL')})</span>
       </div>`).join('');
   }
 
@@ -5204,7 +5248,9 @@ function _renderSatBIScatter(){
   const ctxS=document.getElementById('cSatBIScatter');
   if(!ctxS)return;
 
-  // Filtrar por tramo seleccionado
+  // Usar base instalada real (Potencial ST = Sí) como eje X
+  const _biCliPotSc = _satGetBICliPot();
+
   const _inTramo=(bi,t)=>{
     if(!bi||bi<=0)return false;
     if(t==='todos')return true;
@@ -5215,14 +5261,19 @@ function _renderSatBIScatter(){
     return true;
   };
   const pts=inst
-    .filter(d=>d.bi_total>0 && _inTramo(d.bi_total,_satBIFiltTramo))
-    .map(d=>({
-      x:d.bi_total, y:d.recom,
-      label:d.institucion, n:d.n,
-      bi_detalle:d.bi_detalle, categoria:d.categoria,
-      calidad:d.calidad, tiempo:d.tiempo, bi_total:d.bi_total,
-      bg:d.recom>=7?'rgba(0,131,47,.8)':d.recom>=4?'rgba(255,192,0,.9)':'rgba(192,0,0,.8)'
-    }));
+    .map(d=>{
+      const biRec=_satLookupBICliente(d.institucion,_biCliPotSc);
+      const biReal=biRec?biRec.total:0;
+      if(!biReal||!_inTramo(biReal,_satBIFiltTramo))return null;
+      return {
+        x:biReal, y:d.recom,
+        label:d.institucion, n:d.n,
+        bi_detalle:d.bi_detalle, categoria:d.categoria,
+        calidad:d.calidad, tiempo:d.tiempo, bi_total:biReal,
+        bg:d.recom>=7?'rgba(0,131,47,.8)':d.recom>=4?'rgba(255,192,0,.9)':'rgba(192,0,0,.8)'
+      };
+    })
+    .filter(Boolean);
 
   if(_chSatBIScatter)_chSatBIScatter.destroy();
   _chSatBIScatter=safeChart(ctxS.getContext('2d'),{
