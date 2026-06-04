@@ -244,13 +244,14 @@ def read_bbdd(xlsx_path):
 
     cols = df.columns.tolist()
     # Access by position to avoid encoding issues in header names
-    c_cliente = cols[7]    # H
-    c_monto   = cols[18]   # S: Total Linea Venta
-    c_mes     = cols[38]   # AM
-    c_ano     = cols[40]   # AO
-    c_emp2    = cols[43]   # AR: Empresa 2
-    c_tipocli = cols[45]   # AT: Tipo Cliente
-    c_linea   = cols[46]   # AU: Linea de Negocio
+    c_cliente  = cols[7]    # H
+    c_monto    = cols[18]   # S: Total Linea Venta
+    c_mes      = cols[38]   # AM
+    c_ano      = cols[40]   # AO
+    c_emp2     = cols[43]   # AR: Empresa 2
+    c_tipocli  = cols[45]   # AT: Tipo Cliente
+    c_linea    = cols[46]   # AU: Linea de Negocio
+    c_ejecutivo = cols[50] if len(cols) > 50 else None  # AY: Ejecutivo
 
     # Filter Tecservice rows
     df_ts = df[df[c_emp2].astype(str).str.strip() == "TS"].copy()
@@ -288,6 +289,15 @@ def read_bbdd(xlsx_path):
     mensual_contr   = monthly_dict(df_contr)
     mensual_nocontr = monthly_dict(df_nocontr)
 
+    # Facturación mensual por ejecutivo (columna AY)
+    mensual_por_ejecutivo = {}
+    if c_ejecutivo:
+        df_ts[c_ejecutivo] = df_ts[c_ejecutivo].astype(str).str.strip()
+        ejecutivos = [e for e in df_ts[c_ejecutivo].unique() if e and e.lower() not in ("nan","none","")]
+        for eje in ejecutivos:
+            df_eje = df_ts[df_ts[c_ejecutivo] == eje]
+            mensual_por_ejecutivo[eje] = monthly_dict(df_eje)
+
     # Auto-detect MES_CORTE: last month in current year with >100k billing
     mes_corte = 1
     ano_data = mensual_total.get(ANO, {})
@@ -305,15 +315,16 @@ def read_bbdd(xlsx_path):
     ytd_cli_2024 = ytd_per_cli(ANO - 2, mes_corte)
 
     return {
-        "mensual_total":    mensual_total,
-        "mensual_priv":     mensual_priv,
-        "mensual_pub":      mensual_pub,
-        "mensual_contr":    mensual_contr,
-        "mensual_nocontr":  mensual_nocontr,
-        "tipo_cli_map":     tipo_map,
-        "ytd_cli_2025":     ytd_cli_2025,
-        "ytd_cli_2024":     ytd_cli_2024,
-        "mes_corte":        mes_corte,
+        "mensual_total":         mensual_total,
+        "mensual_priv":          mensual_priv,
+        "mensual_pub":           mensual_pub,
+        "mensual_contr":         mensual_contr,
+        "mensual_nocontr":       mensual_nocontr,
+        "mensual_por_ejecutivo": mensual_por_ejecutivo,
+        "tipo_cli_map":          tipo_map,
+        "ytd_cli_2025":          ytd_cli_2025,
+        "ytd_cli_2024":          ytd_cli_2024,
+        "mes_corte":             mes_corte,
     }
 
 
@@ -991,6 +1002,10 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
             "presup_contr": presup_contr,
             "contr_real":   contr_real_monthly,
             "nocontr_real": nocontr_real_monthly,
+            "por_ejecutivo": {
+                eje: {str(y): to_arr(data, y) for y in [ANO - 2, ANO - 1, ANO]}
+                for eje, data in bbdd.get("mensual_por_ejecutivo", {}).items()
+            },
         },
         "ytd":                  ytd,
         "ppto_anual_total":     PPTO_ANUAL_TOTAL,

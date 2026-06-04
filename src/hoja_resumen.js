@@ -350,6 +350,63 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
   if(note) note.innerHTML = 'En Ene-'+MES_CORTE_NOMBRE+' '+ANO_ACTUAL+' se facturaron <strong>'+fmtMM(tsIng)+'</strong> (Servicio Técnico): <strong style="color:var(--az2)">'+fmtMM(contrRealYTD)+'</strong> ('+pctContr.toFixed(1).replace('.',',')+'%) proviene de contratos y <strong style="color:var(--am)">'+fmtMM(nocontrRealYTD)+'</strong> ('+pctNoContr.toFixed(1).replace('.',',')+'%) de otras facturaciones.';
 })();
 
+// ─── FACTURACIÓN POR EJECUTIVO ────────────────────────────────
+(function(){
+  const ctx = document.getElementById('cRsEjeFac'); if(!ctx) return;
+  const porEje = (APP_DATA.mensual && APP_DATA.mensual.por_ejecutivo) || {};
+  const ejecutivos = Object.keys(porEje).filter(e => e && e !== 'nan' && e !== 'None');
+  if(!ejecutivos.length){ ctx.parentElement.innerHTML='<div style="text-align:center;color:var(--mut);padding:2rem;font-style:italic">Sin datos de ejecutivo en la BBDD</div>'; return; }
+
+  // Paleta para ejecutivos
+  const _PAL=['#002D73','#33448D','#28D2C3','#D46000','#FFC000','#00832F','#C00000','#7B2FBE','#5090D0','#E87722'];
+  const labels = MESES_ABR.slice(0, MES_CORTE);
+  const anoStr = String(ANO_ACTUAL);
+
+  // Construir datasets: un dataset por ejecutivo, solo meses hasta MES_CORTE
+  const datasets = ejecutivos.map((eje, i) => {
+    const mensArr = (porEje[eje] && porEje[eje][anoStr]) || Array(12).fill(0);
+    return {
+      label: eje.split(' ').slice(0, 2).join(' '),  // nombre corto
+      data: mensArr.slice(0, MES_CORTE).map(v => v / 1e6),
+      backgroundColor: _PAL[i % _PAL.length],
+      borderRadius: 3,
+      stack: 's'
+    };
+  });
+
+  // Totales YTD por ejecutivo para el footer
+  const totales = ejecutivos.map(eje => {
+    const arr = (porEje[eje] && porEje[eje][anoStr]) || Array(12).fill(0);
+    return arr.slice(0, MES_CORTE).reduce((s, v) => s + v, 0);
+  });
+  const totalGlobal = totales.reduce((s, v) => s + v, 0);
+
+  const foot = document.getElementById('rs-eje-foot');
+  if(foot) foot.textContent = ejecutivos.length + ' ejecutivos · Total YTD: ' + fmtMM(totalGlobal);
+
+  new Chart(ctx.getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 }, padding: 8 } },
+        tooltip: {
+          mode: 'index',
+          callbacks: {
+            label: c => ` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`,
+            footer: items => ' Total: MM$' + items.reduce((s, i) => s + i.raw, 0).toFixed(1)
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: { stacked: true, beginAtZero: true, grid: { color: '#E2E6F0' }, ticks: { callback: v => 'MM$' + v } }
+      }
+    }
+  });
+})();
+
 // ─── TOP CLIENTES FACTURACIÓN 2026 ────────────────────────────
 (function(){
   const mesLbl=document.getElementById('rs-fac-mes-lbl');if(mesLbl)mesLbl.textContent=MES_CORTE_NOMBRE;
