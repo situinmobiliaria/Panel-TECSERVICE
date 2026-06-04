@@ -785,6 +785,9 @@ def read_base_instalada(wb):
             "potencial_st":  d.get("_potencial_st", False),
         })
 
+    # Excluir clientes internos (GEMCO)
+    clientes = [c for c in clientes if "GEMCO" not in c["nombre"]]
+
     # Ordenar clientes por total desc
     clientes.sort(key=lambda x: -x["total"])
 
