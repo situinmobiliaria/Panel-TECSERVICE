@@ -4433,16 +4433,24 @@ function _biClientesFiltrados(){
     list = list.filter(c => c.nombre.toLowerCase().includes(q));
   }
 
-  // Sort
+  // Sort — siempre por base instalada total (filtrada) mayor a menor como primario
   const cols = ['nombre','nombre','total','dental','esterilizacion','incardia','endoscopia','mobiliario','mmq_reas','estado'];
   const colKey = cols[_biSortCol] || 'total';
   list = [...list].sort((a,b)=>{
+    // Para columnas numéricas usar _biVal para respetar el filtro potencial activo
+    const numProps = ['total','dental','esterilizacion','incardia','endoscopia','mobiliario','mmq_reas'];
+    if(numProps.includes(colKey)){
+      const va = _biVal(a, colKey), vb = _biVal(b, colKey);
+      if(va !== vb) return _biSortAsc ? va-vb : vb-va;
+      // Orden secundario: total filtrado descendente
+      return _biVal(b,'total') - _biVal(a,'total');
+    }
     const va = a[colKey], vb = b[colKey];
-    if(typeof va === 'number' && typeof vb === 'number')
-      return _biSortAsc ? va-vb : vb-va;
-    return _biSortAsc
+    const cmp = _biSortAsc
       ? String(va).localeCompare(String(vb),'es')
       : String(vb).localeCompare(String(va),'es');
+    if(cmp !== 0) return cmp;
+    return _biVal(b,'total') - _biVal(a,'total');
   });
   return list;
 }
