@@ -291,20 +291,23 @@ def read_bbdd(xlsx_path):
     mensual_contr   = monthly_dict(df_contr)
     mensual_nocontr = monthly_dict(df_nocontr)
 
+    # Facturación mensual filtrada: solo Facturas + catálogos ST/Trazabilidad/REAS
+    # Mismos filtros que el desglose por ejecutivo pero sin desagregar
+    _CATALOGOS_FAC = {"Servicio Técnico", "Trazabilidad", "REAS"}
+    df_ts[c_tipodoc]  = df_ts[c_tipodoc].astype(str).str.strip()
+    df_ts[c_catalogo] = df_ts[c_catalogo].astype(str).str.strip()
+    df_facturado = df_ts[
+        (df_ts[c_tipodoc]  == "Factura") &
+        (df_ts[c_catalogo].isin(_CATALOGOS_FAC))
+    ].copy()
+    mensual_facturado = monthly_dict(df_facturado)
+
     # Facturación mensual por ejecutivo (columna AY)
-    # Filtros: año actual, tipo doc = "Factura", catálogo en ST/Trazabilidad/REAS
-    _CATALOGOS_EJE = {"Servicio Técnico", "Trazabilidad", "REAS"}
+    # Usa df_facturado (ya filtrado) restringido al año actual
     mensual_por_ejecutivo = {}
     if c_ejecutivo:
         df_ts[c_ejecutivo] = df_ts[c_ejecutivo].astype(str).str.strip()
-        df_ts[c_tipodoc]   = df_ts[c_tipodoc].astype(str).str.strip()
-        df_ts[c_catalogo]  = df_ts[c_catalogo].astype(str).str.strip()
-        # Aplicar filtros específicos para el desglose por ejecutivo
-        df_eje_base = df_ts[
-            (df_ts[c_ano]     == ANO) &
-            (df_ts[c_tipodoc] == "Factura") &
-            (df_ts[c_catalogo].isin(_CATALOGOS_EJE))
-        ].copy()
+        df_eje_base = df_facturado[df_facturado[c_ano] == ANO].copy()
         ejecutivos = [e for e in df_eje_base[c_ejecutivo].unique()
                       if e and e.lower() not in ("nan", "none", "")]
         for eje in ejecutivos:
@@ -329,6 +332,7 @@ def read_bbdd(xlsx_path):
 
     return {
         "mensual_total":         mensual_total,
+        "mensual_facturado":     mensual_facturado,
         "mensual_priv":          mensual_priv,
         "mensual_pub":           mensual_pub,
         "mensual_contr":         mensual_contr,
@@ -1010,6 +1014,7 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         "panel":   panel,
         "mensual": {
             "total":        {str(y): to_arr(mt, y) for y in [ANO - 2, ANO - 1, ANO]},
+            "facturado":    {str(y): to_arr(bbdd["mensual_facturado"], y) for y in [ANO - 2, ANO - 1, ANO]},
             "priv":         {str(y): to_arr(bbdd["mensual_priv"], y) for y in [ANO - 2, ANO - 1, ANO]},
             "pub":          {str(y): to_arr(bbdd["mensual_pub"],  y) for y in [ANO - 2, ANO - 1, ANO]},
             "presup_contr": presup_contr,

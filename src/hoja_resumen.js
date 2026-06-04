@@ -77,7 +77,8 @@
 // ─── RESUMEN CHARTS (ejecutar al cargar) ──────────────────────
 // Escalar datos BBDD al total de Analisis Facturación (fuente master)
 (function(){
-  const _bbddArr = APP_DATA.mensual.total['2026'] || [];
+  // Usar datos filtrados (solo Facturas + catálogos ST/Trazabilidad/REAS) para coincidir con ejecutivos
+  const _bbddArr = (APP_DATA.mensual.facturado && APP_DATA.mensual.facturado[String(ANO_ACTUAL)]) || APP_DATA.mensual.total[String(ANO_ACTUAL)] || [];
   // Mes actual: usar acum_mes de la tabla semanal de Analisis (fuente exacta)
   const _semTot=(APP_DATA.analisis_fac&&APP_DATA.analisis_fac.tabla_semanal||[])
     .find(r=>r.linea&&r.linea.toLowerCase().includes('total'));
