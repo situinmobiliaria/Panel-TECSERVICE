@@ -752,8 +752,10 @@ def read_base_instalada(wb):
 
         if nombre_analisis not in cli_map:
             cli_map[nombre_analisis] = {
-                "total": 0,
+                "total": 0, "total_si": 0, "total_no": 0,
                 "lineas": defaultdict(int),
+                "lineas_si": defaultdict(int),
+                "lineas_no": defaultdict(int),
                 "estados": defaultdict(int),
                 "_potencial_st": False,
             }
@@ -762,7 +764,12 @@ def read_base_instalada(wb):
         d["lineas"][linea]  += 1
         d["estados"][estado] += 1
         if es_potencial:
-            d["_potencial_st"] = True
+            d["_potencial_st"]     = True
+            d["total_si"]          += 1
+            d["lineas_si"][linea]  += 1
+        else:
+            d["total_no"]          += 1
+            d["lineas_no"][linea]  += 1
 
     # Top 20 tipos (global y por potencial)
     top_tipos    = sorted([{"tipo": t, "n": n} for t, n in por_tipo.items()],    key=lambda x: -x["n"])[:20]
@@ -783,19 +790,42 @@ def read_base_instalada(wb):
         lineas_conocidas = {"DENTAL", "ESTERILIZACIÓN", "ESTERILIZACION", "INCARDIA", "ENDOSCOPIA", "MOBILIARIO CLINICO", "MMQ", "REAS"}
         otros = sum(v for k, v in ls.items() if k not in lineas_conocidas and k not in ("MMQ", "REAS"))
 
+        ls_si  = d["lineas_si"]
+        ls_no  = d["lineas_no"]
+        mmq_reas_si = ls_si.get("MMQ", 0) + ls_si.get("REAS", 0)
+        mmq_reas_no = ls_no.get("MMQ", 0) + ls_no.get("REAS", 0)
+        otros_si = sum(v for k, v in ls_si.items() if k not in lineas_conocidas and k not in ("MMQ", "REAS"))
+        otros_no = sum(v for k, v in ls_no.items() if k not in lineas_conocidas and k not in ("MMQ", "REAS"))
+
         clientes.append({
-            "nombre":        nombre,
-            "total":         d["total"],
-            "dental":        ls.get("DENTAL", 0),
-            "esterilizacion": ls.get("ESTERILIZACIÓN", ls.get("ESTERILIZACION", 0)),
-            "incardia":      ls.get("INCARDIA", 0),
-            "endoscopia":    ls.get("ENDOSCOPÍA", ls.get("ENDOSCOPIA", 0)),
-            "mobiliario":    ls.get("MOBILIARIO CLINICO", 0),
-            "mmq_reas":      mmq_reas,
-            "otros":         otros,
-            "estado":        estado_cli,
-            "con_contrato":  estado_cli in ("Contrato", "Garantia"),
-            "potencial_st":  d.get("_potencial_st", False),
+            "nombre":            nombre,
+            "total":             d["total"],
+            "total_si":          d["total_si"],
+            "total_no":          d["total_no"],
+            "dental":            ls.get("DENTAL", 0),
+            "dental_si":         ls_si.get("DENTAL", 0),
+            "dental_no":         ls_no.get("DENTAL", 0),
+            "esterilizacion":    ls.get("ESTERILIZACIÓN", ls.get("ESTERILIZACION", 0)),
+            "esterilizacion_si": ls_si.get("ESTERILIZACIÓN", ls_si.get("ESTERILIZACION", 0)),
+            "esterilizacion_no": ls_no.get("ESTERILIZACIÓN", ls_no.get("ESTERILIZACION", 0)),
+            "incardia":          ls.get("INCARDIA", 0),
+            "incardia_si":       ls_si.get("INCARDIA", 0),
+            "incardia_no":       ls_no.get("INCARDIA", 0),
+            "endoscopia":        ls.get("ENDOSCOPÍA", ls.get("ENDOSCOPIA", 0)),
+            "endoscopia_si":     ls_si.get("ENDOSCOPÍA", ls_si.get("ENDOSCOPIA", 0)),
+            "endoscopia_no":     ls_no.get("ENDOSCOPÍA", ls_no.get("ENDOSCOPIA", 0)),
+            "mobiliario":        ls.get("MOBILIARIO CLINICO", 0),
+            "mobiliario_si":     ls_si.get("MOBILIARIO CLINICO", 0),
+            "mobiliario_no":     ls_no.get("MOBILIARIO CLINICO", 0),
+            "mmq_reas":          mmq_reas,
+            "mmq_reas_si":       mmq_reas_si,
+            "mmq_reas_no":       mmq_reas_no,
+            "otros":             otros,
+            "otros_si":          otros_si,
+            "otros_no":          otros_no,
+            "estado":            estado_cli,
+            "con_contrato":      estado_cli in ("Contrato", "Garantia"),
+            "potencial_st":      d.get("_potencial_st", False),
         })
 
     # Excluir clientes internos (GEMCO)

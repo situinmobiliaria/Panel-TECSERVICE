@@ -78,6 +78,12 @@ function _biBaseList(){
   if(_biFiltPotencial === 'no')  return _biAllClientes.filter(c => !c.potencial_st);
   return _biAllClientes;
 }
+// Obtiene el valor correcto de total/línea según filtro potencial activo
+function _biVal(c, prop){
+  if(_biFiltPotencial === 'si') return c[prop+'_si'] !== undefined ? c[prop+'_si'] : c[prop] || 0;
+  if(_biFiltPotencial === 'no') return c[prop+'_no'] !== undefined ? c[prop+'_no'] : c[prop] || 0;
+  return c[prop] || 0;
+}
 
 function _biClientesFiltrados(){
   let list = _biBaseList();
@@ -139,13 +145,13 @@ function _biRenderTabla(){
       return `<tr>
       <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">${i+1}</td>
       <td><strong style="font-size:.7rem">${shortN(c.nombre)}</strong></td>
-      <td style="text-align:right;font-family:'Roboto Mono',monospace;font-weight:700;color:var(--az1)">${c.total.toLocaleString('es-CL')}</td>
-      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--am)">${c.dental||'—'}</td>
-      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--az2)">${c.esterilizacion||'—'}</td>
-      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--or)">${c.incardia||'—'}</td>
-      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--teal)">${c.endoscopia||'—'}</td>
-      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:#7B2FBE">${c.mobiliario||'—'}</td>
-      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--gn)">${c.mmq_reas||'—'}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;font-weight:700;color:var(--az1)">${_biVal(c,'total').toLocaleString('es-CL')}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--am)">${_biVal(c,'dental')||'—'}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--az2)">${_biVal(c,'esterilizacion')||'—'}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--or)">${_biVal(c,'incardia')||'—'}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--teal)">${_biVal(c,'endoscopia')||'—'}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:#7B2FBE">${_biVal(c,'mobiliario')||'—'}</td>
+      <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--gn)">${_biVal(c,'mmq_reas')||'—'}</td>
       <td style="text-align:right;color:var(--az1);font-weight:700">${fac2026}</td>
       <td style="text-align:right;color:var(--teal)">${facContr}</td>
       <td>${_biRelBadge(p,d)}</td>
@@ -156,13 +162,13 @@ function _biRenderTabla(){
   // Footer
   const foot = document.getElementById('tfoot-bi-cli');
   if(foot){
-    const tot  = list.reduce((s,c)=>s+c.total,0);
-    const dent = list.reduce((s,c)=>s+c.dental,0);
-    const este = list.reduce((s,c)=>s+c.esterilizacion,0);
-    const inc  = list.reduce((s,c)=>s+c.incardia,0);
-    const endo = list.reduce((s,c)=>s+c.endoscopia,0);
-    const mob  = list.reduce((s,c)=>s+c.mobiliario,0);
-    const mmq  = list.reduce((s,c)=>s+c.mmq_reas,0);
+    const tot  = list.reduce((s,c)=>s+_biVal(c,'total'),0);
+    const dent = list.reduce((s,c)=>s+_biVal(c,'dental'),0);
+    const este = list.reduce((s,c)=>s+_biVal(c,'esterilizacion'),0);
+    const inc  = list.reduce((s,c)=>s+_biVal(c,'incardia'),0);
+    const endo = list.reduce((s,c)=>s+_biVal(c,'endoscopia'),0);
+    const mob  = list.reduce((s,c)=>s+_biVal(c,'mobiliario'),0);
+    const mmq  = list.reduce((s,c)=>s+_biVal(c,'mmq_reas'),0);
     const facTotal = list.reduce((s,c)=>{const p=_biLookupPanel(c.nombre);return s+(p&&p.real_ytd?p.real_ytd:0);},0);
     const conContr = list.filter(c=>{const d=_biLookupContrato(c.nombre);return d&&d.n>0;}).length;
     const st='text-align:right;font-family:\'Roboto Mono\',monospace;color:rgba(255,255,255,.75)';
@@ -210,7 +216,7 @@ function biFiltrarPotencial(btn){
 // Actualiza KPIs, cards de línea y tabla al cambiar el filtro de Potencial ST
 function _biRefreshDynamic(){
   const base = _biBaseList();
-  const total = base.reduce((s,c)=>s+c.total,0);
+  const total = base.reduce((s,c)=>s+_biVal(c,'total'),0);
   const biConContratoActivo = base.filter(c=>{ const d=_biLookupContrato(c.nombre); return d&&d.n>0; }).length;
 
   // Actualizar KPI grid
@@ -222,8 +228,8 @@ function _biRefreshDynamic(){
     const pctCli2 = document.getElementById('bi-kpi-clientes-sub2');
     const estVal  = document.getElementById('bi-kpi-estado-val');
     const pctContr= document.getElementById('bi-kpi-contrato-sub');
-    const baseTotal = base.reduce((s,c)=>s+c.total,0);
-    const conContrato = base.reduce((s,c)=>s+(c.con_contrato?c.total:0),0);
+    const baseTotal = base.reduce((s,c)=>s+_biVal(c,'total'),0);
+    const conContrato = base.reduce((s,c)=>s+(c.con_contrato?_biVal(c,'total'):0),0);
     if(totEl)   totEl.textContent   = baseTotal.toLocaleString('es-CL');
     if(cliEl)   cliEl.textContent   = base.length.toLocaleString('es-CL');
     if(contrEl) contrEl.textContent = biConContratoActivo;
@@ -244,15 +250,15 @@ function _biRefreshDynamic(){
       {key:'mmq_reas',      label:'MMQ / REAS',         color:'#00832F', icon:'🔧', prop:'mmq_reas'},
     ];
     cardsContainer.innerHTML = _LINEAS_DEF.map(def => {
-      const nTotal = base.reduce((s,c)=>s+(c[def.prop]||0),0);
-      const nCli   = base.filter(c=>c[def.prop]>0).length;
-      const nContr = base.filter(c=>c[def.prop]>0 && _biLookupContrato(c.nombre)?.n>0).length;
+      const nTotal = base.reduce((s,c)=>s+_biVal(c,def.prop),0);
+      const nCli   = base.filter(c=>_biVal(c,def.prop)>0).length;
+      const nContr = base.filter(c=>_biVal(c,def.prop)>0 && _biLookupContrato(c.nombre)?.n>0).length;
       const pctCon = nCli>0?(nContr/nCli*100).toFixed(0):0;
-      const topCli = [...base].filter(c=>c[def.prop]>0).sort((a,b)=>b[def.prop]-a[def.prop]).slice(0,3);
+      const topCli = [...base].filter(c=>_biVal(c,def.prop)>0).sort((a,b)=>_biVal(b,def.prop)-_biVal(a,def.prop)).slice(0,3);
       const cliRows = topCli.map(c=>
         `<div style="display:flex;justify-content:space-between;font-size:.6rem;padding:.1rem 0;border-bottom:1px solid var(--gy2)">
           <span style="color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${c.nombre.length>28?c.nombre.slice(0,26)+'…':c.nombre}</span>
-          <span style="font-family:'Roboto Mono',monospace;font-weight:700;color:${def.color};flex-shrink:0">${c[def.prop]}</span>
+          <span style="font-family:'Roboto Mono',monospace;font-weight:700;color:${def.color};flex-shrink:0">${_biVal(c,def.prop)}</span>
         </div>`).join('');
       return `<div class="card" style="border-top:3px solid ${def.color};padding:0;overflow:hidden">
         <div style="padding:.65rem .8rem;background:linear-gradient(135deg,${def.color}18,transparent)">
@@ -289,7 +295,7 @@ function _biRefreshDynamic(){
     {label:'MMQ / REAS',        prop:'mmq_reas',        color:'#00832F'},
     {label:'Otros',             prop:'otros',           color:'#B8C1D8'},
   ];
-  const _lineaTotals = _LINEA_MAP.map(l=>({...l, n: base.reduce((s,c)=>s+(c[l.prop]||0),0)})).filter(l=>l.n>0);
+  const _lineaTotals = _LINEA_MAP.map(l=>({...l, n: base.reduce((s,c)=>s+_biVal(c,l.prop),0)})).filter(l=>l.n>0);
   const _ctxLineas = document.getElementById('cBILineas');
   if(_ctxLineas){
     if(_chBIRegion) _chBIRegion.destroy();
