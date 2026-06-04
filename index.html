@@ -1612,12 +1612,12 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
   </div>
   <div class="g2">
     <div class="card">
-      <div class="ch"><span class="ct">📊 Facturación por Año · <span id="fc-anual-tit">A la fecha</span></span></div>
+      <div class="ch"><span class="ct">📊 Facturación por Año · <span id="fc-anual-tit">A la fecha</span></span><span style="font-size:.55rem;background:rgba(255,192,0,.15);color:var(--am);border-radius:3px;padding:.15rem .4rem;font-weight:600;white-space:nowrap">Descuenta provisiones</span></div>
       <div class="cb"><canvas id="cFcAnual" height="220"></canvas></div>
       <div style="padding:.6rem 1rem;background:var(--gy);border-top:1px solid var(--brd);font-size:.6rem;color:var(--mut);text-align:center" id="fc-anual-nota">—</div>
     </div>
     <div class="card">
-      <div class="ch"><span class="ct">📅 Facturación por Mes · <span id="fc-mensual-tit">2024-2026</span></span></div>
+      <div class="ch"><span class="ct">📅 Facturación por Mes · <span id="fc-mensual-tit">2024-2026</span></span><span style="font-size:.55rem;background:rgba(255,192,0,.15);color:var(--am);border-radius:3px;padding:.15rem .4rem;font-weight:600;white-space:nowrap">Descuenta provisiones</span></div>
       <div class="cb"><canvas id="cFcMensual" height="220"></canvas></div>
       <div style="padding:.6rem 1rem;background:var(--gy);border-top:1px solid var(--brd);font-size:.6rem;color:var(--mut);text-align:center" id="fc-mensual-nota">—</div>
     </div>
@@ -4153,8 +4153,10 @@ let _chFcAnual=null,_chFcMensual=null;
 function renderFcGraficos(){
   if(typeof Chart==='undefined')return;
   const m=APP_DATA.mensual;
-  const totYr=año=>m.total[String(año)].slice(0,MES_CORTE).reduce((s,v)=>s+v,0);
-  const totFull=año=>m.total[String(año)].reduce((s,v)=>s+v,0);
+  // Usar datos filtrados (solo Facturas + catálogos ST/Trazabilidad/REAS), sin provisiones
+  const mf=m.facturado||m.total;
+  const totYr=año=>( mf[String(año)]||[] ).slice(0,MES_CORTE).reduce((s,v)=>s+v,0);
+  const totFull=año=>( mf[String(año)]||[] ).reduce((s,v)=>s+v,0);
   let labels,ytdData,fullData;
   if(fcYrF==='todos'){labels=['2024','2025','2026'];ytdData=[totYr(2024),totYr(2025),totYr(2026)];fullData=[totFull(2024)-totYr(2024),totFull(2025)-totYr(2025),0];}
   else{labels=[fcYrF];ytdData=[totYr(parseInt(fcYrF))];fullData=[Math.max(0,totFull(parseInt(fcYrF))-totYr(parseInt(fcYrF)))];}
@@ -4164,10 +4166,10 @@ function renderFcGraficos(){
     _chFcAnual=new Chart(ctxA.getContext('2d'),{type:'bar',data:{labels:labels,datasets:[{label:'Ene-'+MES_CORTE_NOMBRE+' (YTD)',data:ytdData.map(v=>v/1e6),backgroundColor:C.te,borderRadius:4,stack:'s'},{label:'Resto año',data:fullData.map(v=>v/1e6),backgroundColor:'rgba(184,191,203,.6)',borderRadius:4,stack:'s'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`}}},scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v}}}}});
   }
   const tit=document.getElementById('fc-anual-tit');if(tit)tit.textContent=fcYrF==='todos'?'Comparativo 2024-2026 (YTD '+MES_CORTE_NOMBRE+')':'Año '+fcYrF;
-  const nota=document.getElementById('fc-anual-nota');if(nota){const tots=labels.map((l,i)=>`${l}: YTD MM$${(ytdData[i]/1e6).toFixed(0)}`).join(' · ');nota.textContent='Servicio Técnico al corte de '+MES_CORTE_NOMBRE+' · '+tots;}
+  const nota=document.getElementById('fc-anual-nota');if(nota){const tots=labels.map((l,i)=>`${l}: YTD MM$${(ytdData[i]/1e6).toFixed(0)}`).join(' · ');nota.textContent='Servicio Técnico al corte de '+MES_CORTE_NOMBRE+' · '+tots+' · Sin provisiones';}
   let datasetsMes;
-  if(fcYrF==='todos'){datasetsMes=[{label:'2024',data:m.total['2024'].map(v=>v/1e6),backgroundColor:'rgba(0,45,115,.6)',borderRadius:3},{label:'2025',data:m.total['2025'].map(v=>v/1e6),backgroundColor:'rgba(255,192,0,.7)',borderRadius:3},{label:'2026',data:m.total['2026'].map(v=>v/1e6),backgroundColor:'rgba(40,210,195,.85)',borderRadius:3}];}
-  else{const arr=m.total[fcYrF];datasetsMes=[{label:'Real '+fcYrF,data:arr.map(v=>v/1e6),backgroundColor:C.te,borderRadius:3}];if(fcYrF==='2026'){const _pm=APP_DATA.analisis_fac&&APP_DATA.analisis_fac.ppto_mensual&&APP_DATA.analisis_fac.ppto_mensual.some(v=>v>0)?APP_DATA.analisis_fac.ppto_mensual.map(v=>v/2/1e6):m.presup_contr.map(v=>v/1e6);datasetsMes.push({label:'Ppto contratos',data:_pm,type:'line',borderColor:C.te,backgroundColor:'rgba(40,210,195,.1)',borderWidth:2.5,tension:0.3,pointRadius:4,pointBackgroundColor:C.te,fill:false});}}
+  if(fcYrF==='todos'){datasetsMes=[{label:'2024',data:(mf['2024']||[]).map(v=>v/1e6),backgroundColor:'rgba(0,45,115,.6)',borderRadius:3},{label:'2025',data:(mf['2025']||[]).map(v=>v/1e6),backgroundColor:'rgba(255,192,0,.7)',borderRadius:3},{label:'2026',data:(mf['2026']||[]).map(v=>v/1e6),backgroundColor:'rgba(40,210,195,.85)',borderRadius:3}];}
+  else{const arr=mf[fcYrF]||[];datasetsMes=[{label:'Real '+fcYrF,data:arr.map(v=>v/1e6),backgroundColor:C.te,borderRadius:3}];if(fcYrF==='2026'){const _pm=APP_DATA.analisis_fac&&APP_DATA.analisis_fac.ppto_mensual&&APP_DATA.analisis_fac.ppto_mensual.some(v=>v>0)?APP_DATA.analisis_fac.ppto_mensual.map(v=>v/2/1e6):m.presup_contr.map(v=>v/1e6);datasetsMes.push({label:'Ppto contratos',data:_pm,type:'line',borderColor:C.te,backgroundColor:'rgba(40,210,195,.1)',borderWidth:2.5,tension:0.3,pointRadius:4,pointBackgroundColor:C.te,fill:false});}}
   const ctxM=document.getElementById('cFcMensual');
   if(ctxM){
     if(_chFcMensual){_chFcMensual.destroy();}
@@ -4175,7 +4177,7 @@ function renderFcGraficos(){
   }
   const titM=document.getElementById('fc-mensual-tit');if(titM)titM.textContent=fcYrF==='todos'?'Comparativo mensual 2024-2026':'Año '+fcYrF+(fcYrF==='2026'?' (vs ppto)':'');
   const notaM=document.getElementById('fc-mensual-nota');
-  if(notaM){if(fcYrF==='todos'){notaM.textContent='Facturación Servicio Técnico mes a mes · meses sin valor 2026 = pendientes';}else if(fcYrF==='2026'){notaM.textContent='Comparativo facturación real vs presupuesto contratos (línea naranja)';}else{notaM.textContent='Facturación Servicio Técnico del año '+fcYrF+' por mes';}}
+  if(notaM){if(fcYrF==='todos'){notaM.textContent='Facturación Servicio Técnico mes a mes · sin provisiones · meses sin valor 2026 = pendientes';}else if(fcYrF==='2026'){notaM.textContent='Comparativo facturación real vs presupuesto contratos (línea naranja) · sin provisiones';}else{notaM.textContent='Facturación Servicio Técnico del año '+fcYrF+' por mes · sin provisiones';}}
 }
 
 // ─── FC-YR HOOK ───────────────────────────────────────────────
