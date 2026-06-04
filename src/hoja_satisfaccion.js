@@ -165,12 +165,11 @@ function renderSatBI(){
 
   // Lookup base instalada Potencial ST para instituciones encuestadas
   const _biCliPot = _satGetBICliPot();
-  const _biSurveyTotals = inst.reduce((acc,d)=>{
-    const rec=_satLookupBICliente(d,_biCliPot);
-    if(rec) acc.total+=rec.total;
-    return acc;
-  },{total:0});
-  const _biSurveyN = inst.filter(d=>_satLookupBICliente(d,_biCliPot)).length;
+  // Construir mapa bi para reutilizar en tabla y otros (evita múltiples lookups)
+  const _biMap = {};
+  inst.forEach(d=>{ const r=_satLookupBICliente(d,_biCliPot); if(r) _biMap[d.institucion]=r; });
+  const _biSurveyN = Object.keys(_biMap).length;
+  const _biSurveyTotals = {total: Object.values(_biMap).reduce((s,r)=>s+(r.total_si||0),0)};
 
   // ── KPI cards ──────────────────────────────────────────────────────────────
   const kpis=document.getElementById('sat-bi-kpis');
@@ -194,8 +193,10 @@ function renderSatBI(){
     tb.innerHTML=inst.map((d,i)=>{
       const rcol=d.recom>=7?'var(--gn)':d.recom>=4?'var(--am)':'var(--rd)';
       const cls=d.categoria==='Sector Público'?'pb':d.categoria==='Sector Privado'?'por':'pgr';
-      const biVal=d.bi_total!=null?d.bi_total:'—';
-      const biStyle=d.bi_total!=null?'color:#1558D6;font-weight:700':'color:var(--mut)';
+      // Usar base instalada real (Potencial ST=Sí, habilitado) en vez de dato survey
+      const biRec=_biMap[d.institucion];
+      const biVal=biRec?(biRec.total_si||0):'—';
+      const biStyle=biRec?'color:#1558D6;font-weight:700':'color:var(--mut)';
       const nTag=d.n>1?`<span style="font-size:.58rem;background:#E0E4F0;border-radius:3px;padding:.1rem .3rem;margin-left:.3rem">${d.n} resp.</span>`:'';
       const tiene=_satTieneContr(d.institucion);
       const cBadge=tiene?`<span class="pill pg">CON</span>`:`<span class="pill pd">SIN</span>`;
@@ -212,18 +213,18 @@ function renderSatBI(){
       </tr>`;
     }).join('');
     const foot=document.getElementById('sat-bi-foot');
-    if(foot)foot.textContent=`${inst.length} instituciones · ${bi.n_con_bi} con BI · ${(bi.total_bi||0).toLocaleString('es-CL')} equipos · ${conContr} con contrato activo`;
+    if(foot)foot.textContent=`${inst.length} instituciones · ${_biSurveyN} con BI (Potencial ST) · ${_biSurveyTotals.total.toLocaleString('es-CL')} equipos · ${conContr} con contrato activo`;
   }
   if(!document.getElementById('tb-sat-bi')){}// foot handled above
 
   // ── Calcular tramos y tipos a partir de instituciones ─────────────────────
   const _biTramo=v=>v==null||v<=0?null:v<=10?'Pequeño (1-10)':v<=50?'Mediano (11-50)':v<=150?'Grande (51-150)':'Enterprise (150+)';
   const TRAMO_ORDER=['Pequeño (1-10)','Mediano (11-50)','Grande (51-150)','Enterprise (150+)'];
-  // Tramos basados en BI real de base instalada (Potencial ST), no en survey
+  // Tramos basados en BI Potencial ST (habilitado) de base instalada
   const tramoMap={};
   inst.forEach(d=>{
-    const biRec=_satLookupBICliente(d,_biCliPot);
-    const biReal=biRec?biRec.total:0;
+    const biRec=_biMap[d.institucion];
+    const biReal=biRec?(biRec.total_si||0):0;
     const t=_biTramo(biReal);
     if(!t)return;
     if(!tramoMap[t])tramoMap[t]={n:0,recs:[]};
@@ -249,9 +250,10 @@ function renderSatBI(){
   const _biLineaSat={};
   _BI_LINEAS.forEach(l=>{ _biLineaSat[l.prop]=0; });
   inst.forEach(d=>{
-    const biRec=_satLookupBICliente(d,_biCliPot);
+    const biRec=_biMap[d.institucion];
     if(!biRec)return;
-    _BI_LINEAS.forEach(l=>{ _biLineaSat[l.prop]+=(biRec[l.prop]||0); });
+    // Usar conteos _si (solo equipos con Potencial ST=Sí, habilitados)
+    _BI_LINEAS.forEach(l=>{ _biLineaSat[l.prop]+=(biRec[l.prop+'_si']||0); });
   });
 
   // ── Gráfico 1: Recom promedio por tramo de BI ─────────────────────────────
@@ -343,15 +345,17 @@ function _renderSatBIScatter(){
     if(t==='101+')  return bi>=101;
     return true;
   };
+  const _biMapSc = {};
+  inst.forEach(d=>{ const r=_satLookupBICliente(d,_biCliPotSc); if(r) _biMapSc[d.institucion]=r; });
   const pts=inst
     .map(d=>{
-      const biRec=_satLookupBICliente(d,_biCliPotSc);
-      const biReal=biRec?biRec.total:0;
+      const biRec=_biMapSc[d.institucion];
+      const biReal=biRec?(biRec.total_si||0):0;
       if(!biReal||!_inTramo(biReal,_satBIFiltTramo))return null;
       return {
         x:biReal, y:d.recom,
         label:d.institucion, n:d.n,
-        bi_detalle:d.bi_detalle, categoria:d.categoria,
+        bi_detalle:biRec, categoria:d.categoria,
         calidad:d.calidad, tiempo:d.tiempo, bi_total:biReal,
         bg:d.recom>=7?'rgba(0,131,47,.8)':d.recom>=4?'rgba(255,192,0,.9)':'rgba(192,0,0,.8)'
       };
@@ -516,14 +520,16 @@ function initSatisfaccion(){
   }
 
   // Detractores: usar instituciones completas (no solo las con comentario)
+  const _biCliPotDet = _satGetBICliPot();
   const det=(s.instituciones||[]).filter(d=>d.recom<7).sort((a,b)=>a.recom-b.recom);
   const detTb=document.getElementById('tb-sat-det');
   if(detTb){
     detTb.innerHTML=det.map((d,i)=>{
       const cls=d.categoria==='Sector Público'?'pb':d.categoria==='Sector Privado'?'por':'pgr';
-      const biStyle=d.bi_total!=null?'color:#C00000;font-weight:700':'color:var(--mut)';
+      const biRec=_satLookupBICliente(d,_biCliPotDet);
+      const biSi=biRec?(biRec.total_si||0):null;
+      const biStyle=biSi!=null?'color:#C00000;font-weight:700':'color:var(--mut)';
       const nTag=d.n>1?`<span style="font-size:.58rem;background:#FFE0E0;border-radius:3px;padding:.1rem .3rem;margin-left:.3rem">${d.n} resp.</span>`:'';
-      // Contrato: mostrar monto si tiene contr_asociados, o indicar con contrato activo si está en DATA
       const montoContr = d.contr_asociados > 0 ? d.contr_asociados : 0;
       const tieneContr = montoContr > 0 || _satTieneContr(d.institucion);
       const contrCell = montoContr > 0
@@ -537,7 +543,7 @@ function initSatisfaccion(){
         <td><span class="pill ${cls}">${d.categoria}</span></td>
         ${contrCell}
         <td style="text-align:center;font-family:'Roboto Mono',monospace">${d.n}</td>
-        <td style="text-align:right;font-family:'Roboto Mono',monospace;${biStyle}">${d.bi_total!=null?d.bi_total:'—'}</td>
+        <td style="text-align:right;font-family:'Roboto Mono',monospace;${biStyle}">${biSi!=null?biSi:'—'}</td>
         <td class="num" style="text-align:right;color:var(--mut)">${d.calidad.toFixed(2).replace('.',',')}</td>
         <td class="num" style="text-align:right;color:var(--mut)">${d.tiempo.toFixed(2).replace('.',',')}</td>
         <td class="num" style="text-align:right;color:var(--rd);font-weight:700">${d.recom.toFixed(2).replace('.',',')}</td>
@@ -646,12 +652,13 @@ function _renderSatDetBI(){
     const biRec = matchBI(d);
     const panelRec = _findPanel(d.institucion);
     const contrRec = _findContrato(d.institucion);
-    const totalEq  = biRec ? biRec.total.toLocaleString('es-CL') : '—';
-    const dental    = biRec ? (biRec.dental    || '—') : '—';
-    const ester     = biRec ? (biRec.esterilizacion || '—') : '—';
-    const incardia  = biRec ? (biRec.incardia   || '—') : '—';
-    const endo      = biRec ? (biRec.endoscopia || '—') : '—';
-    const mob       = biRec ? (biRec.mobiliario || '—') : '—';
+    // Usar conteos _si (Potencial ST=Sí, habilitados) — misma fuente que tabla BI
+    const totalEq  = biRec ? (biRec.total_si||0).toLocaleString('es-CL') : '—';
+    const dental    = biRec ? (biRec.dental_si    || '—') : '—';
+    const ester     = biRec ? (biRec.esterilizacion_si || '—') : '—';
+    const incardia  = biRec ? (biRec.incardia_si   || '—') : '—';
+    const endo      = biRec ? (biRec.endoscopia_si || '—') : '—';
+    const mob       = biRec ? (biRec.mobiliario_si || '—') : '—';
     // Prioridad: col AC de SATISFACCION → panel de facturación → '—'
     const fac2026   = d.fac_2026 > 0 ? mm(d.fac_2026)
       : panelRec && (panelRec.real_ytd||0) > 0 ? mm(panelRec.real_ytd) : '—';
