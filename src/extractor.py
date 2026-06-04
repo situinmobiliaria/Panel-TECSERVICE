@@ -244,13 +244,15 @@ def read_bbdd(xlsx_path):
 
     cols = df.columns.tolist()
     # Access by position to avoid encoding issues in header names
-    c_cliente  = cols[7]    # H
-    c_monto    = cols[18]   # S: Total Linea Venta
-    c_mes      = cols[38]   # AM
-    c_ano      = cols[40]   # AO
-    c_emp2     = cols[43]   # AR: Empresa 2
-    c_tipocli  = cols[45]   # AT: Tipo Cliente
-    c_linea    = cols[46]   # AU: Linea de Negocio
+    c_cliente   = cols[7]    # H
+    c_monto     = cols[18]   # S: Total Linea Venta
+    c_catalogo  = cols[36]   # AK: Catálogo
+    c_tipodoc   = cols[37]   # AL: Tipo documento (Factura / Nota de crédito / etc.)
+    c_mes       = cols[38]   # AM
+    c_ano       = cols[40]   # AO
+    c_emp2      = cols[43]   # AR: Empresa 2
+    c_tipocli   = cols[45]   # AT: Tipo Cliente
+    c_linea     = cols[46]   # AU: Linea de Negocio
     c_ejecutivo = cols[50] if len(cols) > 50 else None  # AY: Ejecutivo
 
     # Filter Tecservice rows
@@ -290,12 +292,23 @@ def read_bbdd(xlsx_path):
     mensual_nocontr = monthly_dict(df_nocontr)
 
     # Facturación mensual por ejecutivo (columna AY)
+    # Filtros: año actual, tipo doc = "Factura", catálogo en ST/Trazabilidad/REAS
+    _CATALOGOS_EJE = {"Servicio Técnico", "Trazabilidad", "REAS"}
     mensual_por_ejecutivo = {}
     if c_ejecutivo:
         df_ts[c_ejecutivo] = df_ts[c_ejecutivo].astype(str).str.strip()
-        ejecutivos = [e for e in df_ts[c_ejecutivo].unique() if e and e.lower() not in ("nan","none","")]
+        df_ts[c_tipodoc]   = df_ts[c_tipodoc].astype(str).str.strip()
+        df_ts[c_catalogo]  = df_ts[c_catalogo].astype(str).str.strip()
+        # Aplicar filtros específicos para el desglose por ejecutivo
+        df_eje_base = df_ts[
+            (df_ts[c_ano]     == ANO) &
+            (df_ts[c_tipodoc] == "Factura") &
+            (df_ts[c_catalogo].isin(_CATALOGOS_EJE))
+        ].copy()
+        ejecutivos = [e for e in df_eje_base[c_ejecutivo].unique()
+                      if e and e.lower() not in ("nan", "none", "")]
         for eje in ejecutivos:
-            df_eje = df_ts[df_ts[c_ejecutivo] == eje]
+            df_eje = df_eje_base[df_eje_base[c_ejecutivo] == eje]
             mensual_por_ejecutivo[eje] = monthly_dict(df_eje)
 
     # Auto-detect MES_CORTE: last month in current year with >100k billing
