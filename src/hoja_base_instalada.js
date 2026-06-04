@@ -5,7 +5,9 @@
 
 let _chBILinea=null, _chBITipos=null, _chBIClientes=null;
 let _biFiltLinea='todos', _biFiltEstado='todos', _biFiltRelacion='todos', _biQuery='';
+let _biFiltPotencial='todos';
 let _biSortCol=2, _biSortAsc=false;
+let _biAllClientes=[]; // lista completa para re-filtrar con potencial
 
 // Lookup maps cruzados con panel (facturación) y DATA (contratos activos)
 let _biPanelMap={}, _biContratoMap={};
@@ -69,9 +71,15 @@ function _biEstadoBadge(estado){
   return `<span class="badge bgy">Sin clasificar</span>`;
 }
 
+// Lista base filtrada por potencial (afecta toda la hoja)
+function _biBaseList(){
+  if(_biFiltPotencial === 'si')  return _biAllClientes.filter(c => c.potencial_st);
+  if(_biFiltPotencial === 'no')  return _biAllClientes.filter(c => !c.potencial_st);
+  return _biAllClientes;
+}
+
 function _biClientesFiltrados(){
-  const bi = APP_DATA.base_instalada || {};
-  let list = bi.clientes || [];
+  let list = _biBaseList();
 
   if(_biFiltEstado !== 'todos'){
     list = list.filter(c => c.estado === _biFiltEstado);
@@ -185,6 +193,87 @@ function biFiltrarRelacion(btn){
   _biFiltRelacion = btn.dataset.bfr;
   _biRenderTabla();
 }
+function biFiltrarPotencial(btn){
+  document.querySelectorAll('#bi-filt-potencial .btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  _biFiltPotencial = btn.dataset.bfp;
+  _biRefreshDynamic();
+}
+
+// Actualiza KPIs, cards de línea y tabla al cambiar el filtro de Potencial ST
+function _biRefreshDynamic(){
+  const base = _biBaseList();
+  const total = base.reduce((s,c)=>s+c.total,0);
+  const biConContratoActivo = base.filter(c=>{ const d=_biLookupContrato(c.nombre); return d&&d.n>0; }).length;
+
+  // Actualizar KPI grid
+  const kpiGrid = document.getElementById('bi-kpi-grid');
+  if(kpiGrid){
+    const totEl   = document.getElementById('bi-kpi-total-val');
+    const cliEl   = document.getElementById('bi-kpi-clientes-val');
+    const contrEl = document.getElementById('bi-kpi-contrato-val');
+    const pctCli2 = document.getElementById('bi-kpi-clientes-sub2');
+    const estVal  = document.getElementById('bi-kpi-estado-val');
+    const pctContr= document.getElementById('bi-kpi-contrato-sub');
+    const baseTotal = base.reduce((s,c)=>s+c.total,0);
+    const conContrato = base.reduce((s,c)=>s+(c.con_contrato?c.total:0),0);
+    if(totEl)   totEl.textContent   = baseTotal.toLocaleString('es-CL');
+    if(cliEl)   cliEl.textContent   = base.length.toLocaleString('es-CL');
+    if(contrEl) contrEl.textContent = biConContratoActivo;
+    if(pctCli2) pctCli2.textContent = base.length > 0 ? ((biConContratoActivo/base.length)*100).toFixed(1)+'% clientes BI' : '—';
+    if(estVal)  estVal.textContent  = conContrato.toLocaleString('es-CL');
+    if(pctContr)pctContr.textContent= baseTotal > 0 ? ((conContrato/baseTotal)*100).toFixed(1)+'% equipos' : '—';
+  }
+
+  // Actualizar cards por línea
+  const cardsContainer = document.getElementById('bi-linea-cards');
+  if(cardsContainer){
+    const _LINEAS_DEF = [
+      {key:'dental',        label:'Dental',            color:'#FFC000', icon:'🦷', prop:'dental'},
+      {key:'esterilizacion',label:'Esterilización',   color:'#002D73', icon:'⚗️',  prop:'esterilizacion'},
+      {key:'incardia',      label:'Incardia',           color:'#D46000', icon:'🫀', prop:'incardia'},
+      {key:'endoscopia',    label:'Endoscopía',         color:'#28D2C3', icon:'🔭', prop:'endoscopia'},
+      {key:'mobiliario',    label:'Mobiliario Clínico', color:'#7B2FBE', icon:'🛏️', prop:'mobiliario'},
+      {key:'mmq_reas',      label:'MMQ / REAS',         color:'#00832F', icon:'🔧', prop:'mmq_reas'},
+    ];
+    cardsContainer.innerHTML = _LINEAS_DEF.map(def => {
+      const nTotal = base.reduce((s,c)=>s+(c[def.prop]||0),0);
+      const nCli   = base.filter(c=>c[def.prop]>0).length;
+      const nContr = base.filter(c=>c[def.prop]>0 && _biLookupContrato(c.nombre)?.n>0).length;
+      const pctCon = nCli>0?(nContr/nCli*100).toFixed(0):0;
+      const topCli = [...base].filter(c=>c[def.prop]>0).sort((a,b)=>b[def.prop]-a[def.prop]).slice(0,3);
+      const cliRows = topCli.map(c=>
+        `<div style="display:flex;justify-content:space-between;font-size:.6rem;padding:.1rem 0;border-bottom:1px solid var(--gy2)">
+          <span style="color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${c.nombre.length>28?c.nombre.slice(0,26)+'…':c.nombre}</span>
+          <span style="font-family:'Roboto Mono',monospace;font-weight:700;color:${def.color};flex-shrink:0">${c[def.prop]}</span>
+        </div>`).join('');
+      return `<div class="card" style="border-top:3px solid ${def.color};padding:0;overflow:hidden">
+        <div style="padding:.65rem .8rem;background:linear-gradient(135deg,${def.color}18,transparent)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.3rem">
+            <div>
+              <div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);font-weight:700">${def.icon} ${def.label}</div>
+              <div style="font-family:'Roboto Condensed',sans-serif;font-weight:900;font-size:1.6rem;color:${def.color};line-height:1.1">${nTotal.toLocaleString('es-CL')}</div>
+              <div style="font-size:.58rem;color:var(--mut)">equipos · ${nCli} clientes</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-family:'Roboto Condensed',sans-serif;font-weight:900;font-size:1.1rem;color:var(--gn)">${pctCon}%</div>
+              <div style="font-size:.55rem;color:var(--mut)">con contrato</div>
+            </div>
+          </div>
+          <div style="height:4px;background:var(--gy2);border-radius:2px;margin:.4rem 0">
+            <div style="width:${pctCon}%;height:100%;background:var(--gn);border-radius:2px;transition:width .6s"></div>
+          </div>
+        </div>
+        <div style="padding:.4rem .8rem .55rem;border-top:1px solid var(--brd)">
+          <div style="font-size:.58rem;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.28rem">Top clientes</div>
+          ${cliRows||'<div style="font-size:.6rem;color:var(--mut)">Sin datos</div>'}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  _biRenderTabla();
+}
 function biSearch(val){
   _biQuery = val;
   _biRenderTabla();
@@ -202,7 +291,8 @@ function biSortCol(col, th){
 
 function initBaseInstalada(){
   const bi = APP_DATA.base_instalada || {};
-  const clientes = bi.clientes || [];
+  _biAllClientes = bi.clientes || [];   // guardar para re-filtrar con potencial
+  const clientes = _biAllClientes;
   const porLinea = bi.por_linea || {};
   const porEstado = bi.por_estado || {};
   const porTipo   = bi.por_tipo   || [];
@@ -332,12 +422,26 @@ function initBaseInstalada(){
     <span class="sh-tag">${total.toLocaleString('es-CL')} equipos activos · ${clientes.length} clientes · ${lineasActivas} líneas de negocio</span>
   </div>
 
+  <!-- Segmentador Potencial ST -->
+  <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem;padding:.5rem .7rem;background:var(--gy);border-radius:6px;border-left:3px solid var(--az2)">
+    <span style="font-size:.65rem;font-weight:700;color:var(--az1)">Potencial ST:</span>
+    <div id="bi-filt-potencial" style="display:flex;gap:.25rem">
+      <button class="btn on" data-bfp="todos" onclick="biFiltrarPotencial(this)">Todos</button>
+      <button class="btn" data-bfp="si" onclick="biFiltrarPotencial(this)" style="border-left:2px solid var(--gn)">Sí</button>
+      <button class="btn" data-bfp="no" onclick="biFiltrarPotencial(this)" style="border-left:2px solid var(--rd)">No</button>
+    </div>
+    <span style="font-size:.58rem;color:var(--mut);margin-left:.4rem;line-height:1.4">
+      <strong style="color:var(--gn)">Sí</strong> = solo marcas que TECSERVICE actualmente representa · este equipamiento constituye oportunidades potenciales de servicio de mantención.
+      <strong style="color:var(--rd)">No</strong> = marcas que ya no representamos.
+    </span>
+  </div>
+
   <!-- KPIs compactos -->
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.55rem;margin-bottom:1rem">
-    <div class="kpi" style="--kc:var(--az1)"><div class="kpi-lbl">Total Equipos</div><div class="kpi-val">${total.toLocaleString('es-CL')}</div><div class="kpi-sub">activos en servicio</div></div>
-    <div class="kpi" style="--kc:var(--az2)"><div class="kpi-lbl">Clientes</div><div class="kpi-val">${clientes.length.toLocaleString('es-CL')}</div><div class="kpi-sub">instituciones</div></div>
-    <div class="kpi" style="--kc:var(--gn)"><div class="kpi-lbl">Con Contrato Activo</div><div class="kpi-val">${biConContratoActivo}</div><div class="kpi-sub">${clientes.length>0?((biConContratoActivo/clientes.length)*100).toFixed(1):'0'}% clientes BI</div></div>
-    <div class="kpi" style="--kc:var(--teal)"><div class="kpi-lbl">Contr./Garantía BI</div><div class="kpi-val">${conContrato.toLocaleString('es-CL')}</div><div class="kpi-sub">${total>0?((conContrato/total)*100).toFixed(1):'0'}% equipos</div></div>
+  <div id="bi-kpi-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:.55rem;margin-bottom:1rem">
+    <div class="kpi" style="--kc:var(--az1)"><div class="kpi-lbl">Total Equipos</div><div class="kpi-val" id="bi-kpi-total-val">${total.toLocaleString('es-CL')}</div><div class="kpi-sub">activos en servicio</div></div>
+    <div class="kpi" style="--kc:var(--az2)"><div class="kpi-lbl">Clientes</div><div class="kpi-val" id="bi-kpi-clientes-val">${clientes.length.toLocaleString('es-CL')}</div><div class="kpi-sub" id="bi-kpi-clientes-sub">instituciones</div></div>
+    <div class="kpi" style="--kc:var(--gn)"><div class="kpi-lbl">Con Contrato Activo</div><div class="kpi-val" id="bi-kpi-contrato-val">${biConContratoActivo}</div><div class="kpi-sub" id="bi-kpi-clientes-sub2">${clientes.length>0?((biConContratoActivo/clientes.length)*100).toFixed(1):'0'}% clientes BI</div></div>
+    <div class="kpi" style="--kc:var(--teal)"><div class="kpi-lbl">Contr./Garantía BI</div><div class="kpi-val" id="bi-kpi-estado-val">${conContrato.toLocaleString('es-CL')}</div><div class="kpi-sub" id="bi-kpi-contrato-sub">${total>0?((conContrato/total)*100).toFixed(1):'0'}% equipos</div></div>
     <div class="kpi" style="--kc:var(--or)"><div class="kpi-lbl">Tipos de Equipo</div><div class="kpi-val">${porTipo.length}</div><div class="kpi-sub">tipos distintos</div></div>
   </div>
 

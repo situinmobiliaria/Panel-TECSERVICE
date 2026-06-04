@@ -676,6 +676,7 @@ def read_satisfaccion(wb):
 #     col[4]=Nombre  col[5]=Fabricante  col[6]=Modelo
 #     col[12]=Tipo  col[13]=Clasificacion1(cliente)  col[14]=Clasificacion2(estado)
 #     col[25]=LineaDeNegocio  col[26]=NombreAnalisis(cliente normalizado, puede ser None)
+#     col[27]=PotencialST (Si/No) — marcas que TECSERVICE aún representa
 # ══════════════════════════════════════════════════════════════════════════════
 def read_base_instalada(wb):
     ws = None
@@ -725,6 +726,10 @@ def read_base_instalada(wb):
             nombre_analisis = safe_str(row[13]).strip() if row[13] else "SIN CLIENTE"
         nombre_analisis = nombre_analisis.upper()
 
+        # col[27] = Potencial ST (Si/No)
+        potencial_raw = safe_str(row[27]).strip().upper() if len(row) > 27 and row[27] is not None else ""
+        es_potencial  = potencial_raw in ("SI", "SÍ", "S", "1", "TRUE", "VERDADERO")
+
         total += 1
         por_linea[linea] += 1
         por_tipo[tipo]   += 1
@@ -736,11 +741,14 @@ def read_base_instalada(wb):
                 "total": 0,
                 "lineas": defaultdict(int),
                 "estados": defaultdict(int),
+                "_potencial_st": False,
             }
         d = cli_map[nombre_analisis]
-        d["total"]       += 1
+        d["total"]          += 1
         d["lineas"][linea]  += 1
         d["estados"][estado] += 1
+        if es_potencial:
+            d["_potencial_st"] = True
 
     # Top 20 tipos
     top_tipos = sorted(
@@ -774,6 +782,7 @@ def read_base_instalada(wb):
             "otros":         otros,
             "estado":        estado_cli,
             "con_contrato":  estado_cli in ("Contrato", "Garantia"),
+            "potencial_st":  d.get("_potencial_st", False),
         })
 
     # Ordenar clientes por total desc
