@@ -272,6 +272,48 @@ function _biRefreshDynamic(){
     }).join('');
   }
 
+  // ── Gráfico Top 12 Tipos ──────────────────────────────────────────────────
+  const _biRef = APP_DATA.base_instalada || {};
+  const _tiposData = _biFiltPotencial==='si' ? (_biRef.por_tipo_si||_biRef.por_tipo)
+                   : _biFiltPotencial==='no' ? (_biRef.por_tipo_no||_biRef.por_tipo)
+                   : _biRef.por_tipo;
+  const _top12 = (_tiposData||[]).slice(0,12);
+  const _ctxTipos = document.getElementById('cBITipos');
+  if(_ctxTipos){
+    if(_chBITipos) _chBITipos.destroy();
+    _chBITipos = safeChart(_ctxTipos.getContext('2d'),{
+      type:'bar',
+      data:{labels:_top12.map(x=>x.tipo.length>28?x.tipo.slice(0,26)+'…':x.tipo),
+        datasets:[{label:'Equipos',data:_top12.map(x=>x.n),
+          backgroundColor:_top12.map((_,i)=>{const cols=['#FFC000','#002D73','#D46000','#28D2C3','#7B2FBE','#00832F'];return cols[i%cols.length];}),
+          borderRadius:4}]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw.toLocaleString('es-CL')} equipos`}}},
+        scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{font:{size:10}}},y:{grid:{display:false},ticks:{font:{size:9}}}}}
+    });
+  }
+
+  // ── Gráfico Distribución Regional ─────────────────────────────────────────
+  const _regArr = _biRegionFromClients(base);
+  const _ctxReg = document.getElementById('cBIRegion');
+  if(_ctxReg && _regArr.length > 0){
+    if(_chBIRegion) _chBIRegion.destroy();
+    _chBIRegion = safeChart(_ctxReg.getContext('2d'),{
+      type:'bar',
+      data:{
+        labels:_regArr.map(([r])=>r.length>20?r.slice(0,18)+'…':r),
+        datasets:[
+          {label:'Equipos BI',data:_regArr.map(([,d])=>d.bi),backgroundColor:'#002D73',stack:'s',borderRadius:3},
+          {label:'Clientes',data:_regArr.map(([,d])=>d.n*10),backgroundColor:'#28D2C3',stack:'cc',borderRadius:3,type:'bar'},
+        ]
+      },
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{position:'top',labels:{boxWidth:10,font:{size:10},padding:8}},
+          tooltip:{callbacks:{label:c=>c.datasetIndex===0?` ${c.parsed.x} equipos BI`:` ${Math.round(c.parsed.x/10)} clientes`}}},
+        scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{font:{size:9}}},y:{grid:{display:false},ticks:{font:{size:9}}}}}
+    });
+  }
+
   _biRenderTabla();
 }
 function biSearch(val){
