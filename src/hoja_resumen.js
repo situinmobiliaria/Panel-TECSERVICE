@@ -300,7 +300,7 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
 
   const cards = document.getElementById('rs-mes-cards');
   if(cards){
-    const mes2026 = APP_DATA.mensual.total['2026'];
+    const mes2026 = (APP_DATA.mensual.facturado && APP_DATA.mensual.facturado[String(ANO_ACTUAL)]) || APP_DATA.mensual.total[String(ANO_ACTUAL)];
     // Ppto contratos por mes: 50% del ppto mensual real de GD-PPTO
     const _pmRaw = (APP_DATA.analisis_fac && APP_DATA.analisis_fac.ppto_mensual) || [];
     const _usePM = _pmRaw.some(v=>v>0);
