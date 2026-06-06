@@ -45,17 +45,17 @@ function fcYrContr(d){
     return p?(p.presup_contr_ytd||0):0;
   }
   if(fcYrF==='todos'){
-    return((d.contr_2024_real||0)+(d.contr_2025_real||0))*(MES_CORTE/12)+(window.fcYrContrYTD2026?window.fcYrContrYTD2026(d):0);
+    return(d.contr_2024_real||0)+(d.contr_2025_real||0)+(window.fcYrContrYTD2026?window.fcYrContrYTD2026(d):0);
   }
-  if(fcYrF==='2024')return(d.contr_2024_real||0)*(MES_CORTE/12);
-  if(fcYrF==='2025')return(d.contr_2025_real||0)*(MES_CORTE/12);
+  if(fcYrF==='2024')return d.contr_2024_real||0;
+  if(fcYrF==='2025')return d.contr_2025_real||0;
   return 0;
 }
 function fcYrCorr(d){return fcYrTotal(d)-fcYrContr(d);}
 function fcYrLabel(){
   if(fcYrF==='todos')return'2024 - 2026';
   if(fcYrF==='2026')return'2026 a la fecha (Ene-'+MES_CORTE_NOMBRE+')';
-  return fcYrF+' (Ene-'+MES_CORTE_NOMBRE+' · prorrateado)';
+  return fcYrF+' real (Ene-'+MES_CORTE_NOMBRE+')';
 }
 
 // ─── INIT ─────────────────────────────────────────────────────
@@ -145,15 +145,20 @@ function renderFacturacion(){
     return fcSA?av-bv:bv-av;
   });
 
-  // Totales desde FAC_DATA (per-cliente) y analisis_fac (master total 2026)
-  const t24=data.reduce((s,d)=>s+d.fac_2024,0);
-  const t25=data.reduce((s,d)=>s+d.fac_2025,0);
+  // Totales directamente desde mensual.facturado (BBDD crudo, solo Facturas ST/REAS/Traz)
+  const _mf=APP_DATA.mensual&&APP_DATA.mensual.facturado||{};
+  const _sumMf=(yr)=>(_mf[String(yr)]||[]).slice(0,MES_CORTE).reduce((s,v)=>s+v,0);
+  const t24=_sumMf(2024);
+  const t25=_sumMf(2025);
   const t26=data.reduce((s,d)=>s+d.fac_2026,0);
-  // Total 2026: usa Ingresos TS de Analisis Facturación (fuente master, incluye todos los clientes TS)
   const _af=APP_DATA.analisis_fac||{};
   const t26Master=fcYrF==='2026'&&_af.ts_ingresos>0 ? _af.ts_ingresos : t26;
   const tot=fcYrF==='2026'?t26Master:fcYrF==='2024'?t24:fcYrF==='2025'?t25:(t24+t25+t26Master);
-  const tcontr=data.reduce((s,d)=>s+fcYrContr(d),0);
+  // Contratos: para 2024/2025 usa Vendedor ST* desde BBDD; para 2026 usa presup_contr_ytd
+  const _vc24=APP_DATA.ytd_contr_2024||0;
+  const _vc25=APP_DATA.ytd_contr_2025||0;
+  const _vc26=data.reduce((s,d)=>s+fcYrContr(d),0);
+  const tcontr=fcYrF==='2024'?_vc24:fcYrF==='2025'?_vc25:fcYrF==='2026'?_vc26:(_vc24+_vc25+_vc26);
   const tcorr=Math.max(0, tot-tcontr);
 
   document.getElementById('fc-clientes-badge').textContent=data.length+' clientes';
@@ -248,13 +253,14 @@ function renderFcCoord(data){
   }).join('');
 }
 
+function _mfYtd(yr){const a=(APP_DATA.mensual&&APP_DATA.mensual.facturado&&APP_DATA.mensual.facturado[String(yr)])||[];return a.slice(0,MES_CORTE).reduce((s,v)=>s+v,0);}
+
 function renderFcCharts(){
   const isAll=fcYrF==='todos';
   const _af2=APP_DATA.analisis_fac||{};
-  const t24=FAC_DATA.reduce((s,d)=>s+d.fac_2024,0);
-  const t25=FAC_DATA.reduce((s,d)=>s+d.fac_2025,0);
+  const t24=_mfYtd(2024);
+  const t25=_mfYtd(2025);
   const t26Raw=FAC_DATA.reduce((s,d)=>s+d.fac_2026,0);
-  // Usar Analisis Facturación como fuente master para 2026
   const t26=_af2.ts_ingresos>0?_af2.ts_ingresos:t26Raw;
 
   const baseCol=['#A8DADC','#FFD966','#FFC000'],baseBor=['#7DC9D6','#E5BD52','#D4A300'];
@@ -268,8 +274,11 @@ function renderFcCharts(){
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'MM$'+c.parsed.y.toFixed(1)}}},scales:{y:{beginAtZero:true,ticks:{callback:v=>'MM$'+v}}}}
   });
 
-  // Donut: base = t26 master (consistente con KPI strip)
-  const tcontr=FAC_DATA.reduce((s,d)=>s+fcYrContr(d),0);
+  // Donut: contratos usando Vendedor "ST*" para 2024/2025, presup_contr_ytd para 2026
+  const _contr2024=APP_DATA.ytd_contr_2024||0;
+  const _contr2025=APP_DATA.ytd_contr_2025||0;
+  const _contr2026=FAC_DATA.reduce((s,d)=>s+fcYrContr(d),0);
+  const tcontr=fcYrF==='2024'?_contr2024:fcYrF==='2025'?_contr2025:fcYrF==='2026'?_contr2026:(_contr2024+_contr2025+_contr2026);
   const tcorr=Math.max(0, (isAll?(t24+t25+t26):fcYrF==='2026'?t26:fcYrF==='2025'?t25:t24) - tcontr);
   const totMix=tcontr+tcorr;
   document.getElementById('fc-donut-n').textContent=mm(totMix);
@@ -339,9 +348,9 @@ function renderFcTipoCliente(){
   const pub=grupos['Público']||{n:0,total:0,contr:0,corr:0};
   const pri=grupos['Privado']||{n:0,total:0,contr:0,corr:0};
   const totalN=pub.n+pri.n;
-  // Escalar montos al total master (analisis_fac.ts_ingresos) manteniendo proporciones
-  const _afT=APP_DATA.analisis_fac||{};
-  const _master=_afT.ts_ingresos||0;
+  // Escalar al total real del año seleccionado (mensual.facturado)
+  const _af2T=APP_DATA.analisis_fac||{};
+  const _master=fcYrF==='2026'?(_af2T.ts_ingresos||0):fcYrF==='2024'?_mfYtd(2024):fcYrF==='2025'?_mfYtd(2025):(_mfYtd(2024)+_mfYtd(2025)+(_af2T.ts_ingresos||0));
   const totalFacPanel=pub.total+pri.total;
   const _scale=totalFacPanel>0&&_master>0?_master/totalFacPanel:1;
   const pubMonto=pub.total*_scale, priMonto=pri.total*_scale;
@@ -421,11 +430,13 @@ function renderFcAlertas(){
 function renderFcVsPpto(){
   const isAll=fcYrF==='todos';
   const _afV=APP_DATA.analisis_fac||{};
-  const t24v=FAC_DATA.reduce((s,d)=>s+d.fac_2024,0);
-  const t25v=FAC_DATA.reduce((s,d)=>s+d.fac_2025,0);
+  const t24v=_mfYtd(2024);
+  const t25v=_mfYtd(2025);
   const t26v=_afV.ts_ingresos>0?_afV.ts_ingresos:FAC_DATA.reduce((s,d)=>s+d.fac_2026,0);
   const totFact=isAll?(t24v+t25v+t26v):fcYrF==='2026'?t26v:fcYrF==='2025'?t25v:t24v;
-  const totContr=FAC_DATA.reduce((s,d)=>s+fcYrContr(d),0);
+  const _vc24=APP_DATA.ytd_contr_2024||0,_vc25=APP_DATA.ytd_contr_2025||0;
+  const _vc26=FAC_DATA.reduce((s,d)=>s+fcYrContr(d),0);
+  const totContr=fcYrF==='2024'?_vc24:fcYrF==='2025'?_vc25:fcYrF==='2026'?_vc26:(_vc24+_vc25+_vc26);
   const factor=isAll?3:1;
   const pptoTot=FC_PPTO_TOTAL*factor,pptoCon=FC_PPTO_CONTRATOS*factor;
   const periodLabel=isAll?'Acumulado 2024-2026':'Año '+fcYrF;
@@ -486,7 +497,7 @@ let _chFcAnual=null,_chFcMensual=null;
 function renderFcGraficos(){
   if(typeof Chart==='undefined')return;
   const m=APP_DATA.mensual;
-  // Usar datos filtrados (solo Facturas + catálogos ST/Trazabilidad/REAS), sin provisiones
+  // Usar datos filtrados (catálogos ST/Trazabilidad/REAS), incluye provisiones
   const mf=m.facturado||m.total;
   const totYr=año=>( mf[String(año)]||[] ).slice(0,MES_CORTE).reduce((s,v)=>s+v,0);
   const totFull=año=>( mf[String(año)]||[] ).reduce((s,v)=>s+v,0);
@@ -499,7 +510,7 @@ function renderFcGraficos(){
     _chFcAnual=new Chart(ctxA.getContext('2d'),{type:'bar',data:{labels:labels,datasets:[{label:'Ene-'+MES_CORTE_NOMBRE+' (YTD)',data:ytdData.map(v=>v/1e6),backgroundColor:C.te,borderRadius:4,stack:'s'},{label:'Resto año',data:fullData.map(v=>v/1e6),backgroundColor:'rgba(184,191,203,.6)',borderRadius:4,stack:'s'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`}}},scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v}}}}});
   }
   const tit=document.getElementById('fc-anual-tit');if(tit)tit.textContent=fcYrF==='todos'?'Comparativo 2024-2026 (YTD '+MES_CORTE_NOMBRE+')':'Año '+fcYrF;
-  const nota=document.getElementById('fc-anual-nota');if(nota){const tots=labels.map((l,i)=>`${l}: YTD MM$${(ytdData[i]/1e6).toFixed(0)}`).join(' · ');nota.textContent='Servicio Técnico al corte de '+MES_CORTE_NOMBRE+' · '+tots+' · Sin provisiones';}
+  const nota=document.getElementById('fc-anual-nota');if(nota){const tots=labels.map((l,i)=>`${l}: YTD MM$${(ytdData[i]/1e6).toFixed(0)}`).join(' · ');const pnota=APP_DATA.periodo_nota||('Ene–'+MES_CORTE_NOMBRE+' '+ANO_ACTUAL);nota.textContent=pnota+' · '+tots+' · Catálogos: ST / REAS / Trazabilidad · Incluye provisiones';}
   let datasetsMes;
   if(fcYrF==='todos'){datasetsMes=[{label:'2024',data:(mf['2024']||[]).map(v=>v/1e6),backgroundColor:'rgba(0,45,115,.6)',borderRadius:3},{label:'2025',data:(mf['2025']||[]).map(v=>v/1e6),backgroundColor:'rgba(255,192,0,.7)',borderRadius:3},{label:'2026',data:(mf['2026']||[]).map(v=>v/1e6),backgroundColor:'rgba(40,210,195,.85)',borderRadius:3}];}
   else{const arr=mf[fcYrF]||[];datasetsMes=[{label:'Real '+fcYrF,data:arr.map(v=>v/1e6),backgroundColor:C.te,borderRadius:3}];if(fcYrF==='2026'){const _pm=APP_DATA.analisis_fac&&APP_DATA.analisis_fac.ppto_mensual&&APP_DATA.analisis_fac.ppto_mensual.some(v=>v>0)?APP_DATA.analisis_fac.ppto_mensual.map(v=>v/2/1e6):m.presup_contr.map(v=>v/1e6);datasetsMes.push({label:'Ppto contratos',data:_pm,type:'line',borderColor:C.te,backgroundColor:'rgba(40,210,195,.1)',borderWidth:2.5,tension:0.3,pointRadius:4,pointBackgroundColor:C.te,fill:false});}}
@@ -510,7 +521,7 @@ function renderFcGraficos(){
   }
   const titM=document.getElementById('fc-mensual-tit');if(titM)titM.textContent=fcYrF==='todos'?'Comparativo mensual 2024-2026':'Año '+fcYrF+(fcYrF==='2026'?' (vs ppto)':'');
   const notaM=document.getElementById('fc-mensual-nota');
-  if(notaM){if(fcYrF==='todos'){notaM.textContent='Facturación Servicio Técnico mes a mes · sin provisiones · meses sin valor 2026 = pendientes';}else if(fcYrF==='2026'){notaM.textContent='Comparativo facturación real vs presupuesto contratos (línea naranja) · sin provisiones';}else{notaM.textContent='Facturación Servicio Técnico del año '+fcYrF+' por mes · sin provisiones';}}
+  if(notaM){if(fcYrF==='todos'){notaM.textContent='Facturación Servicio Técnico mes a mes · incluye provisiones · meses sin valor 2026 = pendientes';}else if(fcYrF==='2026'){notaM.textContent='Comparativo facturación real vs presupuesto contratos (línea naranja) · incluye provisiones';}else{notaM.textContent='Facturación Servicio Técnico del año '+fcYrF+' por mes · incluye provisiones';}}
 }
 
 // ─── FC-YR HOOK ───────────────────────────────────────────────

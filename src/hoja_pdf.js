@@ -51,7 +51,8 @@ async function generarPDF() {
         const com=DATA.filter(d=>d.tipo==='Comercial');
         const gar=DATA.filter(d=>d.tipo==='Garantia');
         const val=com.reduce((s,d)=>s+(d.val||0),0);
-        return`${com.length} contratos comerciales con cartera anual de ${fmtMM(val)} y ${gar.length} contratos de garantía sin valor económico en cartera.`;
+        const garVal=gar.reduce((s,d)=>s+(d.val||0),0);
+        return`${com.length} contratos comerciales con cartera anual de ${fmtMM(val)} y ${gar.length} contratos de garantía con cartera de ${fmtMM(garVal)}.`;
       }
     },
     { id:'view-nuevos',       nav:'nuevos',       lab:'Nuevos Clientes y Contratos',

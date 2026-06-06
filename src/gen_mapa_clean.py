@@ -266,7 +266,7 @@ function _renderRegTable(){
     window.sv=function(name,btn){
       orig(name,btn);
       if(name==='mapa'){
-        if(!_mapaInited){_mapaInited=true;setTimeout(initMapa,80);}
+        if(!_mapaInited){_mapaInited=true;setTimeout(cnitMapa,80);}
         else{setTimeout(()=>{if(_mapaLeaflet)_mapaLeaflet.invalidateSize();},100);}
       }
     };

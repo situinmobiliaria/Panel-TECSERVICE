@@ -24,7 +24,8 @@ import pandas as pd
 # ══════════════════════════════════════════════════════════════════════════════
 DIR  = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(DIR)
-XLSX = os.path.join(ROOT, "data", "CONTRATOS -FACTURACION -SATISFACCION -VISITAS.xlsx")
+XLSX      = os.path.join(ROOT, "data", "CONTRATOS -FACTURACION -SATISFACCION -VISITAS.xlsx")
+XLSX_MAPA = os.path.join(ROOT, "Base Mapa.xlsx")
 TMPL = os.path.join(DIR, "template.html")
 OUT  = os.path.join(DIR, "dashboard_contratos_v16.2.html")
 
@@ -189,7 +190,10 @@ def read_facturacion(wb):
         if not cliente:
             continue
 
-        # Col[2] = NombreAnalisis (nueva), Total2026 se desplazó a col[3]
+        # Col[2] = NombreAnalisis — nombre normalizado que coincide con BBDD col H
+        nombre_analisis = safe_str(row[2]) or cliente
+
+        # Col[3] = Total2026, Total2026 se desplazó a col[3]
         real_ytd   = to_float(row[3])
         real_2025  = to_float(row[4])
         real_2024  = to_float(row[5])
@@ -213,13 +217,14 @@ def read_facturacion(wb):
 
         panel.append({
             "cliente":           cliente,
-            "coord":             "Sin contrato",   # filled later from CONTRATOS
-            "tipo_cli":          "Privado",         # filled later from BBDD
+            "nombre_analisis":   nombre_analisis,   # key para lookup en BBDD
+            "coord":             "Sin contrato",    # filled later from CONTRATOS
+            "tipo_cli":          "Privado",          # filled later from BBDD
             "real_ytd":          real_ytd,
-            "real_anual_2026":   real_ytd,          # YTD = mejor proxy para año en curso
+            "real_anual_2026":   real_ytd,           # YTD = mejor proxy para año en curso
             "real_anual_2025":   real_2025,
             "real_anual_2024":   real_2024,
-            "real_ytd_2025":     0,                 # filled later from BBDD
+            "real_ytd_2025":     0,                  # filled later from BBDD
             "real_ytd_2024":     0,
             "presup_contr_anio": 0,                 # filled later from CONTRATOS
             "presup_contr_ytd":  contr_2026,
@@ -309,26 +314,40 @@ def read_bbdd(xlsx_path):
         df_ts[c_ejecutivo] = df_ts[c_ejecutivo].astype(str).str.strip()
         df_eje_base = df_facturado[df_facturado[c_ano] == ANO].copy()
         ejecutivos = [e for e in df_eje_base[c_ejecutivo].unique()
-                      if e and e.lower() not in ("nan", "none", "")]
+                      if isinstance(e, str) and e.strip().lower() not in ("nan", "none", "")]
         for eje in ejecutivos:
             df_eje = df_eje_base[df_eje_base[c_ejecutivo] == eje]
             mensual_por_ejecutivo[eje] = monthly_dict(df_eje)
 
-    # Auto-detect MES_CORTE: last month in current year with >100k billing
-    mes_corte = 1
-    ano_data = mensual_total.get(ANO, {})
-    for m in range(12, 0, -1):
-        if ano_data.get(m, 0) > 100_000:
-            mes_corte = m
-            break
+    # MES_CORTE: mes calendario actual (dinámico)
+    mes_corte = TODAY.month
 
-    # YTD per client: same month range as current year (1..mes_corte)
+    # YTD per client: solo Facturas + catálogos ST/REAS/Trazabilidad
+    _CATALOGOS_YTD = {"Servicio Técnico", "REAS", "Trazabilidad"}
+    df_ytd_base = df_ts[
+        (df_ts[c_tipodoc] == "Factura") &
+        df_ts[c_catalogo].isin(_CATALOGOS_YTD)
+    ]
+
     def ytd_per_cli(year, max_mes):
-        sub = df_ts[(df_ts[c_ano] == year) & (df_ts[c_mes] <= max_mes)]
+        sub = df_ytd_base[(df_ytd_base[c_ano] == year) & (df_ytd_base[c_mes] <= max_mes)]
         return sub.groupby(c_cliente)[c_monto].sum().to_dict()
 
     ytd_cli_2025 = ytd_per_cli(ANO - 1, mes_corte)
     ytd_cli_2024 = ytd_per_cli(ANO - 2, mes_corte)
+
+    # YTD contratos 2024/2025: Vendedor (col T) empieza con "ST"
+    c_vendedor = cols[19]
+    df_ytd_base = df_ytd_base.copy()
+    df_ytd_base[c_vendedor] = df_ytd_base[c_vendedor].astype(str).str.strip().str.upper()
+    df_ytd_contr = df_ytd_base[df_ytd_base[c_vendedor].str.startswith("ST")]
+
+    def ytd_contr_total(year, max_mes):
+        sub = df_ytd_contr[(df_ytd_contr[c_ano] == year) & (df_ytd_contr[c_mes] <= max_mes)]
+        return float(sub[c_monto].sum())
+
+    ytd_contr_2024 = ytd_contr_total(ANO - 2, mes_corte)
+    ytd_contr_2025 = ytd_contr_total(ANO - 1, mes_corte)
 
     return {
         "mensual_total":         mensual_total,
@@ -341,6 +360,8 @@ def read_bbdd(xlsx_path):
         "tipo_cli_map":          tipo_map,
         "ytd_cli_2025":          ytd_cli_2025,
         "ytd_cli_2024":          ytd_cli_2024,
+        "ytd_contr_2024":        ytd_contr_2024,
+        "ytd_contr_2025":        ytd_contr_2025,
         "mes_corte":             mes_corte,
     }
 
@@ -975,7 +996,68 @@ def read_analisis_fac(wb):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 6. ENSAMBLAR APP_DATA
+# 6. HOJA: BASE MAPA (Base Mapa.xlsx — hoja "Resumen Clientes")
+#    Columnas (0-based):
+#    0=Cliente  1=TipoCliente  2=Ingreso  3=Correctivo  5=Preventivo
+#    12=BI  14-21=Equipos  22=Región  23=Comuna  25=Contratos
+#    30=Pipeline  31=Lat  32=Lon  33=ConContrato  35=Margen
+#    36=Satisfaccion  37=PotPipe  38=PotEq  39=PotTotal
+# ══════════════════════════════════════════════════════════════════════════════
+def read_mapa():
+    if not os.path.exists(XLSX_MAPA):
+        print(f"  ADVERTENCIA: No se encontro Base Mapa.xlsx en {XLSX_MAPA}")
+        return []
+    wb = openpyxl.load_workbook(XLSX_MAPA, read_only=True, data_only=True)
+    ws = wb["Resumen Clientes"]
+    clientes = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        nombre = safe_str(row[0])
+        if not nombre:
+            continue
+        lat = to_float(row[31], None)
+        lon = to_float(row[32], None)
+        if lat is None or lon is None:
+            continue
+        region_raw = safe_str(row[22])
+        region = region_raw.replace("Región ", "").replace("Region ", "").strip()
+        eq = {
+            "Esterilización": to_int(row[14]),
+            "Dental":         to_int(row[15]),
+            "Endoscopía":     to_int(row[16]),
+            "Incardia":       to_int(row[17]),
+            "MMQ":            to_int(row[18]),
+            "REAS":           to_int(row[19]),
+            "Mob.Clínico":    to_int(row[20]),
+            "Mob.Otros":      to_int(row[21]),
+        }
+        cc_raw = safe_str(row[33]).upper()
+        clientes.append({
+            "n":         nombre,
+            "tipo":      safe_str(row[1]),
+            "ingreso":   to_int(row[2]),
+            "correctivo": to_int(row[3]),
+            "preventivo": to_int(row[5]),
+            "bi":        to_int(row[12]),
+            "eq":        eq,
+            "region":    region,
+            "comuna":    safe_str(row[23]),
+            "contratos": to_int(row[25]),
+            "pipe":      to_int(row[30]),
+            "lat":       round(lat, 7),
+            "lon":       round(lon, 7),
+            "cc":        cc_raw in ("SI", "SÍ", "S", "1", "TRUE", "VERDADERO"),
+            "margen":    to_int(row[35]),
+            "sat":       to_float(row[36]) if row[36] is not None else None,
+            "pot_pipe":  to_int(row[37]),
+            "pot_eq":    to_int(row[38]),
+            "pot":       to_int(row[39]),
+        })
+    wb.close()
+    return clientes
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. ENSAMBLAR APP_DATA
 # ══════════════════════════════════════════════════════════════════════════════
 def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac=None, base_instalada=None):
 
@@ -1019,8 +1101,10 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         entry["coord"]            = coord_by_cli.get(cli, "Sin contrato")
         entry["tipo_cli"]         = safe_str(tipo_map.get(cli, "")) or "Privado"
         entry["presup_contr_anio"] = round(presup_by_cli.get(cli, 0), 2)
-        entry["real_ytd_2025"]    = round(ytd_cli_25.get(cli, 0))
-        entry["real_ytd_2024"]    = round(ytd_cli_24.get(cli, 0))
+        # Buscar en BBDD usando NombreAnalisis primero (coincide con col H del BBDD)
+        nom = p.get("nombre_analisis") or cli
+        entry["real_ytd_2025"]    = round(ytd_cli_25.get(nom, ytd_cli_25.get(cli, 0)))
+        entry["real_ytd_2024"]    = round(ytd_cli_24.get(nom, ytd_cli_24.get(cli, 0)))
         entry["fin_contrato"]     = fin_contrato_by_cli.get(cli, "")
         entry["fin_fmt"]          = fin_fmt_by_cli.get(cli, "")
         entry["inicio_fmt"]       = inicio_fmt_by_cli.get(cli, "")
@@ -1071,10 +1155,14 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
     _MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
               "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
 
+    _mes_nom = _MESES[mes_corte - 1] if 1 <= mes_corte <= 12 else "—"
     return {
-        "mes_corte":       mes_corte,
-        "mes_corte_nombre": _MESES[mes_corte - 1] if 1 <= mes_corte <= 12 else "—",
-        "hoy":             TODAY.isoformat(),
+        "mes_corte":        mes_corte,
+        "mes_corte_nombre": _mes_nom,
+        "periodo_nota":     f"Comparativo YTD: Ene–{_mes_nom} {ANO} vs Ene–{_mes_nom} {ANO-1} y {ANO-2}",
+        "hoy":              TODAY.isoformat(),
+        "ytd_contr_2024":   round(bbdd.get("ytd_contr_2024", 0)),
+        "ytd_contr_2025":   round(bbdd.get("ytd_contr_2025", 0)),
         "panel":   panel,
         "mensual": {
             "total":        {str(y): to_arr(mt, y) for y in [ANO - 2, ANO - 1, ANO]},
@@ -1118,8 +1206,8 @@ def build_data_arrays(contratos, panel_raw):
         d["estado_relacion"] = panel_rel_map.get(c["cliente"], "Nuevo")
         data.append(d)
 
-    # NC_DATA: new active commercial contracts (started ≤90 days ago)
-    nc_data = [d for d in data if d["es_nuevo"] and d["tipo"] == "Comercial"]
+    # NC_DATA: new active contracts (started ≤90 days ago), all types
+    nc_data = [d for d in data if d["es_nuevo"]]
 
     # PERDIDOS_VG: clients marked as no_continuo with no active contract
     active_clientes = {c["cliente"] for c in contratos if c["estado"] == "Activado"}
@@ -1165,7 +1253,7 @@ def build_data_arrays(contratos, panel_raw):
 # ══════════════════════════════════════════════════════════════════════════════
 # 8. PARCHEAR BLOQUE DATA/APP_DATA EN EL HTML TEMPLATE
 # ══════════════════════════════════════════════════════════════════════════════
-def patch_html(html, data, app_data):
+def patch_html(html, data, app_data, mapa_data=None):
     """Reemplaza el bloque <script>...const DATA=...;window.APP_DATA=...;</script>"""
     # Buscar "const DATA=" (con o sin espacio) y su bloque <script> contenedor
     data_idx = html.find("const DATA=")
@@ -1198,11 +1286,13 @@ def patch_html(html, data, app_data):
     mes_nombre = _MESES[app_data["mes_corte"] - 1].upper()
     ano = app_data.get("hoy", "")[:4]
 
+    mapa_json = json.dumps(mapa_data or [], ensure_ascii=False)
     new_block = (
         "<script>\n"
         f"const DATA = {json.dumps(data, ensure_ascii=False)};\n\n"
         f"// ═══ DATOS ACTUALIZADOS A {mes_nombre} {ano} ═══\n"
         f"window.APP_DATA = {json.dumps(app_data, ensure_ascii=False)};\n"
+        f"window.MAPA_DATA = {mapa_json};\n"
         "</script>"
     )
     return html[:script_start] + new_block + html[script_end + 9:]
@@ -1326,18 +1416,22 @@ def main():
     print(f"       Analisis Fac: Ingresos TS MM${ts_ing/1e6:.1f} | Total YTD MM${ts_ytd/1e6:.1f}")
 
     # ── Construir estructuras de datos ───────────────────────────────────────
-    print("[6/6] Construyendo estructuras de datos...")
+    print("[6/7] Construyendo estructuras de datos...")
     app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada)
     data, nc_data, perdidos = build_data_arrays(contratos, panel_raw)
     total_com_val = sum(d["val"] for d in data if d["tipo"] == "Comercial")
     print(f"       DATA: {len(data)} contratos | Cartera COM: MM${total_com_val/1e6:.1f}")
     print(f"       NC_DATA: {len(nc_data)} nuevos | PERDIDOS: {len(perdidos)}")
 
+    print("[7/7] Leyendo Base Mapa (MAPA_DATA)...")
+    mapa_data = read_mapa()
+    print(f"       {len(mapa_data)} clientes cargados desde Base Mapa.xlsx")
+
     # ── Parchear template.html (fuente de build.ps1) ─────────────────────────
     print("\nParcheando template.html...")
     with open(TMPL, encoding="utf-8") as f:
         html = f.read()
-    html = patch_html(html, data, app_data)
+    html = patch_html(html, data, app_data, mapa_data)
     with open(TMPL, "w", encoding="utf-8") as f:
         f.write(html)
     print("  Actualizado: template.html")

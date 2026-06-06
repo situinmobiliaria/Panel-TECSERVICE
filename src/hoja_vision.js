@@ -39,8 +39,9 @@ function renderVG(){
   const totalVal=d.reduce((s,x)=>s+x.val,0);
   const avgPct=d.length?d.reduce((s,x)=>s+x.pct_consumido,0)/d.length:0;
   const urgentes=d.filter(x=>x.dias_vence<=90&&x.dias_vence>=0).length;
+  const carteraVG=vgFilt==='Comercial'?TOTAL_COM_VAL:vgFilt==='Garantia'?TOTAL_GAR_VAL:TOTAL_CARTERA_VAL;
   document.getElementById('vg-k1').textContent=d.length;
-  document.getElementById('vg-k2').textContent=mm(TOTAL_COM_VAL);
+  document.getElementById('vg-k2').textContent=mm(carteraVG);
   document.getElementById('vg-k3').textContent=d.filter(x=>x.tipo==='Garantia').length;
   document.getElementById('vg-k4').textContent=avgPct.toFixed(1)+'%';
   document.getElementById('vg-k5').textContent=urgentes;

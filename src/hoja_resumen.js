@@ -14,13 +14,14 @@
   const nGar=DATA.filter(d=>d.tipo==='Garantia').length;
   const nGarCli=new Set(DATA.filter(d=>d.tipo==='Garantia').map(d=>d.cliente)).size;
   const carteraAnual=DATA.filter(d=>d.tipo==='Comercial').reduce((s,d)=>s+(d.val||0),0);
+  const carteraGar=DATA.filter(d=>d.tipo==='Garantia').reduce((s,d)=>s+(d.val||0),0);
 
   const garV=document.getElementById('rs-kpi-gar-val');if(garV)garV.textContent=nGar;
-  const garS=document.getElementById('rs-kpi-gar-sub');if(garS)garS.textContent=nGarCli+' clientes · sin valor económico';
+  const garS=document.getElementById('rs-kpi-gar-sub');if(garS)garS.textContent=nGarCli+' clientes · '+mm(carteraGar)+' cartera';
   const tlCom=document.getElementById('rs-tipo-com-lbl');if(tlCom)tlCom.textContent=nCom+' Comerciales';
   const tsCom=document.getElementById('rs-tipo-com-sub');if(tsCom)tsCom.textContent='Contratos con valor económico · '+mm(carteraAnual)+' cartera anual';
   const tlGar=document.getElementById('rs-tipo-gar-lbl');if(tlGar)tlGar.textContent=nGar+' Garantía';
-  const tsGar=document.getElementById('rs-tipo-gar-sub');if(tsGar)tsGar.textContent='Cobertura sin valor en cartera · '+nGarCli+' clientes únicos';
+  const tsGar=document.getElementById('rs-tipo-gar-sub');if(tsGar)tsGar.textContent='Cobertura valorizada · '+mm(carteraGar)+' · '+nGarCli+' clientes únicos';
 
   const venc90=DATA.filter(d=>d.dias_vence>=0&&d.dias_vence<=90);
   const venc90Val=DATA.filter(d=>d.dias_vence>=0&&d.dias_vence<=90&&d.tipo==='Comercial').reduce((s,d)=>s+(d.val||0),0);
@@ -166,22 +167,22 @@ new Chart(document.getElementById('cLong').getContext('2d'),{
 
 // ─── PRESUPUESTO CONTRATOS INIT ───────────────────────────────
 (function(){
-  const pct=(TOTAL_COM_VAL/PPTO_CONTRATOS*100);
-  const brecha=Math.max(0,PPTO_CONTRATOS-TOTAL_COM_VAL);
+  const pct=(TOTAL_CARTERA_VAL/PPTO_CONTRATOS*100);
+  const brecha=Math.max(0,PPTO_CONTRATOS-TOTAL_CARTERA_VAL);
   const kpiEl=document.getElementById('kpi-ppto-pct');
   if(kpiEl)kpiEl.textContent=pct.toFixed(1)+'%';
   const kpiSub=document.getElementById('kpi-ppto-sub');
-  if(kpiSub)kpiSub.textContent=mm(TOTAL_COM_VAL)+' de '+mm(PPTO_CONTRATOS);
+  if(kpiSub)kpiSub.textContent=mm(TOTAL_CARTERA_VAL)+' de '+mm(PPTO_CONTRATOS);
   const rk1=document.getElementById('rs-ppto-total');if(rk1)rk1.textContent=mm(PPTO_CONTRATOS);
-  const rk2=document.getElementById('rs-ppto-real');if(rk2)rk2.textContent=mm(TOTAL_COM_VAL);
-  const rk2l=document.getElementById('rs-ppto-real-lbl');if(rk2l)rk2l.textContent='Comercial ('+pct.toFixed(1)+'%)';
+  const rk2=document.getElementById('rs-ppto-real');if(rk2)rk2.textContent=mm(TOTAL_CARTERA_VAL);
+  const rk2l=document.getElementById('rs-ppto-real-lbl');if(rk2l)rk2l.textContent='COM+GAR ('+pct.toFixed(1)+'%)';
   const rk3=document.getElementById('rs-ppto-brecha');if(rk3)rk3.textContent=mm(brecha);
   const rk3l=document.getElementById('rs-ppto-brecha-lbl');if(rk3l)rk3l.textContent='Brecha ('+(brecha/PPTO_CONTRATOS*100).toFixed(1)+'%)';
 })();
 
 new Chart(document.getElementById('cPpto').getContext('2d'),{
-  type:'bar',data:{labels:['Cartera COM','Brecha'],
-    datasets:[{data:[(TOTAL_COM_VAL/PPTO_CONTRATOS*100).toFixed(1),(Math.max(0,PPTO_CONTRATOS-TOTAL_COM_VAL)/PPTO_CONTRATOS*100).toFixed(1)],backgroundColor:[C.az2,'#E2E6F0'],borderRadius:4,borderSkipped:false}]},
+  type:'bar',data:{labels:['Cartera COM+GAR','Brecha'],
+    datasets:[{data:[(TOTAL_CARTERA_VAL/PPTO_CONTRATOS*100).toFixed(1),(Math.max(0,PPTO_CONTRATOS-TOTAL_CARTERA_VAL)/PPTO_CONTRATOS*100).toFixed(1)],backgroundColor:[C.az2,'#E2E6F0'],borderRadius:4,borderSkipped:false}]},
   options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},
     tooltip:{callbacks:{label:c=>` ${c.raw}% del ppto contratos (MM$${(PPTO_CONTRATOS/1e6).toFixed(1)})`}}},
     scales:{x:{max:100,grid:{color:'#E2E6F0'},ticks:{callback:v=>v+'%'}},y:{grid:{display:false}}}}
@@ -248,10 +249,12 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
 (function renderResumenKPIs(){
   const af = APP_DATA.analisis_fac || {};
   // Fuente master: Analisis Facturación
-  const tsIng    = af.ts_ingresos    || 0;   // Facturación TS (fuente única para todos los paneles)
-  const tsIngAA  = af.ts_ingresos_aa || 0;   // Facturación año anterior
+  const tsIng    = af.ts_ingresos    || 0;   // Facturación TS 2026 YTD
+  // Año anterior: mismo período (Ene–mes_corte) desde mensual.facturado — igual que hoja Facturación
+  const _mfAA = (APP_DATA.mensual && APP_DATA.mensual.facturado && APP_DATA.mensual.facturado[String(ANO_ACTUAL-1)]) || [];
+  const tsIngAA = _mfAA.slice(0, MES_CORTE).reduce((s,v)=>s+v, 0);
   const pptoacum = af.ts_ppto_acum   || 0;
-  const carteraAnual = TOTAL_COM_VAL;
+  const carteraAnual = TOTAL_CARTERA_VAL;
 
   document.getElementById('rs-kpi-tot').textContent = fmtMM(tsIng);
   document.getElementById('rs-kpi-tot-sub').textContent = 'Facturación TS Ene–'+MES_CORTE_NOMBRE+' · '+APP_DATA.panel.length+' clientes panel';

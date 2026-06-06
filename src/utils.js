@@ -6,6 +6,8 @@
 const TOTAL_PRESUP=window.PPTO_ANUAL;
 const PPTO_CONTRATOS=TOTAL_PRESUP*0.50;
 const TOTAL_COM_VAL=DATA.filter(d=>d.tipo==='Comercial').reduce((s,d)=>s+d.val,0);
+const TOTAL_GAR_VAL=DATA.filter(d=>d.tipo==='Garantia').reduce((s,d)=>s+d.val,0);
+const TOTAL_CARTERA_VAL=TOTAL_COM_VAL+TOTAL_GAR_VAL;
 const C={az1:'#002D73',az2:'#33448D',az3:'#0E2D55',te:'#28D2C3',am:'#FFC000',rd:'#C00000',gn:'#00832F',or:'#D46000',gy:'#E2E6F0',mut:'#B8C1D8'};
 Chart.defaults.font.family="'Roboto',sans-serif";
 Chart.defaults.color='#6B7BA8';
@@ -101,7 +103,7 @@ function updateTfoot(tbodyId){
   if(!foot)return;
   const count=rows.length;
   const clients=new Set(rows.map(r=>r.cells[1]?.textContent.trim()||'')).size;
-  const mmCols={'tb-tc-com':5,'tb-tc-gar':null,'tb-hz':6,'tb-vg':8,'tb-nc':6};
+  const mmCols={'tb-tc-com':5,'tb-tc-gar':5,'tb-hz':6,'tb-vg':8,'tb-nc':6};
   const pctCols={'tb-tc-com':7,'tb-tc-gar':7,'tb-hz':8,'tb-vg':12,'tb-nc':null};
   const mmCol=mmCols[tbodyId], pctCol=pctCols[tbodyId];
   let totalMM=0, totalPct=0, pctCount=0;

@@ -26,7 +26,7 @@ function ppEstadoKey(pct){
 }
 
 function renderPresupuesto(){
-  const totalCom=TOTAL_COM_VAL;
+  const totalCom=TOTAL_CARTERA_VAL;
   const pctGlobal=(totalCom/PPTO_CONTRATOS*100);
   const brecha=Math.max(0,PPTO_CONTRATOS-totalCom);
 
@@ -55,9 +55,9 @@ function renderPresupuesto(){
 
   document.getElementById('pp-nota').innerHTML=
     `Presupuesto contratos: <strong style="color:var(--teal)">50%</strong> × ${mm(TOTAL_PRESUP)} = <strong style="color:var(--teal)">${mm(PPTO_CONTRATOS)}</strong>.
-     Cartera comercial real: <strong style="color:rgba(255,255,255,.85)">${mm(totalCom)}</strong>
+     Cartera real (COM+GAR): <strong style="color:rgba(255,255,255,.85)">${mm(totalCom)}</strong>
      (${pctGlobal.toFixed(1)}% del presupuesto de contratos · ${(totalCom/TOTAL_PRESUP*100).toFixed(1)}% del presupuesto área total).
-     El presupuesto individual por contrato se calcula como: <strong style="color:var(--teal)">(valor contrato / cartera total) × ppto. contratos</strong>.`;
+     El presupuesto individual por contrato se calcula como: <strong style="color:var(--teal)">(valor contrato / cartera total COM+GAR) × ppto. contratos</strong>.`;
 
   const _PP_PALETTE=[C.az3,C.az2,'#4A6CC0','#6A8CDF','#8AAEF0','#28D2C3','#FFC000'];
   const coords=[...new Set(DATA.filter(d=>d.coord&&d.coord!=='Sin asignar').map(d=>d.coord))].sort();
@@ -68,11 +68,11 @@ function renderPresupuesto(){
     const cData=DATA.filter(d=>d.coord===coord);
     const cCom=cData.filter(d=>d.tipo==='Comercial');
     const cGar=cData.filter(d=>d.tipo==='Garantia');
-    const cVal=cCom.reduce((s,d)=>s+d.val,0);
+    const cVal=cData.reduce((s,d)=>s+d.val,0);
     const cPptoInd=totalCom>0?(cVal/totalCom)*PPTO_CONTRATOS:PPTO_CONTRATOS/5;
     const cPct=cPptoInd>0?(cVal/cPptoInd*100):0;
     const cBrecha=Math.max(0,cPptoInd-cVal);
-    const avgPct=cCom.length?cCom.reduce((s,d)=>s+d.pct_consumido,0)/cCom.length:0;
+    const avgPct=cData.length?cData.reduce((s,d)=>s+d.pct_consumido,0)/cData.length:0;
     const cColor=ppColor(cPct);
     const barW=Math.min(cPct,100);
     return`<div class="ppto-coord-card">
@@ -82,7 +82,7 @@ function renderPresupuesto(){
       </div>
       <div class="ppto-coord-body">
         <div class="ppto-cbar"><div class="ppto-cbar-fill" style="width:${barW}%;background:${cColor}"></div></div>
-        <div class="ppto-coord-row">Cartera COM<strong>${mm(cVal)}</strong></div>
+        <div class="ppto-coord-row">Cartera COM+GAR<strong>${mm(cVal)}</strong></div>
         <div class="ppto-coord-row">Ppto. asignado<strong>${mm(cPptoInd)}</strong></div>
         <div class="ppto-coord-row">% cumplimiento<strong style="color:${cColor}">${cPct.toFixed(1)}%</strong></div>
         <div class="ppto-coord-row">Brecha<strong style="color:${cBrecha>0?C.am:C.gn}">${cBrecha>0?mm(cBrecha):'✓'}</strong></div>

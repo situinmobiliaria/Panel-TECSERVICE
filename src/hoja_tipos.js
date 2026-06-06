@@ -6,8 +6,9 @@
 // ─── TIPOS DE CONTRATO ────────────────────────────────────────
 function initTipos(){
   const com=DATA.filter(d=>d.tipo==='Comercial').sort((a,b)=>b.val-a.val);
-  const gar=DATA.filter(d=>d.tipo==='Garantia').sort((a,b)=>b.tpo_activo-a.tpo_activo);
+  const gar=DATA.filter(d=>d.tipo==='Garantia').sort((a,b)=>b.val-a.val||b.tpo_activo-a.tpo_activo);
   const totalComVal=com.reduce((s,d)=>s+d.val,0);
+  const totalGarVal=gar.reduce((s,d)=>s+d.val,0);
   const totalGarN=gar.length;
 
   // ─── KPIs dinámicos desde DATA ───────────────────────────────
@@ -26,7 +27,7 @@ function initTipos(){
   set('tc-kpi-fac-val',mm(facContrYTD));
   set('tc-kpi-fac-sub',pctContr+'% facturación área · Ene–'+MES_CORTE_NOMBRE+' '+ANO_ACTUAL);
   set('tc-kpi-gar-n',gar.length);
-  set('tc-kpi-gar-sub',garCli+' clientes · sin valor económico');
+  set('tc-kpi-gar-sub',garCli+' clientes · '+mm(totalGarVal)+' cartera');
   set('tc-kpi-gar-pct',garPctProm+'%');
   const btns=document.querySelectorAll('#view-tipos .tabs .tab-btn');
   if(btns[0])btns[0].textContent='Tipo Comercial ('+com.length+')';
@@ -37,7 +38,9 @@ function initTipos(){
   const tfc=document.getElementById('tfoot-tc-com');
   if(tfc)tfc.innerHTML='<td class="flab" colspan="10" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+com.length+' contratos Comerciales · '+comCli+' clientes únicos · '+mm(totalComVal)+' cartera anual</td>';
   const tfg=document.getElementById('tfoot-tc-gar');
-  if(tfg)tfg.innerHTML='<td class="flab" colspan="10" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+gar.length+' contratos Garantía · '+garCli+' clientes únicos</td>';
+  if(tfg)tfg.innerHTML='<td class="flab" colspan="10" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+gar.length+' contratos Garantía · '+garCli+' clientes únicos · '+mm(totalGarVal)+' cartera valorizada</td>';
+  const fgv=document.getElementById('tc-foot-gar-val');
+  if(fgv)fgv.textContent=mm(totalGarVal)+' cartera garantías';
 
   document.getElementById('tb-tc-com').innerHTML=com.map(d=>`<tr>
     <td class="num">${d.n}</td>
@@ -51,13 +54,13 @@ function initTipos(){
     <td>${nueBadge(d.es_nuevo)}</td>
   </tr>`).join('');
 
-  document.getElementById('tb-tc-gar').innerHTML=gar.map((d,i)=>`<tr>
+  document.getElementById('tb-tc-gar').innerHTML=gar.map(d=>`<tr>
     <td class="num">${d.n}</td>
     <td style="font-size:.67rem">${shortN(d.cliente)}</td>
     <td style="font-size:.63rem;color:var(--mut)">${shortC(d.coord)}</td>
     <td style="font-size:.67rem">${d.inicio_fmt}</td><td style="font-size:.67rem">${d.fin_fmt}</td>
-    <td class="num">${(isNaN(d.tpo_activo)||d.tpo_activo<0)?0:d.tpo_activo}d</td>
-    <td class="num" style="color:var(--mut)">${totalGarN>0?((i+1)/totalGarN*100).toFixed(1)+'%':'—'}</td>
+    <td class="num" style="color:${d.val>0?'var(--az2)':'var(--mut)'}">${d.val>0?mm(d.val):'—'}</td>
+    <td class="num" style="color:var(--mut)">${totalGarVal>0?pctOf(d.val,totalGarVal):'—'}</td>
     <td style="min-width:80px">${pbarHTML(d.pct_consumido,C.te)}<span style="font-size:.6rem;color:var(--mut)">${isNaN(d.pct_consumido)?0:d.pct_consumido}%</span></td>
     <td>${urgP(d.dias_vence)}</td>
     <td>${nueBadge(d.es_nuevo)}</td>
