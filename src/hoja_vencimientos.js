@@ -42,12 +42,13 @@ function renderHz(){
     <td><span style="background:${relCol};color:#fff;padding:.12rem .35rem;border-radius:3px;font-size:.55rem;font-weight:700;white-space:nowrap">${relIco} ${rel}</span></td>
     <td style="font-size:.62rem;color:var(--mut)">${shortC(d.coord)}</td>
     <td>${tipoBadge(d.tipo)}</td>
+    <td style="text-align:center">${_progBadge(d.programa||'')}</td>
     <td style="font-size:.67rem">${d.fin_fmt}</td>
     <td>${urgP(d.dias_vence)}</td>
     <td class="num" style="color:${d.val>0?'var(--az2)':'var(--mut)'}">${d.val>0?mm(d.val):'—'}</td>
     <td class="num" style="color:var(--mut)">${pctOf(d.val,totalHzVal)}</td>
     <td style="min-width:75px">${pbarHTML(d.pct_consumido,urgC(d.dias_vence))}<span style="font-size:.6rem;color:var(--mut)">${d.pct_consumido}%</span></td>
-  </tr>`;}).join('')||`<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--mut)">Sin contratos en este horizonte</td></tr>`;
+  </tr>`;}).join('')||`<tr><td colspan="10" style="text-align:center;padding:2rem;color:var(--mut)">Sin contratos en este horizonte</td></tr>`;
 
   document.getElementById('hz-ft').textContent=`${data.length} contratos · ${data.filter(d=>d.tipo==='Comercial').length} Comercial · ${data.filter(d=>d.tipo==='Garantia').length} Garantía`;
   document.getElementById('hz-tot').textContent=mm(data.filter(d=>d.tipo==='Comercial').reduce((s,d)=>s+d.val,0))+' Comercial en riesgo';

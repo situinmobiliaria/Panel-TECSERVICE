@@ -83,6 +83,9 @@ function renderPanelFact(){
 
   const tb=document.getElementById('tb-pf');
   if(tb){
+    const _PROG_ORD={BASIC:0,ADVANCED:1,PROFESIONAL:2,INTEGRAL:3};
+    const progByClient={};
+    DATA.forEach(d=>{const k=_progKey(d.programa||'');if(!k)return;const prev=progByClient[d.cliente];if(!prev||(_PROG_ORD[k]||0)>(_PROG_ORD[prev]||0))progByClient[d.cliente]=k;});
     const sorted=[...data].sort((a,b)=>(b.real_ytd||0)-(a.real_ytd||0));
     tb.innerHTML=sorted.map((p,i)=>{
       const pct=(p.presup_contr_ytd||0)>0?(p.real_ytd||0)/p.presup_contr_ytd*100:0;
@@ -99,6 +102,7 @@ function renderPanelFact(){
         <td class="num" style="text-align:right;color:var(--mut)">${fmtMM(p.presup_contr_ytd||0)}</td>
         <td style="text-align:right"><span class="pill ${cls}">${cumpTxt}</span></td>
         <td class="num" style="text-align:right;font-size:.62rem;color:var(--mut)">${fmtMM(p.presup_contr_anio||0)}</td>
+        <td style="text-align:center">${_progBadge(progByClient[p.cliente]||'')}</td>
       </tr>`;
     }).join('');
   }

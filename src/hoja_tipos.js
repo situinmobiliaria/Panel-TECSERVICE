@@ -36,9 +36,9 @@ function initTipos(){
   set('tc-foot-com-val',mm(totalComVal)+' cartera anual');
   set('tc-foot-gar-txt',gar.length+' contratos tipo Garantía · '+garCli+' clientes únicos');
   const tfc=document.getElementById('tfoot-tc-com');
-  if(tfc)tfc.innerHTML='<td class="flab" colspan="10" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+com.length+' contratos Comerciales · '+comCli+' clientes únicos · '+mm(totalComVal)+' cartera anual</td>';
+  if(tfc)tfc.innerHTML='<td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+com.length+' contratos Comerciales · '+comCli+' clientes únicos · '+mm(totalComVal)+' cartera anual</td>';
   const tfg=document.getElementById('tfoot-tc-gar');
-  if(tfg)tfg.innerHTML='<td class="flab" colspan="10" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+gar.length+' contratos Garantía · '+garCli+' clientes únicos · '+mm(totalGarVal)+' cartera valorizada</td>';
+  if(tfg)tfg.innerHTML='<td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+gar.length+' contratos Garantía · '+garCli+' clientes únicos · '+mm(totalGarVal)+' cartera valorizada</td>';
   const fgv=document.getElementById('tc-foot-gar-val');
   if(fgv)fgv.textContent=mm(totalGarVal)+' cartera garantías';
 
@@ -51,6 +51,7 @@ function initTipos(){
     <td class="num" style="color:var(--mut)">${pctOf(d.val,totalComVal)}</td>
     <td style="min-width:80px">${pbarHTML(d.pct_consumido,urgC(d.dias_vence))}<span style="font-size:.6rem;color:var(--mut)">${isNaN(d.pct_consumido)?0:d.pct_consumido}%</span></td>
     <td>${urgP(d.dias_vence)}</td>
+    <td style="text-align:center">${_progBadge(d.programa||'')}</td>
     <td>${nueBadge(d.es_nuevo)}</td>
   </tr>`).join('');
 
@@ -63,6 +64,7 @@ function initTipos(){
     <td class="num" style="color:var(--mut)">${totalGarVal>0?pctOf(d.val,totalGarVal):'—'}</td>
     <td style="min-width:80px">${pbarHTML(d.pct_consumido,C.te)}<span style="font-size:.6rem;color:var(--mut)">${isNaN(d.pct_consumido)?0:d.pct_consumido}%</span></td>
     <td>${urgP(d.dias_vence)}</td>
+    <td style="text-align:center">${_progBadge(d.programa||'')}</td>
     <td>${nueBadge(d.es_nuevo)}</td>
   </tr>`).join('');
 

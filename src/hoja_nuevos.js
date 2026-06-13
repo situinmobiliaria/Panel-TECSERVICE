@@ -32,13 +32,14 @@ function renderNC(){
     <td style="font-size:.67rem">${shortN(r.cliente)}</td>
     <td style="font-size:.62rem;color:var(--mut)">${shortC(r.coord)}</td>
     <td>${tipoBadge(r.tipo)}</td>
+    <td style="text-align:center">${_progBadge(r.programa||'')}</td>
     <td style="font-size:.67rem">${r.inicio_fmt}</td>
     <td style="font-size:.67rem">${r.fin_fmt}</td>
     <td class="num" style="color:${r.val>0?'var(--az2)':'var(--mut)'}">${r.val>0?mm(r.val):'—'}</td>
     <td class="num" style="color:var(--mut)">${pctOf(r.val,totalVal)}</td>
     <td>${urgP(r.dias_vence)}</td>
     <td><span class="pill pgr">${r.dias_inicio_cli<0?'Futuro':r.dias_inicio_cli+'d'}</span></td>
-  </tr>`).join(''):`<tr><td colspan="10" style="text-align:center;padding:2rem;color:var(--mut);font-size:.75rem">Sin resultados para este período/filtro</td></tr>`;
+  </tr>`).join(''):`<tr><td colspan="11" style="text-align:center;padding:2rem;color:var(--mut);font-size:.75rem">Sin resultados para este período/filtro</td></tr>`;
 
   document.getElementById('nc-ftl').textContent=`${d.length} contratos · ${clientes} clientes nuevos · ${garN} tipo Garantía`;
   document.getElementById('nc-ftr').textContent=totalVal>0?'+ '+mm(totalVal):'Sin valor económico';

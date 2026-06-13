@@ -103,8 +103,8 @@ function updateTfoot(tbodyId){
   if(!foot)return;
   const count=rows.length;
   const clients=new Set(rows.map(r=>r.cells[1]?.textContent.trim()||'')).size;
-  const mmCols={'tb-tc-com':5,'tb-tc-gar':5,'tb-hz':6,'tb-vg':8,'tb-nc':6};
-  const pctCols={'tb-tc-com':7,'tb-tc-gar':7,'tb-hz':8,'tb-vg':12,'tb-nc':null};
+  const mmCols={'tb-tc-com':5,'tb-tc-gar':5,'tb-hz':8,'tb-vg':9,'tb-nc':7};
+  const pctCols={'tb-tc-com':7,'tb-tc-gar':7,'tb-hz':9,'tb-vg':13,'tb-nc':null};
   const mmCol=mmCols[tbodyId], pctCol=pctCols[tbodyId];
   let totalMM=0, totalPct=0, pctCount=0;
   rows.forEach(r=>{
@@ -138,3 +138,16 @@ document.addEventListener('DOMContentLoaded',()=>{
 
 // ─── PROGRESS BARS ANIMATE ────────────────────────────────────
 setTimeout(()=>{document.querySelectorAll('.prf').forEach(el=>{const w=el.style.width;el.style.width='0';setTimeout(()=>el.style.width=w,150);});},200);
+
+// ─── PROGRAMAS CARE (usado en todas las hojas de contratos) ───────
+const _PROG_FEATURES={
+  BASIC:{label:'Basic',color:'#1a7a1a',bg:'rgba(30,130,30,.15)',items:['Mantenimiento Preventivo según indicación del fabricante (2 visitas x año)','Atención técnica en terreno, con valor preferente','Hasta 2 actividades de capacitación sin costo, al año']},
+  ADVANCED:{label:'Advanced',color:'#a07800',bg:'rgba(255,192,0,.15)',items:['Mantenimiento Preventivo','Mantenimiento Correctivo (Solo Mano de obra)','Hasta 2 actividades de capacitación sin costo, al año','Precio preferente para repuestos (descuento 7%)']},
+  PROFESIONAL:{label:'Profesional',color:'#1155aa',bg:'rgba(17,85,170,.15)',items:['Mantenimiento Preventivo','Mantenimiento Correctivo','Bolsa de repuestos incluidos','Hasta 4 actividades de capacitación sin costo, al año','Precio preferente para repuestos, fuera de la bolsa (descuento 10%)','Soporte técnico 24/7, según área de cobertura']},
+  INTEGRAL:{label:'Integral',color:'#1a237e',bg:'rgba(26,35,126,.15)',items:['Mantenimiento Preventivo','Mantenimiento Correctivo','Repuestos incluidos','Hasta 10 actividades de capacitación sin costo, al año','Soporte técnico 24/7, según área de cobertura','Servicio de Backup (según corresponda - ver archivo equipos)']}
+};
+function _progKey(p){const u=(p||'').toUpperCase();if(u.includes('BASIC'))return'BASIC';if(u.includes('ADVANCED'))return'ADVANCED';if(u.includes('PROFESIONAL')||u.includes('PROFESSIONAL'))return'PROFESIONAL';if(u.includes('INTEGRAL'))return'INTEGRAL';return null;}
+function _ensureProgTip(){if(document.getElementById('_prog-tip'))return;const d=document.createElement('div');d.id='_prog-tip';d.style.cssText='position:fixed;z-index:99999;background:#1e2434;border:1px solid #3a4460;border-radius:8px;padding:.7rem .9rem;min-width:280px;max-width:360px;pointer-events:none;display:none;box-shadow:0 6px 24px rgba(0,0,0,.55);font-family:Roboto,sans-serif';document.body.appendChild(d);}
+function _showProgTip(e,key){_ensureProgTip();const info=_PROG_FEATURES[key];if(!info)return;const tip=document.getElementById('_prog-tip');tip.innerHTML=`<div style="font-family:'Roboto Condensed',sans-serif;font-weight:700;font-size:.78rem;color:${info.color};margin-bottom:.4rem;padding-bottom:.3rem;border-bottom:1px solid ${info.color}44">${info.label} Care Program</div><ul style="margin:0;padding-left:1.1rem;font-size:.6rem;color:rgba(255,255,255,.88);line-height:1.75">${info.items.map(i=>`<li>${i}</li>`).join('')}</ul>`;tip.style.display='block';tip.style.left=Math.min(e.clientX+14,window.innerWidth-380)+'px';tip.style.top=Math.min(e.clientY+10,window.innerHeight-200)+'px';}
+function _hideProgTip(){const t=document.getElementById('_prog-tip');if(t)t.style.display='none';}
+function _progBadge(programa){const key=_progKey(programa);if(!key)return'<span style="color:var(--mut);font-size:.6rem">—</span>';const info=_PROG_FEATURES[key];return`<span style="cursor:help;display:inline-block;padding:.18rem .45rem;border-radius:4px;font-size:.53rem;font-weight:700;font-family:'Roboto Condensed',sans-serif;background:${info.bg};color:${info.color};border:1px solid ${info.color}55;white-space:nowrap" onmouseenter="_showProgTip(event,'${key}')" onmouseleave="_hideProgTip()">${info.label}</span>`;}

@@ -63,6 +63,7 @@ function renderVG(){
       <td style="font-size:.67rem;line-height:1.3">${shortN(x.cliente)}</td>
       <td style="font-size:.62rem;color:var(--mut)">${shortC(x.coord)}</td>
       <td>${esPerdidoFac?'<span style="font-size:.6rem;color:var(--mut)">Expirado</span>':tipoBadge(x.tipo)}</td>
+      <td style="text-align:center">${esPerdidoFac?'—':_progBadge(x.programa||'')}</td>
       <td><span style="background:${relCol};color:#fff;padding:.14rem .35rem;border-radius:3px;font-size:.55rem;font-weight:700;white-space:nowrap" title="${rel}">${relIco} ${rel}</span></td>
       <td>${esPerdidoFac?'—':nueBadge(x.es_nuevo)}</td>
       <td style="font-size:.67rem">${x.inicio_fmt}</td>
@@ -74,7 +75,7 @@ function renderVG(){
       <td style="min-width:75px">${esPerdidoFac?'<div class="prf" style="height:6px;background:#FF6B6B;border-radius:3px;width:100%"></div>':pbarHTML(x.pct_consumido,urgC(x.dias_vence))}<span style="font-size:.6rem;color:var(--mut)">${pctBar}%</span></td>
       <td>${diasVenceLabel}</td>
     </tr>`;
-  }).join('')||`<tr><td colspan="14" style="text-align:center;padding:2rem;color:var(--mut)">Sin resultados</td></tr>`;
+  }).join('')||`<tr><td colspan="15" style="text-align:center;padding:2rem;color:var(--mut)">Sin resultados</td></tr>`;
 
   const esFiltPerdido=vgRelF==='Perdido';
   const nActivosMostrados=d.filter(x=>!x._es_perdido_fac).length;

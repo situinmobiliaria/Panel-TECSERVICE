@@ -25,7 +25,6 @@ import pandas as pd
 DIR  = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(DIR)
 XLSX      = os.path.join(ROOT, "data", "CONTRATOS -FACTURACION -SATISFACCION -VISITAS.xlsx")
-XLSX_MAPA = os.path.join(ROOT, "Base Mapa.xlsx")
 TMPL = os.path.join(DIR, "template.html")
 OUT  = os.path.join(DIR, "dashboard_contratos_v16.2.html")
 
@@ -135,11 +134,17 @@ def read_contratos(wb):
         # Billing flags per month (columns N–Y = indices 13–24)
         fact_flags = [bool(row[13 + m]) for m in range(12)]
 
-        val_mes   = to_float(row[27])   # AB: Facturación Neta Mes convertido
-        val_anual = to_float(row[29])   # AD: Facturación Anual Esperada 2026
+        val_mes   = to_float(row[27])   # AC: Facturación Neta Mes convertido
+        val_anual = to_float(row[29])   # AE: Facturación Anual Esperada 2026
+        if val_anual == 0:
+            nm = to_float(row[28])
+            val_anual = val_mes * nm if nm >= 1 else val_mes  # fallback si col AE vacía
         real_ytd  = to_float(row[32])   # AG: Facturación Contratos 2026 YTD
         real_2025 = to_float(row[33])   # AH
         real_2024 = to_float(row[34])   # AI
+        # AJ (idx 35): tipo de programa (Basic/Advanced/Profesional/Integral Care Program)
+        prog_raw  = row[35] if len(row) > 35 else None
+        programa  = safe_str(prog_raw).replace('​','').strip() if prog_raw else ""
 
         dias_vence    = (fecha_fin - TODAY).days
         long_dias     = max(1, (fecha_fin - fecha_inicio).days)
@@ -168,6 +173,7 @@ def read_contratos(wb):
             "pct_consumido": pct_consumido,
             "es_nuevo":     tpo_activo <= 90,
             "estado":       estado,
+            "programa":     programa,
             "dias_inicio_cli": tpo_activo,
         })
 
@@ -996,64 +1002,185 @@ def read_analisis_fac(wb):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 6. HOJA: BASE MAPA (Base Mapa.xlsx — hoja "Resumen Clientes")
+# 6. HOJA: BASE MAPA (hoja "BASE MAPA" del Excel principal)
 #    Columnas (0-based):
-#    0=Cliente  1=TipoCliente  2=Ingreso  3=Correctivo  5=Preventivo
-#    12=BI  14-21=Equipos  22=Región  23=Comuna  25=Contratos
-#    30=Pipeline  31=Lat  32=Lon  33=ConContrato  35=Margen
-#    36=Satisfaccion  37=PotPipe  38=PotEq  39=PotTotal
+#    0=NombreCliente  1=TipoCliente  2=Ingresos2025  3=Ingresos2026  4=BiTotal
+#    6=EqEster  7=EqDental  8=EqEndo  9=EqIncardia  10=EqMMQ  11=EqREAS
+#    12=EqMobClin  13=EqMobOtros
+#    14=Región  15=Comuna
+#    17=PipeEster  18=PipeEndo  19=PipeDental
+#    20=PotencialEquipos  21=PotSTGarantía  22=PotContratosBIActual
+#    23=PotSTTotal  24=Latitud  25=Longitud  26=Contrato(Sí/No)
+#    contratos y sat se enriquecen en enrich_mapa_data(); cc viene directo de col AA
 # ══════════════════════════════════════════════════════════════════════════════
-def read_mapa():
-    if not os.path.exists(XLSX_MAPA):
-        print(f"  ADVERTENCIA: No se encontro Base Mapa.xlsx en {XLSX_MAPA}")
+def read_mapa(wb):
+    ws = None
+    for name in wb.sheetnames:
+        if name.strip().upper() == "BASE MAPA":
+            ws = wb[name]
+            break
+    if ws is None:
+        print("  ADVERTENCIA: no se encontró la hoja 'BASE MAPA' en el Excel.")
         return []
-    wb = openpyxl.load_workbook(XLSX_MAPA, read_only=True, data_only=True)
-    ws = wb["Resumen Clientes"]
     clientes = []
     for row in ws.iter_rows(min_row=2, values_only=True):
         nombre = safe_str(row[0])
         if not nombre:
             continue
-        lat = to_float(row[31], None)
-        lon = to_float(row[32], None)
-        if lat is None or lon is None:
+        lat = to_float(row[24], None)   # col Y
+        lon = to_float(row[25], None)   # col Z
+        if lat is None or lon is None or lat == 0 or lon == 0:
             continue
-        region_raw = safe_str(row[22])
+        region_raw = safe_str(row[14])
         region = region_raw.replace("Región ", "").replace("Region ", "").strip()
+
+        # Potencial Equipos (col U) = sum pipeline por línea (R+S+T)
+        pot_eq_ester  = to_int(row[17])   # col R: Pipeline Esterilización
+        pot_eq_endo   = to_int(row[18])   # col S: Pipeline Endoscopía
+        pot_eq_dental = to_int(row[19])   # col T: Pipeline Dental
+        pot_eq        = to_int(row[20])   # col U: Potencial Equipos total
+
+        # Potencial ST (col V + col W; col X = total precalculado)
+        pot_st_gar   = to_int(row[21])   # col V: Potencial ST Garantía
+        pot_st_contr = to_int(row[22])   # col W: Potencial Contratos sobre BI Actual
+        pot_st       = to_int(row[23])   # col X: Potencial ST Total (directo del Excel)
+        if pot_st == 0:
+            pot_st = pot_st_gar + pot_st_contr  # fallback si col X está vacía
+
+        # Contrato (col AA = index 26): fuente autorativa desde Excel
+        cc_raw = safe_str(row[26]).strip().upper() if len(row) > 26 and row[26] is not None else ""
+        cc = cc_raw in ("SI", "SÍ", "S", "1", "TRUE", "VERDADERO", "X")
+
+        # Satisfacción (col AB = index 27): escala 1–5, 0 = sin dato
+        sat_raw = row[27] if len(row) > 27 else None
+        sat = None
+        if sat_raw is not None:
+            try:
+                sat_val = int(float(sat_raw))
+                sat = sat_val if 1 <= sat_val <= 5 else None
+            except Exception:
+                sat = None
+
         eq = {
-            "Esterilización": to_int(row[14]),
-            "Dental":         to_int(row[15]),
-            "Endoscopía":     to_int(row[16]),
-            "Incardia":       to_int(row[17]),
-            "MMQ":            to_int(row[18]),
-            "REAS":           to_int(row[19]),
-            "Mob.Clínico":    to_int(row[20]),
-            "Mob.Otros":      to_int(row[21]),
+            "Esterilización": to_int(row[6]),
+            "Dental":         to_int(row[7]),
+            "Endoscopía":     to_int(row[8]),
+            "Incardia":       to_int(row[9]),
+            "MMQ":            to_int(row[10]),
+            "REAS":           to_int(row[11]),
+            "Mob.Clínico":    to_int(row[12]),
+            "Mob.Otros":      to_int(row[13]),
         }
-        cc_raw = safe_str(row[33]).upper()
         clientes.append({
-            "n":         nombre,
-            "tipo":      safe_str(row[1]),
-            "ingreso":   to_int(row[2]),
-            "correctivo": to_int(row[3]),
-            "preventivo": to_int(row[5]),
-            "bi":        to_int(row[12]),
-            "eq":        eq,
-            "region":    region,
-            "comuna":    safe_str(row[23]),
-            "contratos": to_int(row[25]),
-            "pipe":      to_int(row[30]),
-            "lat":       round(lat, 7),
-            "lon":       round(lon, 7),
-            "cc":        cc_raw in ("SI", "SÍ", "S", "1", "TRUE", "VERDADERO"),
-            "margen":    to_int(row[35]),
-            "sat":       to_float(row[36]) if row[36] is not None else None,
-            "pot_pipe":  to_int(row[37]),
-            "pot_eq":    to_int(row[38]),
-            "pot":       to_int(row[39]),
+            "n":            nombre,
+            "tipo":         safe_str(row[1]),
+            "ingreso_2025": to_int(row[2]),    # col C
+            "ingreso_2026": to_int(row[3]),    # col D
+            "ingreso":      to_int(row[3]),    # alias 2026
+            "bi":           to_int(row[4]),    # BI Total (equipos con pot. ST)
+            "eq":           eq,
+            "region":       region,
+            "comuna":       safe_str(row[15]),
+            "contratos":    0,                 # enrich_mapa_data
+            "pipe":         pot_eq,
+            "lat":          round(lat, 7),
+            "lon":          round(lon, 7),
+            "cc":           cc,                # desde col AA del Excel
+            "margen":       0,
+            "sat":          sat,               # desde col AB del Excel
+            "pot_eq":       pot_eq,
+            "pot_eq_ester": pot_eq_ester,
+            "pot_eq_endo":  pot_eq_endo,
+            "pot_eq_dental": pot_eq_dental,
+            "pot_st":       pot_st,
+            "pot_st_gar":   pot_st_gar,
+            "pot_st_contr": pot_st_contr,
+            "pot":          pot_eq + pot_st,
         })
-    wb.close()
     return clientes
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6b. HOJA: CASOS RELEVANTES
+#     Dos tablas lado a lado:
+#     Tabla izquierda A-F (cols 0-5): Casos Relevantes
+#     Tabla derecha   J-T (cols 9-19): Equipos Detenidos
+# ══════════════════════════════════════════════════════════════════════════════
+def read_casos(wb):
+    ws = None
+    for name in wb.sheetnames:
+        if "caso" in name.lower() and "relevante" in name.lower():
+            ws = wb[name]
+            break
+    if ws is None:
+        return {"casos": [], "equipos": []}
+
+    casos   = []
+    equipos = []
+    last_coord = ""
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        # Forward-fill coordinador (puede estar en celdas combinadas)
+        coord_cell = safe_str(row[0]) if len(row) > 0 and row[0] else ""
+        if coord_cell:
+            last_coord = coord_cell
+
+        # Tabla izquierda: fila de caso si hay cliente (col B = índice 1)
+        cliente = safe_str(row[1]) if len(row) > 1 and row[1] else ""
+        if cliente:
+            casos.append({
+                "coordinador": last_coord,
+                "cliente":     cliente,
+                "problema":    safe_str(row[2]) if len(row) > 2 else "",
+                "responsable": safe_str(row[3]) if len(row) > 3 else "",
+                "comentario":  safe_str(row[4]) if len(row) > 4 else "",
+                "salesforce":  safe_str(row[5]) if len(row) > 5 else "",
+            })
+
+        # Tabla derecha: fila de equipo si hay modelo (col J = índice 9)
+        modelo = safe_str(row[9]) if len(row) > 9 and row[9] else ""
+        if modelo:
+            equipos.append({
+                "modelo":           modelo,
+                "nombre":           safe_str(row[11]) if len(row) > 11 else "",
+                "serie":            safe_str(str(row[12])) if len(row) > 12 and row[12] else "",
+                "marca":            safe_str(row[13]) if len(row) > 13 else "",
+                "estado":           safe_str(row[14]) if len(row) > 14 else "",
+                "coordinadora":     safe_str(row[15]) if len(row) > 15 else "",
+                "comentario_coord": safe_str(row[16]) if len(row) > 16 else "",
+                "comentario_mat":   safe_str(row[17]) if len(row) > 17 else "",
+                "contrato_num":     safe_str(str(row[18])) if len(row) > 18 and row[18] else "",
+                "garantia":         safe_str(row[19]) if len(row) > 19 else "",
+            })
+
+    return {"casos": casos, "equipos": equipos}
+
+
+def enrich_mapa_data(mapa_data, contratos, satisf):
+    """Agrega conteo de contratos activos y satisfacción. cc ya viene del Excel."""
+    active_by_cli = {}
+    for c in contratos:
+        if c["estado"] != "Activado":
+            continue
+        cli = c["cliente"].upper().strip()
+        active_by_cli[cli] = active_by_cli.get(cli, 0) + 1
+
+    # Satisfacción: calidad 0–7 → escala 1–5
+    sat_by_inst = {}
+    for inst in satisf.get("instituciones", []):
+        key = inst["institucion"].upper().strip()
+        cal = inst.get("calidad", 0)
+        if cal and cal > 0:
+            sat_by_inst[key] = round(1 + (cal / 7) * 4, 1)
+
+    for c in mapa_data:
+        cli = c["n"].upper().strip()
+        c["contratos"] = active_by_cli.get(cli, 0)
+        # cc ya viene de col AA — no se sobrescribe
+        # sat: si col AB tiene valor lo respeta; si es None usa el cruce con SATISFACCION
+        if c["sat"] is None:
+            c["sat"] = sat_by_inst.get(cli, None)
+
+    return mapa_data
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1253,7 +1380,7 @@ def build_data_arrays(contratos, panel_raw):
 # ══════════════════════════════════════════════════════════════════════════════
 # 8. PARCHEAR BLOQUE DATA/APP_DATA EN EL HTML TEMPLATE
 # ══════════════════════════════════════════════════════════════════════════════
-def patch_html(html, data, app_data, mapa_data=None):
+def patch_html(html, data, app_data, mapa_data=None, casos_data=None):
     """Reemplaza el bloque <script>...const DATA=...;window.APP_DATA=...;</script>"""
     # Buscar "const DATA=" (con o sin espacio) y su bloque <script> contenedor
     data_idx = html.find("const DATA=")
@@ -1286,13 +1413,15 @@ def patch_html(html, data, app_data, mapa_data=None):
     mes_nombre = _MESES[app_data["mes_corte"] - 1].upper()
     ano = app_data.get("hoy", "")[:4]
 
-    mapa_json = json.dumps(mapa_data or [], ensure_ascii=False)
+    mapa_json  = json.dumps(mapa_data  or [], ensure_ascii=False)
+    casos_json = json.dumps(casos_data or {"casos": [], "equipos": []}, ensure_ascii=False)
     new_block = (
         "<script>\n"
         f"const DATA = {json.dumps(data, ensure_ascii=False)};\n\n"
         f"// ═══ DATOS ACTUALIZADOS A {mes_nombre} {ano} ═══\n"
         f"window.APP_DATA = {json.dumps(app_data, ensure_ascii=False)};\n"
         f"window.MAPA_DATA = {mapa_json};\n"
+        f"window.CASOS_DATA = {casos_json};\n"
         "</script>"
     )
     return html[:script_start] + new_block + html[script_end + 9:]
@@ -1376,20 +1505,20 @@ def main():
         return
 
     # ── Leer hojas simples con openpyxl ──────────────────────────────────────
-    print("\n[1/6] Abriendo Excel con openpyxl...")
+    print("\n[1/5] Abriendo Excel con openpyxl...")
     wb = openpyxl.load_workbook(XLSX, read_only=True, data_only=True)
 
-    print("[2/6] Leyendo CONTRATOS TODOS...")
+    print("[2/5] Leyendo CONTRATOS TODOS...")
     contratos = read_contratos(wb)
     activos   = [c for c in contratos if c["estado"] == "Activado"]
     expirados = [c for c in contratos if c["estado"] != "Activado"]
     print(f"       {len(activos)} activos | {len(expirados)} expirados/otros")
 
-    print("[3/6] Leyendo FACTURACION...")
+    print("[3/5] Leyendo FACTURACION...")
     panel_raw = read_facturacion(wb)
     print(f"       {len(panel_raw)} clientes en panel")
 
-    print("[4/6] Leyendo VISITAS y SATISFACCION...")
+    print("[4/5] Leyendo VISITAS, SATISFACCION y BASE MAPA...")
     # Necesitamos mes_corte antes de procesar visitas; hacemos un pase rápido
     # leyendo BBDD primero (lo haremos abajo) — usamos mes=MES_CORTE provisional
     satisf = read_satisfaccion(wb)
@@ -1397,7 +1526,7 @@ def main():
     print(f"       Satisfaccion: {satisf['global']['n']} respuestas | NPS {satisf['nps']['nps']:+}")
 
     # ── Leer BBDD FACTURACION con pandas ─────────────────────────────────────
-    print("[5/6] Leyendo BBDD FACTURACION...")
+    print("[5/5] Leyendo BBDD FACTURACION...")
     bbdd      = read_bbdd(XLSX)
     mes_corte = bbdd["mes_corte"]
     print(f"       MES_CORTE detectado automaticamente: {mes_corte}")
@@ -1407,6 +1536,8 @@ def main():
     visitas = read_visitas(wb2, mes_corte)
     analisis_fac = read_analisis_fac(wb2)
     base_instalada = read_base_instalada(wb2)
+    mapa_data  = read_mapa(wb2)
+    casos_data = read_casos(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -1414,24 +1545,26 @@ def main():
     ts_ytd = analisis_fac.get("ts_total_ytd", 0)
     ts_ing = analisis_fac.get("ts_ingresos", 0)
     print(f"       Analisis Fac: Ingresos TS MM${ts_ing/1e6:.1f} | Total YTD MM${ts_ytd/1e6:.1f}")
+    print(f"       BASE MAPA: {len(mapa_data)} clientes con coordenadas")
 
     # ── Construir estructuras de datos ───────────────────────────────────────
-    print("[6/7] Construyendo estructuras de datos...")
+    print("[6/6] Construyendo estructuras de datos...")
     app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada)
     data, nc_data, perdidos = build_data_arrays(contratos, panel_raw)
     total_com_val = sum(d["val"] for d in data if d["tipo"] == "Comercial")
-    print(f"       DATA: {len(data)} contratos | Cartera COM: MM${total_com_val/1e6:.1f}")
+    total_gar_val = sum(d["val"] for d in data if d["tipo"] == "Garantia")
+    print(f"       DATA: {len(data)} contratos | Cartera COM: MM${total_com_val/1e6:.1f} | GAR: MM${total_gar_val/1e6:.1f} | Total: MM${(total_com_val+total_gar_val)/1e6:.1f}")
     print(f"       NC_DATA: {len(nc_data)} nuevos | PERDIDOS: {len(perdidos)}")
-
-    print("[7/7] Leyendo Base Mapa (MAPA_DATA)...")
-    mapa_data = read_mapa()
-    print(f"       {len(mapa_data)} clientes cargados desde Base Mapa.xlsx")
+    enrich_mapa_data(mapa_data, contratos, satisf)
+    cc_count = sum(1 for c in mapa_data if c["cc"])
+    print(f"       MAPA_DATA: {len(mapa_data)} clientes | {cc_count} con contrato")
+    print(f"       CASOS: {len(casos_data['casos'])} casos relevantes | {len(casos_data['equipos'])} equipos detenidos")
 
     # ── Parchear template.html (fuente de build.ps1) ─────────────────────────
     print("\nParcheando template.html...")
     with open(TMPL, encoding="utf-8") as f:
         html = f.read()
-    html = patch_html(html, data, app_data, mapa_data)
+    html = patch_html(html, data, app_data, mapa_data, casos_data)
     with open(TMPL, "w", encoding="utf-8") as f:
         f.write(html)
     print("  Actualizado: template.html")
@@ -1462,6 +1595,8 @@ def main():
     print(f"  Contratos activos : {len(data)}")
     print(f"  Clientes panel    : {len(app_data['panel'])}")
     print(f"  Cartera COM       : MM${total_com_val/1e6:.1f}")
+    print(f"  Cartera GAR       : MM${total_gar_val/1e6:.1f}")
+    print(f"  Cartera Total     : MM${(total_com_val+total_gar_val)/1e6:.1f}")
     print()
     print("  SIGUIENTE PASO:")
     print(r"  cd src && .\build.ps1")
