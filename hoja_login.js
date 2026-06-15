@@ -14,7 +14,8 @@ const ALLOWED=new Set([
   'marcelo.ruminot@tecservice.cl','alexis.flores@gemco.cl',
   'cristian.valenzuela@aspencapital.cl','ignacio.cargioli@aspencapital.cl',
   'cristobal.munoz@aspencapital.cl','rafael.vergara@gemco.cl',
-  'rafael.vergara@aspencapital.cl'
+  'rafael.vergara@aspencapital.cl',
+  'cristian.valenzuela@situ.cl'
 ]);
 let _otp=null,_otpEmail=null,_otpExpiry=null,_otpTimer=null;
 
@@ -40,7 +41,9 @@ async function sendOtp(){
     document.getElementById('lg-otp').focus();
     startOtpTimer();
   }catch(e){
-    errEl.textContent='Error al enviar el correo. Intenta nuevamente.';
+    console.error('EmailJS error:', e);
+    const detail = e && (e.text || e.message || JSON.stringify(e));
+    errEl.textContent='Error al enviar el correo: ' + (detail || 'revisa la consola del navegador (F12).');
     btn.disabled=false;btn.textContent='Enviar código';_otp=null;
   }
 }
