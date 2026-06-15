@@ -83,7 +83,7 @@ function _casosHTML() {
       </div>
     </div>
     <div style="overflow-x:auto">
-      <table class="tbl" id="cas-table2" style="min-width:1100px">
+      <table class="tbl" id="cas-table2" style="min-width:1800px">
         <thead><tr>
           <th style="min-width:120px">Modelo</th>
           <th style="min-width:200px">Nombre Activo</th>
@@ -95,6 +95,11 @@ function _casosHTML() {
           <th style="min-width:200px">Comentario Matilde</th>
           <th style="min-width:90px">N° Contrato</th>
           <th style="min-width:120px">Estado Garantía</th>
+          <th style="min-width:200px">Nombre Cliente</th>
+          <th style="min-width:105px">Fact. Anual</th>
+          <th style="min-width:90px">Inicio</th>
+          <th style="min-width:90px">Vigencia</th>
+          <th style="min-width:75px">% Cartera</th>
         </tr></thead>
         <tbody id="cas-tbody2"></tbody>
       </table>
@@ -195,6 +200,16 @@ function renderCasos() {
       .toLowerCase().includes(busq);
   });
 
+  // ── Lookup NC_DATA por número de contrato ────────────────────
+  const _ncMap = {};
+  let _totalPortfolio = 0;
+  if (typeof NC_DATA !== 'undefined') {
+    NC_DATA.forEach(c => {
+      _ncMap[c.n] = c;
+      _totalPortfolio += (c.val || 0);
+    });
+  }
+
   const tbody2 = document.getElementById('cas-tbody2');
   if (tbody2) {
     tbody2.innerHTML = eqFilt.map(e => {
@@ -208,6 +223,33 @@ function renderCasos() {
       const contrNum = e.contrato_num
         ? `<span class="pill pte" style="font-size:.52rem;font-family:'Roboto Mono',monospace">${_escH(e.contrato_num)}</span>`
         : '<span style="color:var(--mut);font-size:.6rem">—</span>';
+
+      // ── Cruce con NC_DATA ──────────────────────────────────────
+      const _nc = _ncMap[e.contrato_num] || null;
+      const _facAnual = _nc && _nc.long_dias > 0
+        ? _nc.val / (_nc.long_dias / 365)
+        : null;
+      const _pctCartera = _nc && _totalPortfolio > 0
+        ? (_nc.val / _totalPortfolio * 100)
+        : null;
+      const _fmtM = v => 'MM$' + (v / 1e6).toFixed(1).replace('.', ',');
+
+      const _clienteCell = _nc
+        ? `<strong style="font-size:.62rem">${_escH(_nc.cliente)}</strong>`
+        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
+      const _facCell = _facAnual !== null
+        ? `<span style="font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM(_facAnual)}</span>`
+        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
+      const _inicioCell = _nc
+        ? `<span style="font-size:.6rem;font-family:'Roboto Mono',monospace">${_escH(_nc.inicio_fmt)}</span>`
+        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
+      const _vigCell = _nc
+        ? `<span style="font-size:.6rem;font-family:'Roboto Mono',monospace">${_escH(_nc.fin_fmt)}</span>`
+        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
+      const _pctCell = _pctCartera !== null
+        ? `<span class="pill" style="font-size:.52rem;background:rgba(30,100,255,.13);color:var(--az2);font-weight:700">${_pctCartera.toFixed(1).replace('.', ',')}%</span>`
+        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
+
       return `<tr>
         <td><strong style="font-size:.63rem;color:var(--am)">${_escH(e.modelo)}</strong></td>
         <td><span style="font-size:.63rem">${_escH(e.nombre)}</span></td>
@@ -227,6 +269,11 @@ function renderCasos() {
         </td>
         <td style="text-align:center">${contrNum}</td>
         <td style="text-align:center">${garBadge}</td>
+        <td>${_clienteCell}</td>
+        <td style="text-align:right">${_facCell}</td>
+        <td style="text-align:center">${_inicioCell}</td>
+        <td style="text-align:center">${_vigCell}</td>
+        <td style="text-align:center">${_pctCell}</td>
       </tr>`;
     }).join('');
   }
