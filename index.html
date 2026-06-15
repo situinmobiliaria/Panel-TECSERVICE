@@ -1114,6 +1114,14 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
         <button class="btn" data-vrf="Renovado" title="19 clientes únicos (Tipos de Contrato)">🔄 Renovados</button>
         <button class="btn" data-vrf="Perdido" title="21 clientes perdidos (Tipos de Contrato)">📉 Perdidos</button>
       </div>
+      <div class="btn-g" id="vg-prog-filt">
+        <span class="ctrl-lbl">Programa:</span>
+        <button class="btn on" data-vpf="todos">Todos</button>
+        <button class="btn" data-vpf="ADVANCED CARE PROGRAM">Advanced Care</button>
+        <button class="btn" data-vpf="PROFESSIONAL CARE">Professional Care</button>
+        <button class="btn" data-vpf="BASIC CARE PROGRAM">Basic Care</button>
+        <button class="btn" data-vpf="">Sin programa</button>
+      </div>
       <div style="flex:1;min-width:150px">
         <input class="search-inp" id="vg-srch" placeholder="🔍 Buscar cliente o coordinadora...">
       </div>
@@ -1153,6 +1161,8 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="vgSortCol('coord')">Coordinadora ↕</th>
           <th>Tipo</th>
           <th>Programa</th>
+          <th>% Margen</th>
+          <th>Margen MM$</th>
           <th>Relación</th>
           <th>🆕</th>
           <th>Inicio</th>
@@ -1165,13 +1175,72 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="vgSortCol('dias_vence')">Días rest. ↕</th>
         </tr></thead>
         <tbody id="tb-vg"></tbody>
-<tfoot><tr id="tfoot-vg"><td class="flab" colspan="15" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-vg"><td class="flab" colspan="17" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
       </table>
     </div>
     <div style="padding:.55rem .95rem;background:var(--gy);border-top:1px solid var(--brd);
       display:flex;justify-content:space-between">
       <span id="vg-ftl" style="font-size:.65rem;color:var(--mut)"></span>
       <span id="vg-ftr" style="font-family:'Roboto Mono',monospace;font-weight:700;color:var(--az1);font-size:.82rem"></span>
+    </div>
+  </div>
+
+  <!-- ── Descripciones de Programas ───────────────────────────── -->
+  <div class="card" style="margin-top:.9rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(30,90,200,.13),rgba(30,90,200,.04))">
+      <span class="ct">¿Qué incluye cada Programa de Servicio?</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;padding:.85rem .9rem">
+      <div style="border:1px solid var(--brd);border-radius:8px;padding:.75rem;border-top:3px solid #1565C0">
+        <div style="font-weight:800;font-size:.72rem;color:#1565C0;margin-bottom:.35rem">BASIC CARE PROGRAM</div>
+        <div style="font-size:.62rem;color:var(--mut);margin-bottom:.5rem">Margen objetivo: <strong style="color:#1565C0">55%</strong></div>
+        <ul style="font-size:.62rem;color:var(--txt);line-height:1.7;margin:0;padding-left:1rem">
+          <li>Mantenimientos preventivos <strong>gratis</strong></li>
+          <li>En hasta 4 servicios correctivos, la <strong>mano de obra es gratis</strong></li>
+          <li>Repuestos con costo</li>
+        </ul>
+      </div>
+      <div style="border:1px solid var(--brd);border-radius:8px;padding:.75rem;border-top:3px solid #F59E0B">
+        <div style="font-weight:800;font-size:.72rem;color:#B45309;margin-bottom:.35rem">PROFESSIONAL CARE</div>
+        <div style="font-size:.62rem;color:var(--mut);margin-bottom:.5rem">Margen objetivo: <strong style="color:#B45309">65%</strong></div>
+        <ul style="font-size:.62rem;color:var(--txt);line-height:1.7;margin:0;padding-left:1rem">
+          <li>Mantenimientos preventivos <strong>gratis</strong></li>
+          <li><strong>Horas técnico gratis</strong> en correctivos</li>
+          <li>Repuestos con costo</li>
+        </ul>
+      </div>
+      <div style="border:1px solid var(--brd);border-radius:8px;padding:.75rem;border-top:3px solid #059669">
+        <div style="font-weight:800;font-size:.72rem;color:#065F46;margin-bottom:.35rem">ADVANCED CARE PROGRAM</div>
+        <div style="font-size:.62rem;color:var(--mut);margin-bottom:.5rem">Margen objetivo: <strong style="color:#065F46">60%</strong></div>
+        <ul style="font-size:.62rem;color:var(--txt);line-height:1.7;margin:0;padding-left:1rem">
+          <li>Mantenimientos preventivos <strong>gratis</strong></li>
+          <li><strong>Horas técnico gratis</strong> en correctivos</li>
+          <li><strong>Bolsa de repuestos incluida</strong></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Resumen por Programa ──────────────────────────────────── -->
+  <div class="card" style="margin-top:.75rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(30,90,200,.13),rgba(30,90,200,.04))">
+      <span class="ct">Resumen por Programa</span>
+      <span style="font-size:.58rem;color:var(--mut);margin-left:auto" id="vg-prog-note">Según filtros activos</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="tb-vg-prog">
+        <thead><tr>
+          <th>Programa</th>
+          <th style="text-align:center">Contratos</th>
+          <th style="text-align:right">Fact. Anual Total</th>
+          <th style="text-align:right">Fact. Anual Prom.</th>
+          <th style="text-align:center">Duración Prom.</th>
+          <th style="text-align:center">% Margen</th>
+          <th style="text-align:right">Margen Total</th>
+          <th style="text-align:right">Margen Prom.</th>
+        </tr></thead>
+        <tbody id="tb-vg-prog-body"></tbody>
+      </table>
     </div>
   </div>
 </div>
@@ -3343,6 +3412,8 @@ function renderSemaforo(){
 
 let vgSortF='val', vgFilt='todos', vgRelF='todos', vgSrch='', vgSortA=false;
 let vgSortCF='', vgSortCA=true;
+let vgProgF='todos';
+const PROG_MARGIN={'ADVANCED CARE PROGRAM':0.60,'PROFESSIONAL CARE':0.65,'BASIC CARE PROGRAM':0.55};
 
 function _getRel(cli){
   const r=DATA.find(d=>d.cliente===cli);
@@ -3363,6 +3434,7 @@ function vgData(){
     if(vgRelF!=='todos')d=d.filter(x=>(x.estado_relacion||'N/D')===vgRelF);
   }
   if(vgSrch)d=d.filter(x=>x.cliente.toLowerCase().includes(vgSrch)||x.coord.toLowerCase().includes(vgSrch));
+  if(vgProgF!=='todos')d=d.filter(x=>(x.programa||'')===vgProgF);
   if(window.vgCliFilter)d=d.filter(x=>x.cliente.toLowerCase().includes(vgCliFilter.toLowerCase()));
   d.sort((a,b)=>{
     if(vgSortCF){let va=a[vgSortCF],vb=b[vgSortCF];if(typeof va==='string'){va=va.toLowerCase();vb=vb.toLowerCase();}return vgSortCA?(va>vb?1:-1):(va<vb?1:-1);}
@@ -3402,6 +3474,8 @@ function renderVG(){
       <td style="font-size:.62rem;color:var(--mut)">${shortC(x.coord)}</td>
       <td>${esPerdidoFac?'<span style="font-size:.6rem;color:var(--mut)">Expirado</span>':tipoBadge(x.tipo)}</td>
       <td style="text-align:center">${esPerdidoFac?'—':_progBadge(x.programa||'')}</td>
+      <td style="text-align:center;font-family:'Roboto Mono',monospace;font-size:.63rem;font-weight:700;color:${(()=>{const p=PROG_MARGIN[x.programa||''];return p===0.65?'#B45309':p===0.60?'#065F46':'#1565C0';})()}">${(()=>{const p=PROG_MARGIN[x.programa||''];return p?Math.round(p*100)+'%':'—';})()}</td>
+      <td style="text-align:right;font-size:.63rem;font-weight:700;color:var(--teal)">${(()=>{const p=PROG_MARGIN[x.programa||''];if(!p||!x.val||esPerdidoFac)return'—';const fa=x.long_dias>0?x.val/(x.long_dias/365):x.val;return mm(fa*p);})()}</td>
       <td><span style="background:${relCol};color:#fff;padding:.14rem .35rem;border-radius:3px;font-size:.55rem;font-weight:700;white-space:nowrap" title="${rel}">${relIco} ${rel}</span></td>
       <td>${esPerdidoFac?'—':nueBadge(x.es_nuevo)}</td>
       <td style="font-size:.67rem">${x.inicio_fmt}</td>
@@ -3414,6 +3488,54 @@ function renderVG(){
       <td>${diasVenceLabel}</td>
     </tr>`;
   }).join('')||`<tr><td colspan="15" style="text-align:center;padding:2rem;color:var(--mut)">Sin resultados</td></tr>`;
+
+  // ── Resumen por programa ────────────────────────────────────
+  const progKeys=['ADVANCED CARE PROGRAM','PROFESSIONAL CARE','BASIC CARE PROGRAM',''];
+  const progLabels={'ADVANCED CARE PROGRAM':'Advanced Care Program','PROFESSIONAL CARE':'Professional Care','BASIC CARE PROGRAM':'Basic Care Program','':'Sin programa'};
+  const progColors={'ADVANCED CARE PROGRAM':'#065F46','PROFESSIONAL CARE':'#B45309','BASIC CARE PROGRAM':'#1565C0','':'#888'};
+  const progByKey={};
+  progKeys.forEach(k=>progByKey[k]={n:0,fa:0});
+  d.filter(x=>!x._es_perdido_fac).forEach(x=>{
+    const k=x.programa||'';
+    if(!progByKey[k])progByKey[k]={n:0,fa:0};
+    progByKey[k].n++;
+    const fa=x.long_dias>0?x.val/(x.long_dias/365):x.val;
+    progByKey[k].fa+=fa;
+  });
+  const progBody=document.getElementById('tb-vg-prog-body');
+  if(progBody){
+    const rows=progKeys.filter(k=>progByKey[k]&&progByKey[k].n>0).map(k=>{
+      const g=progByKey[k]; const mg=PROG_MARGIN[k]||null;
+      const prom=g.n>0?g.fa/g.n:0;
+      const margenT=mg?g.fa*mg:null; const margenP=mg&&g.n>0?prom*mg:null;
+      const col=progColors[k]||'#888';
+      return `<tr>
+        <td><strong style="font-size:.67rem;color:${col}">${progLabels[k]}</strong></td>
+        <td style="text-align:center;font-weight:700">${g.n}</td>
+        <td style="text-align:right;font-weight:700;color:var(--az2)">${mm(g.fa)}</td>
+        <td style="text-align:right;color:var(--mut)">${mm(prom)}</td>
+        <td style="text-align:center;color:var(--mut)">—</td>
+        <td style="text-align:center;font-weight:700;color:${col}">${mg?Math.round(mg*100)+'%':'—'}</td>
+        <td style="text-align:right;font-weight:700;color:var(--teal)">${margenT?mm(margenT):'—'}</td>
+        <td style="text-align:right;color:var(--mut)">${margenP?mm(margenP):'—'}</td>
+      </tr>`;
+    });
+    // Fila de totales
+    const totalN=Object.values(progByKey).reduce((s,v)=>s+v.n,0);
+    const totalFa=Object.values(progByKey).reduce((s,v)=>s+v.fa,0);
+    const totalMg=progKeys.reduce((s,k)=>{const g=progByKey[k];const mg=PROG_MARGIN[k];return s+(g&&mg?g.fa*mg:0);},0);
+    rows.push(`<tr style="background:rgba(30,90,200,.07);font-weight:800">
+      <td>TOTAL</td>
+      <td style="text-align:center">${totalN}</td>
+      <td style="text-align:right;color:var(--az2)">${mm(totalFa)}</td>
+      <td style="text-align:right;color:var(--mut)">${totalN?mm(totalFa/totalN):'—'}</td>
+      <td style="text-align:center">—</td>
+      <td style="text-align:center">—</td>
+      <td style="text-align:right;color:var(--teal)">${mm(totalMg)}</td>
+      <td style="text-align:right;color:var(--mut)">${totalN?mm(totalMg/totalN):'—'}</td>
+    </tr>`);
+    progBody.innerHTML=rows.join('');
+  }
 
   const esFiltPerdido=vgRelF==='Perdido';
   const nActivosMostrados=d.filter(x=>!x._es_perdido_fac).length;
@@ -3436,6 +3558,7 @@ function initVision(){
   document.querySelectorAll('#vg-filt .btn').forEach(b=>{b.addEventListener('click',()=>{vgFilt=b.dataset.vf;document.querySelectorAll('#vg-filt .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
   document.querySelectorAll('#vg-rel-filt .btn').forEach(b=>{b.addEventListener('click',()=>{vgRelF=b.dataset.vrf;document.querySelectorAll('#vg-rel-filt .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
   document.getElementById('vg-srch').oninput=e=>{vgSrch=e.target.value.toLowerCase();renderVG();};
+  document.querySelectorAll('#vg-prog-filt .btn').forEach(b=>{b.addEventListener('click',()=>{vgProgF=b.dataset.vpf;document.querySelectorAll('#vg-prog-filt .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
   renderVG();
 }
 </script>
@@ -7349,7 +7472,11 @@ function renderCasos() {
   const _ncMap = {};
   let _totalPortfolio = 0;
   if (typeof NC_DATA !== 'undefined') {
-    NC_DATA.forEach(c => { _ncMap[c.n] = c; _totalPortfolio += (c.val || 0); });
+    NC_DATA.forEach(c => {
+      _ncMap[c.n] = c;
+      _ncMap[String(parseInt(c.n, 10))] = c;
+      _totalPortfolio += (c.val || 0);
+    });
   }
 
   const tbody2 = document.getElementById('cas-tbody2');
