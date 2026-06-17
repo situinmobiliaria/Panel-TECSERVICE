@@ -139,7 +139,7 @@ function _mapaHTML(){
     <div style="overflow-x:auto">
       <table class="tbl" id="mp-reg-tbl">
         <thead><tr>
-          <th>Región</th><th>Clientes</th><th>Con Contrato</th>
+          <th>Región</th><th>Clientes</th><th>Con Contrato</th><th>% Contrato</th>
           <th>Equipos ST</th><th>Ingreso</th><th>Potencial Eq.</th><th>Potencial ST</th>
         </tr></thead>
         <tbody id="mp-reg-tbody"></tbody>
@@ -349,16 +349,31 @@ function _renderRegTable(){
     byR[c.region].bi+=c.bi;byR[c.region].ing+=_getIngreso(c);
     byR[c.region].pot_eq+=(c.pot_eq||0);byR[c.region].pot_st+=(c.pot_st||0);
   });
-  tbody.innerHTML=Object.entries(byR).sort((a,b)=>b[1].ing-a[1].ing).map(([reg,d])=>`
+  const sorted=Object.entries(byR).sort((a,b)=>b[1].ing-a[1].ing);
+  const tot={n:0,cc:0,bi:0,ing:0,pot_eq:0,pot_st:0};
+  sorted.forEach(([,d])=>{tot.n+=d.n;tot.cc+=d.cc;tot.bi+=d.bi;tot.ing+=d.ing;tot.pot_eq+=d.pot_eq;tot.pot_st+=d.pot_st;});
+  const pctFmt=d=>d.n>0?(d.cc/d.n*100).toFixed(0)+'%':'—';
+  tbody.innerHTML=sorted.map(([reg,d])=>`
     <tr>
       <td><strong>${reg}</strong></td>
       <td class="num">${d.n}</td>
       <td><span class="pill pte">${d.cc}</span> <span style="font-size:.57rem;color:var(--mut)">/ ${d.n}</span></td>
+      <td class="num" style="color:${d.cc/d.n>=0.5?'var(--teal)':'var(--mut)'}">${pctFmt(d)}</td>
       <td class="num">${d.bi}</td>
       <td class="num" style="color:var(--az2)">${_fMM(d.ing)}</td>
       <td class="num" style="color:var(--am)">${_fMM(d.pot_eq)}</td>
       <td class="num" style="color:var(--teal)">${_fMM(d.pot_st)}</td>
-    </tr>`).join('');
+    </tr>`).join('')+`
+    <tr style="background:rgba(30,90,200,.08);font-weight:800;border-top:2px solid var(--az2)">
+      <td><strong>TOTAL</strong></td>
+      <td class="num">${tot.n}</td>
+      <td class="num"><strong>${tot.cc}</strong> <span style="font-size:.57rem;color:var(--mut)">/ ${tot.n}</span></td>
+      <td class="num" style="color:var(--az2)">${pctFmt(tot)}</td>
+      <td class="num">${tot.bi}</td>
+      <td class="num" style="color:var(--az2)">${_fMM(tot.ing)}</td>
+      <td class="num" style="color:var(--am)">${_fMM(tot.pot_eq)}</td>
+      <td class="num" style="color:var(--teal)">${_fMM(tot.pot_st)}</td>
+    </tr>`;
 }
 
 /* ── POLÍGONO ── */
