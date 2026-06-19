@@ -101,6 +101,7 @@ function initFacturacion(){
   renderFcTipoCliente();
   renderFcAlertas();
   renderFcVsPpto();
+  renderFcVsPptoMensual();
 }
 
 function fcRefreshAll(){
@@ -115,6 +116,7 @@ function fcRefreshAll(){
   renderFcTipoCliente();
   renderFcAlertas();
   renderFcVsPpto();
+  renderFcVsPptoMensual();
 }
 
 function fcFilter(){
@@ -522,6 +524,60 @@ function renderFcGraficos(){
   const titM=document.getElementById('fc-mensual-tit');if(titM)titM.textContent=fcYrF==='todos'?'Comparativo mensual 2024-2026':'Año '+fcYrF+(fcYrF==='2026'?' (vs ppto)':'');
   const notaM=document.getElementById('fc-mensual-nota');
   if(notaM){if(fcYrF==='todos'){notaM.textContent='Facturación Servicio Técnico mes a mes · incluye provisiones · meses sin valor 2026 = pendientes';}else if(fcYrF==='2026'){notaM.textContent='Comparativo facturación real vs presupuesto contratos (línea naranja) · incluye provisiones';}else{notaM.textContent='Facturación Servicio Técnico del año '+fcYrF+' por mes · incluye provisiones';}}
+}
+
+// ─── GRÁFICOS MENSUALES VS PRESUPUESTO ───────────────────────
+let _chFcVspTotMen=null,_chFcVspConMen=null;
+function renderFcVsPptoMensual(){
+  const af=APP_DATA.analisis_fac||{};
+  const m=APP_DATA.mensual||{};
+  // Real mensual total (solo Facturas ST/REAS/Traz, misma fuente que KPIs)
+  const realMes=(m.facturado&&m.facturado['2026'])||Array(12).fill(0);
+  // Ppto mensual total desde GD-PPTO; fallback proporcional si no hay
+  const hasPpto=af.ppto_mensual&&af.ppto_mensual.some(v=>v>0);
+  const pptoMes=hasPpto?af.ppto_mensual:Array(12).fill(TOTAL_PRESUP/12);
+  // Real contratos mensual (estimado por ratio total)
+  const realConMes=m.contr_real||Array(12).fill(0);
+  // Ppto contratos = 50% ppto total mensual
+  const pptoConMes=pptoMes.map(v=>v*0.5);
+  // Acumulados
+  const acum=arr=>arr.reduce((a,v,i)=>{a.push((a[i-1]||0)+v);return a;},[]);
+  const realAcum=acum(realMes),pptoAcum=acum(pptoMes);
+  const realConAcum=acum(realConMes),pptoConAcum=acum(pptoConMes);
+
+  const barColor=(i)=>i<MES_CORTE?'rgba(40,210,195,.78)':'rgba(184,193,216,.28)';
+  const barConColor=(i)=>i<MES_CORTE?'rgba(40,210,195,.78)':'rgba(184,193,216,.28)';
+  const chartOpts=(yMax)=>({
+    responsive:true,maintainAspectRatio:false,
+    plugins:{
+      legend:{position:'bottom',labels:{boxWidth:10,font:{size:9},padding:8}},
+      tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${c.parsed.y.toFixed(1)}`}}
+    },
+    scales:{
+      x:{grid:{display:false},ticks:{font:{size:9}}},
+      y:{beginAtZero:true,position:'left',grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v,font:{size:9}}},
+      yA:{beginAtZero:true,position:'right',grid:{display:false},ticks:{callback:v=>'MM$'+v,font:{size:9}}}
+    }
+  });
+
+  const mkDatasets=(real,ppto,realAc,pptoAc,barFn)=>[
+    {label:'Real mensual',data:real.map(v=>v/1e6),backgroundColor:real.map((_,i)=>barFn(i)),borderRadius:4,order:3},
+    {label:'Ppto mensual',data:ppto.map(v=>v/1e6),type:'line',borderColor:'#FFC000',backgroundColor:'transparent',borderWidth:2,borderDash:[5,3],pointRadius:3,pointBackgroundColor:'#FFC000',tension:0.3,order:2},
+    {label:'Acum. Real',data:realAc.map(v=>v/1e6),type:'line',borderColor:C.te,backgroundColor:'rgba(40,210,195,.07)',borderWidth:2.5,pointRadius:0,tension:0.4,fill:false,yAxisID:'yA',order:1},
+    {label:'Acum. Ppto',data:pptoAc.map(v=>v/1e6),type:'line',borderColor:'rgba(255,192,0,.5)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[3,2],pointRadius:0,tension:0.3,yAxisID:'yA',order:0}
+  ];
+
+  const ctxT=document.getElementById('cFcVspTotMensual');
+  if(ctxT){if(_chFcVspTotMen)_chFcVspTotMen.destroy();
+    _chFcVspTotMen=new Chart(ctxT.getContext('2d'),{type:'bar',
+      data:{labels:MESES_ABR,datasets:mkDatasets(realMes,pptoMes,realAcum,pptoAcum,barColor)},
+      options:chartOpts()});}
+
+  const ctxC=document.getElementById('cFcVspConMensual');
+  if(ctxC){if(_chFcVspConMen)_chFcVspConMen.destroy();
+    _chFcVspConMen=new Chart(ctxC.getContext('2d'),{type:'bar',
+      data:{labels:MESES_ABR,datasets:mkDatasets(realConMes,pptoConMes,realConAcum,pptoConAcum,barConColor)},
+      options:chartOpts()});}
 }
 
 // ─── FC-YR HOOK ───────────────────────────────────────────────
