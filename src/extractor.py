@@ -204,6 +204,8 @@ def read_facturacion(wb):
         real_2025  = to_float(row[4])
         real_2024  = to_float(row[5])
         contr_2026 = to_float(row[7])   # Columna H (Contr2026 YTD)
+        # AZ-BK (idx 51-62): facturación contratos mes a mes 2026
+        contr_meses = [to_float(row[51 + m]) if len(row) > 51 + m else 0.0 for m in range(12)]
         n_contratos = to_int(row[18])   # desplazado por columna nueva
 
         primera_vez = safe_str(row[15]).upper() == "SI"  # desplazado
@@ -234,6 +236,7 @@ def read_facturacion(wb):
             "real_ytd_2024":     0,
             "presup_contr_anio": 0,                 # filled later from CONTRATOS
             "presup_contr_ytd":  contr_2026,
+            "contr_meses_2026":  contr_meses,
             "n_contratos":       n_contratos,
             "tiene_contrato":    (n_contratos > 0) and not no_continuo,
             "estado_relacion":   estado_rel,
@@ -1268,14 +1271,15 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         str(ANO):     ytd_agg(mt, ANO),
     }
 
-    # Ratio contrato/no-contrato desde hoja FACTURACIÓN (contr_2026 / real_ytd por cliente)
-    _total_ytd_fac = sum(p.get("real_ytd", 0) for p in panel_raw)
-    _contr_ytd_fac = sum(p.get("presup_contr_ytd", 0) for p in panel_raw)
-    _ratio_contr   = _contr_ytd_fac / _total_ytd_fac if _total_ytd_fac > 0 else 0
-
-    _monthly_2026 = to_arr(mt, ANO)
-    contr_real_monthly   = [round(v * _ratio_contr)       for v in _monthly_2026]
-    nocontr_real_monthly = [round(v * (1 - _ratio_contr)) for v in _monthly_2026]
+    # Contratos mensuales: suma de col AZ-BK (idx 51-62) de FACTURACIÓN por mes
+    contr_real_monthly = [0.0] * 12
+    for p in panel_raw:
+        for m in range(12):
+            contr_real_monthly[m] += p.get("contr_meses_2026", [0]*12)[m]
+    contr_real_monthly = [round(v) for v in contr_real_monthly]
+    # Otras = total facturado (BBDD filtrada) - contratos (mínimo 0)
+    _fac_arr = to_arr(bbdd["mensual_facturado"], ANO)
+    nocontr_real_monthly = [max(0, _fac_arr[m] - contr_real_monthly[m]) for m in range(12)]
 
     _MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
               "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
