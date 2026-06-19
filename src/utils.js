@@ -47,7 +47,8 @@ function sv(name,btn){
     panelfact:initPanelFact,
     base:initBaseInstalada,
     satisfaccion:initSatisfaccion,
-    visitas:initVisitas
+    visitas:initVisitas,
+    alertas:initAlertas
   };
   const k='_i_'+name;
   if(inits[name]&&!window[k]){inits[name]();window[k]=true;}

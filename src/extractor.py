@@ -36,6 +36,7 @@ JS_FILES = [
     "utils.js", "datos.js", "hoja_resumen.js", "hoja_tipos.js", "hoja_nuevos.js",
     "hoja_vencimientos.js", "hoja_vision.js", "hoja_presupuesto.js",
     "hoja_facturacion.js", "hoja_panelfact.js", "hoja_satisfaccion.js", "hoja_visitas.js",
+    "hoja_alerta.js",
 ]
 
 ANO   = date.today().year
@@ -134,11 +135,12 @@ def read_contratos(wb):
         # Billing flags per month (columns N–Y = indices 13–24)
         fact_flags = [bool(row[13 + m]) for m in range(12)]
 
-        val_mes   = to_float(row[27])   # AC: Facturación Neta Mes convertido
+        cuota_uf  = to_float(row[25])   # Z:  Facturación Cuota UF
+        val_mes   = to_float(row[27])   # AB: Facturación Neta Mes convertido
+        n_mant    = to_int(row[28])     # AC: N° mantenimientos esperados año
         val_anual = to_float(row[29])   # AE: Facturación Anual Esperada 2026
         if val_anual == 0:
-            nm = to_float(row[28])
-            val_anual = val_mes * nm if nm >= 1 else val_mes  # fallback si col AE vacía
+            val_anual = val_mes * n_mant if n_mant >= 1 else val_mes  # fallback si col AE vacía
         real_ytd  = to_float(row[32])   # AG: Facturación Contratos 2026 YTD
         real_2025 = to_float(row[33])   # AH
         real_2024 = to_float(row[34])   # AI
@@ -162,7 +164,9 @@ def read_contratos(wb):
             "inicio_fmt":   fecha_inicio.strftime("%d/%m/%Y"),
             "fin_fmt":      fecha_fin.strftime("%d/%m/%Y"),
             "val":          val_anual,
+            "cuota_uf":     cuota_uf,
             "val_mes":      val_mes,
+            "n_mant":       n_mant,
             "fact_flags":   fact_flags,   # internal, excluded from DATA output
             "real_ytd":     real_ytd,
             "real_2025":    real_2025,
@@ -206,6 +210,8 @@ def read_facturacion(wb):
         contr_2026 = to_float(row[7])   # Columna H (Contr2026 YTD)
         # AZ-BK (idx 51-62): facturación contratos mes a mes 2026
         contr_meses = [to_float(row[51 + m]) if len(row) > 51 + m else 0.0 for m in range(12)]
+        # BL (idx 63): flag "FACTURACIÓN < CONTRATOS" (SI/NO)
+        fac_menor_contr = safe_str(row[63]).strip().upper() == "SI" if len(row) > 63 and row[63] else False
         n_contratos = to_int(row[18])   # desplazado por columna nueva
 
         primera_vez = safe_str(row[15]).upper() == "SI"  # desplazado
@@ -237,6 +243,7 @@ def read_facturacion(wb):
             "presup_contr_anio": 0,                 # filled later from CONTRATOS
             "presup_contr_ytd":  contr_2026,
             "contr_meses_2026":  contr_meses,
+            "_fac_menor_contr":  fac_menor_contr,
             "n_contratos":       n_contratos,
             "tiene_contrato":    (n_contratos > 0) and not no_continuo,
             "estado_relacion":   estado_rel,
@@ -1380,9 +1387,64 @@ def build_data_arrays(contratos, panel_raw):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 7b. BUILD ALERTA DATA — clientes con facturación bajo contrato
+# ══════════════════════════════════════════════════════════════════════════════
+def build_alerta_data(contratos, panel_raw, mes_corte):
+    activos_by_cli = {}
+    for c in contratos:
+        if c["estado"] != "Activado":
+            continue
+        activos_by_cli.setdefault(c["cliente"], []).append(c)
+
+    result = []
+    for p in panel_raw:
+        if not p.get("_fac_menor_contr", False):
+            continue
+        cli = p["cliente"]
+        cli_contratos = sorted(activos_by_cli.get(cli, []), key=lambda x: x["inicio"])
+        if not cli_contratos:
+            continue
+
+        total_expected = 0
+        total_real     = 0
+        contracts_out  = []
+        for c in cli_contratos:
+            n_exp = sum(1 for m in range(mes_corte) if c["fact_flags"][m])
+            expected_ytd = round(n_exp * c["val_mes"])
+            real = round(c["real_ytd"])
+            total_expected += expected_ytd
+            total_real     += real
+            contracts_out.append({
+                "n":            c["n"],
+                "coord":        c["coord"],
+                "inicio_fmt":   c["inicio_fmt"],
+                "fin_fmt":      c["fin_fmt"],
+                "fact_flags":   c["fact_flags"],
+                "cuota_uf":     round(c.get("cuota_uf", 0), 2),
+                "neta_mes":     round(c["val_mes"]),
+                "n_mant":       c.get("n_mant", 0),
+                "real_ytd":     real,
+                "expected_ytd": expected_ytd,
+                "gap":          expected_ytd - real,
+            })
+
+        result.append({
+            "cliente":        cli,
+            "coord":          cli_contratos[0]["coord"],
+            "total_expected": total_expected,
+            "total_real":     total_real,
+            "total_gap":      total_expected - total_real,
+            "contratos":      contracts_out,
+        })
+
+    result.sort(key=lambda x: -x["total_gap"])
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 8. PARCHEAR BLOQUE DATA/APP_DATA EN EL HTML TEMPLATE
 # ══════════════════════════════════════════════════════════════════════════════
-def patch_html(html, data, app_data, mapa_data=None, casos_data=None):
+def patch_html(html, data, app_data, mapa_data=None, casos_data=None, alerta_data=None):
     """Reemplaza el bloque <script>...const DATA=...;window.APP_DATA=...;</script>"""
     # Buscar "const DATA=" (con o sin espacio) y su bloque <script> contenedor
     data_idx = html.find("const DATA=")
@@ -1415,8 +1477,9 @@ def patch_html(html, data, app_data, mapa_data=None, casos_data=None):
     mes_nombre = _MESES[app_data["mes_corte"] - 1].upper()
     ano = app_data.get("hoy", "")[:4]
 
-    mapa_json  = json.dumps(mapa_data  or [], ensure_ascii=False)
-    casos_json = json.dumps(casos_data or {"casos": [], "equipos": []}, ensure_ascii=False)
+    mapa_json   = json.dumps(mapa_data   or [], ensure_ascii=False)
+    casos_json  = json.dumps(casos_data  or {"casos": [], "equipos": []}, ensure_ascii=False)
+    alerta_json = json.dumps(alerta_data or [], ensure_ascii=False)
     new_block = (
         "<script>\n"
         f"const DATA = {json.dumps(data, ensure_ascii=False)};\n\n"
@@ -1424,6 +1487,7 @@ def patch_html(html, data, app_data, mapa_data=None, casos_data=None):
         f"window.APP_DATA = {json.dumps(app_data, ensure_ascii=False)};\n"
         f"window.MAPA_DATA = {mapa_json};\n"
         f"window.CASOS_DATA = {casos_json};\n"
+        f"window.ALERTA_DATA = {alerta_json};\n"
         "</script>"
     )
     return html[:script_start] + new_block + html[script_end + 9:]
@@ -1557,6 +1621,8 @@ def main():
     total_gar_val = sum(d["val"] for d in data if d["tipo"] == "Garantia")
     print(f"       DATA: {len(data)} contratos | Cartera COM: MM${total_com_val/1e6:.1f} | GAR: MM${total_gar_val/1e6:.1f} | Total: MM${(total_com_val+total_gar_val)/1e6:.1f}")
     print(f"       NC_DATA: {len(nc_data)} nuevos | PERDIDOS: {len(perdidos)}")
+    alerta_data = build_alerta_data(contratos, panel_raw, mes_corte)
+    print(f"       ALERTA_DATA: {len(alerta_data)} clientes con facturación bajo contrato")
     enrich_mapa_data(mapa_data, contratos, satisf)
     cc_count = sum(1 for c in mapa_data if c["cc"])
     print(f"       MAPA_DATA: {len(mapa_data)} clientes | {cc_count} con contrato")
@@ -1566,7 +1632,7 @@ def main():
     print("\nParcheando template.html...")
     with open(TMPL, encoding="utf-8") as f:
         html = f.read()
-    html = patch_html(html, data, app_data, mapa_data, casos_data)
+    html = patch_html(html, data, app_data, mapa_data, casos_data, alerta_data)
     with open(TMPL, "w", encoding="utf-8") as f:
         f.write(html)
     print("  Actualizado: template.html")
