@@ -6,6 +6,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 let _mtzSortCol='pot',_mtzSortAsc=false;
+function mtzSortCol(col){_mtzSortAsc=(_mtzSortCol===col)?!_mtzSortAsc:false;_mtzSortCol=col;renderMatriz();}
 let _mtzReg='todas',_mtzCC='todas',_mtzTipo='todos';
 let _mtzFocoF='todos';
 let _mtzPotTipo='ambos';   // toggle scatter equipos: pot_eq | pot_st | ambos
@@ -155,20 +156,20 @@ function _matrizHTML(){
       <span style="font-size:.6rem;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Buscar</span>
       <input type="text" id="mtz-search" class="search-inp" placeholder="🔍 Nombre cliente..." style="width:200px;font-size:.65rem;padding:.28rem .55rem" oninput="renderMatriz()">
     </div>
-    <div style="overflow-x:auto">
+    <div style="overflow:auto;max-height:72vh">
       <table class="tbl" id="mtz-table" style="min-width:1080px">
         <thead><tr>
-          <th data-ms="n" style="min-width:200px">Cliente</th>
-          <th data-ms="region">Región</th>
-          <th data-ms="tipo">Tipo</th>
-          <th data-ms="bi">Eq. ST</th>
-          <th data-ms="contratos">Contratos</th>
-          <th data-ms="ingreso">Ingreso</th>
-          <th data-ms="pot_eq">Pot. Equipos ↓</th>
-          <th data-ms="pot_st">Pot. ST ↓</th>
-          <th data-ms="pot">Pot. Total</th>
-          <th data-ms="sat" title="Menor = mayor urgencia">Satisf. ↑</th>
-          <th data-ms="_score">Score</th>
+          <th data-ms="n" onclick="mtzSortCol('n',this)" style="min-width:200px;cursor:pointer">Cliente</th>
+          <th data-ms="region" onclick="mtzSortCol('region',this)" style="cursor:pointer">Región</th>
+          <th data-ms="tipo" onclick="mtzSortCol('tipo',this)" style="cursor:pointer">Tipo</th>
+          <th data-ms="bi" onclick="mtzSortCol('bi',this)" style="cursor:pointer">Eq. ST</th>
+          <th data-ms="contratos" onclick="mtzSortCol('contratos',this)" style="cursor:pointer">Contratos</th>
+          <th data-ms="ingreso" onclick="mtzSortCol('ingreso',this)" style="cursor:pointer">Ingreso</th>
+          <th data-ms="pot_eq" onclick="mtzSortCol('pot_eq',this)" style="cursor:pointer">Pot. Equipos</th>
+          <th data-ms="pot_st" onclick="mtzSortCol('pot_st',this)" style="cursor:pointer">Pot. ST</th>
+          <th data-ms="pot" onclick="mtzSortCol('pot',this)" style="cursor:pointer">Pot. Total</th>
+          <th data-ms="sat" onclick="mtzSortCol('sat',this)" style="cursor:pointer" title="Menor = mayor urgencia">Satisf.</th>
+          <th data-ms="_score" onclick="mtzSortCol('_score',this)" style="cursor:pointer">Score</th>
           <th>Foco</th>
         </tr></thead>
         <tbody id="mtz-tbody"></tbody>
@@ -209,11 +210,6 @@ function _bindMatrizCtrl(){
     const p80=allScores[Math.floor(allScores.length*0.20)]||0;
     const p60=allScores[Math.floor(allScores.length*0.40)]||0;
     setTimeout(()=>_renderScatEq(data,p80,p60),50);
-  }));
-  document.querySelectorAll('#mtz-table th[data-ms]').forEach(th=>th.addEventListener('click',()=>{
-    const col=th.dataset.ms;
-    _mtzSortAsc=(_mtzSortCol===col)?!_mtzSortAsc:false;
-    _mtzSortCol=col;renderMatriz();
   }));
 }
 

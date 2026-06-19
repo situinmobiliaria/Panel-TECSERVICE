@@ -141,12 +141,15 @@ def read_contratos(wb):
         val_anual = to_float(row[29])   # AE: Facturación Anual Esperada 2026
         if val_anual == 0:
             val_anual = val_mes * n_mant if n_mant >= 1 else val_mes  # fallback si col AE vacía
+        n_mant_actual = to_int(row[31])   # AF: N° Mantenimientos a la Fecha 2026
         real_ytd  = to_float(row[32])   # AG: Facturación Contratos 2026 YTD
         real_2025 = to_float(row[33])   # AH
         real_2024 = to_float(row[34])   # AI
         # AJ (idx 35): tipo de programa (Basic/Advanced/Profesional/Integral Care Program)
         prog_raw  = row[35] if len(row) > 35 else None
         programa  = safe_str(prog_raw).replace('​','').strip() if prog_raw else ""
+        # AK (idx 36): flag "FACTURACIÓN < CONTRATOS" (SI/NO)
+        bajo_contrato = safe_str(row[36]).strip().upper() if len(row) > 36 and row[36] else ""
 
         dias_vence    = (fecha_fin - TODAY).days
         long_dias     = max(1, (fecha_fin - fecha_inicio).days)
@@ -176,8 +179,10 @@ def read_contratos(wb):
             "tpo_activo":   tpo_activo,
             "pct_consumido": pct_consumido,
             "es_nuevo":     tpo_activo <= 90,
-            "estado":       estado,
-            "programa":     programa,
+            "n_mant_actual":  n_mant_actual,
+            "estado":         estado,
+            "programa":       programa,
+            "bajo_contrato":  bajo_contrato,
             "dias_inicio_cli": tpo_activo,
         })
 
@@ -1149,6 +1154,13 @@ def read_casos(wb):
         # Tabla derecha: fila de equipo si hay modelo (col J = índice 9)
         modelo = safe_str(row[9]) if len(row) > 9 and row[9] else ""
         if modelo:
+            def _fmt_dt(v):
+                if isinstance(v, (datetime, date)):
+                    return v.strftime("%d-%m-%Y")
+                return ""
+            def _no_asoc(v):
+                s = safe_str(v) if v is not None else ""
+                return "" if "NO ASOCIADO" in s.upper() else s
             equipos.append({
                 "modelo":           modelo,
                 "nombre":           safe_str(row[11]) if len(row) > 11 else "",
@@ -1160,6 +1172,12 @@ def read_casos(wb):
                 "comentario_mat":   safe_str(row[17]) if len(row) > 17 else "",
                 "contrato_num":     safe_str(str(row[18])) if len(row) > 18 and row[18] else "",
                 "garantia":         safe_str(row[19]) if len(row) > 19 else "",
+                "nombre_cliente":   _no_asoc(row[21]) if len(row) > 21 else "",
+                "neta_mes":         to_float(row[22]) if len(row) > 22 and not isinstance(row[22], str) else 0,
+                "fac_anual":        to_float(row[23]) if len(row) > 23 and not isinstance(row[23], str) else 0,
+                "fac_ytd":          to_float(row[24]) if len(row) > 24 and not isinstance(row[24], str) else 0,
+                "fecha_inicio":     _fmt_dt(row[25]) if len(row) > 25 else "",
+                "fecha_fin":        _fmt_dt(row[26]) if len(row) > 26 else "",
             })
 
     return {"casos": casos, "equipos": equipos}
@@ -1390,54 +1408,47 @@ def build_data_arrays(contratos, panel_raw):
 # 7b. BUILD ALERTA DATA — clientes con facturación bajo contrato
 # ══════════════════════════════════════════════════════════════════════════════
 def build_alerta_data(contratos, panel_raw, mes_corte):
-    activos_by_cli = {}
+    # Fuente: col AK = "SI", excluir garantías (todos los estados incluidos)
+    by_cli = {}
     for c in contratos:
-        if c["estado"] != "Activado":
+        if c.get("bajo_contrato") != "SI":
             continue
-        activos_by_cli.setdefault(c["cliente"], []).append(c)
+        if c["tipo"] == "Garantia":
+            continue
+        by_cli.setdefault(c["cliente"], []).append(c)
+
+    # Mapa cliente → datos panel (para Real col H y Diferencia col D-H)
+    panel_map = {p["cliente"]: p for p in panel_raw}
 
     result = []
-    for p in panel_raw:
-        if not p.get("_fac_menor_contr", False):
-            continue
-        cli = p["cliente"]
-        cli_contratos = sorted(
-            [c for c in activos_by_cli.get(cli, []) if c["tipo"] != "Garantia"],
-            key=lambda x: x["inicio"]
-        )
-        if not cli_contratos:
-            continue
+    for cli, cli_contratos in by_cli.items():
+        cli_contratos = sorted(cli_contratos, key=lambda x: x["inicio"])
+        p = panel_map.get(cli, {})
 
-        total_expected = 0
-        total_real     = 0
-        contracts_out  = []
+        real_cli_total  = round(p.get("real_ytd", 0))          # col D FACTURACIÓN: total facturado al cliente
+        esperado_cli    = round(p.get("presup_contr_ytd", 0))  # col H FACTURACIÓN: total contratado del cliente
+
+        contracts_out = []
         for c in cli_contratos:
-            n_exp = sum(1 for m in range(mes_corte) if c["fact_flags"][m])
-            expected_ytd = round(n_exp * c["val_mes"])
-            real = round(c["real_ytd"])
-            total_expected += expected_ytd
-            total_real     += real
             contracts_out.append({
-                "n":             c["n"],
-                "coord":         c["coord"],
-                "inicio_fmt":    c["inicio_fmt"],
-                "fin_fmt":       c["fin_fmt"],
-                "fact_flags":    c["fact_flags"],
-                "n_mant_fecha":  n_exp,
-                "cuota_uf":      round(c.get("cuota_uf", 0), 2),
-                "neta_mes":      round(c["val_mes"]),
-                "n_mant":        c.get("n_mant", 0),
-                "real_ytd":      real,
-                "expected_ytd":  expected_ytd,
-                "gap":           expected_ytd - real,
+                "n":            c["n"],
+                "coord":        c["coord"],
+                "inicio_fmt":   c["inicio_fmt"],
+                "fin_fmt":      c["fin_fmt"],
+                "fact_flags":   c["fact_flags"],
+                "n_mant_fecha": c.get("n_mant_actual", 0),   # col AF CONTRATOS TODOS
+                "cuota_uf":     round(c.get("cuota_uf", 0), 2),
+                "neta_mes":     round(c["val_mes"]),
+                "n_mant":       c.get("n_mant", 0),
+                "expected_ytd": round(c["real_ytd"]),         # col AG CONTRATOS TODOS
             })
 
         result.append({
             "cliente":        cli,
             "coord":          cli_contratos[0]["coord"],
-            "total_expected": total_expected,
-            "total_real":     total_real,
-            "total_gap":      total_expected - total_real,
+            "total_expected": esperado_cli,                       # col H FACTURACIÓN
+            "total_real":     real_cli_total,                     # col D FACTURACIÓN
+            "total_gap":      esperado_cli - real_cli_total,      # col H − col D
             "contratos":      contracts_out,
         })
 

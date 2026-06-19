@@ -76,52 +76,74 @@
 })();
 
 // ─── RESUMEN CHARTS (ejecutar al cargar) ──────────────────────
-// Escalar datos BBDD al total de Analisis Facturación (fuente master)
+// ─── GRÁFICO FACTURACIÓN MENSUAL CON SEGMENTADOR ─────────────
 (function(){
-  // Usar datos filtrados (solo Facturas + catálogos ST/Trazabilidad/REAS) para coincidir con ejecutivos
   const _bbddArr = (APP_DATA.mensual.facturado && APP_DATA.mensual.facturado[String(ANO_ACTUAL)]) || APP_DATA.mensual.total[String(ANO_ACTUAL)] || [];
-  // Mes actual: usar acum_mes de la tabla semanal de Analisis (fuente exacta)
   const _semTot=(APP_DATA.analisis_fac&&APP_DATA.analisis_fac.tabla_semanal||[])
     .find(r=>r.linea&&r.linea.toLowerCase().includes('total'));
   const _acumMesActual=_semTot&&_semTot.acum_mes>0?_semTot.acum_mes:null;
-  // Meses anteriores: escalar BBDD al total Analisis YTD menos el mes actual
-  const _analYTD = (APP_DATA.analisis_fac&&APP_DATA.analisis_fac.ts_ingresos>0)
-    ? APP_DATA.analisis_fac.ts_ingresos : null;
-  const _bbddPrev = _bbddArr.slice(0, MES_CORTE-1).reduce((s,v)=>s+v,0);
-  const _analPrev = _analYTD && _acumMesActual ? _analYTD - _acumMesActual : _bbddPrev;
-  const _kPrev = _bbddPrev > 0 ? _analPrev / _bbddPrev : 1;
-  // Array final: meses anteriores escalados + mes actual exacto
-  window._RS_MENS_SCALED = _bbddArr.map((v,i) => {
-    if(i >= MES_CORTE) return 0;
-    if(i === MES_CORTE-1) return _acumMesActual || Math.round(v*_kPrev);
-    return Math.round(v * _kPrev);
+  const _analYTD = (APP_DATA.analisis_fac&&APP_DATA.analisis_fac.ts_ingresos>0)?APP_DATA.analisis_fac.ts_ingresos:null;
+  const _bbddPrev = _bbddArr.slice(0,MES_CORTE-1).reduce((s,v)=>s+v,0);
+  const _analPrev = _analYTD&&_acumMesActual?_analYTD-_acumMesActual:_bbddPrev;
+  const _kPrev = _bbddPrev>0?_analPrev/_bbddPrev:1;
+  window._RS_MENS_SCALED = _bbddArr.map((v,i)=>{
+    if(i>=MES_CORTE)return 0;
+    if(i===MES_CORTE-1)return _acumMesActual||Math.round(v*_kPrev);
+    return Math.round(v*_kPrev);
   });
 
   const _pmRs=(APP_DATA.analisis_fac&&APP_DATA.analisis_fac.ppto_mensual&&APP_DATA.analisis_fac.ppto_mensual.some(v=>v>0))
-    ? APP_DATA.analisis_fac.ppto_mensual : null;
-  new Chart(document.getElementById('cMes').getContext('2d'),{
+    ?APP_DATA.analisis_fac.ppto_mensual:null;
+  const _contr  = APP_DATA.mensual.contr_real   || Array(12).fill(0);
+  const _nocontr = APP_DATA.mensual.nocontr_real || Array(12).fill(0);
+
+  let _seg='total';
+  const _colors={
+    total:  MESES_ABR.map((_,i)=>i<MES_CORTE?C.az3:'#B8BFCB'),
+    contr:  MESES_ABR.map((_,i)=>i<MES_CORTE?C.te:'rgba(40,210,195,.25)'),
+    otros:  MESES_ABR.map((_,i)=>i<MES_CORTE?C.or:'rgba(212,96,0,.25)'),
+  };
+
+  function _getData(seg){
+    if(seg==='contr')  return _contr.map(v=>v/1e6);
+    if(seg==='otros')  return _nocontr.map(v=>v/1e6);
+    return _RS_MENS_SCALED.map(v=>v/1e6);
+  }
+  function _getLbl(seg){
+    if(seg==='contr')  return 'Contratos';
+    if(seg==='otros')  return 'Otras Facturaciones';
+    return 'Real facturado';
+  }
+
+  const _cMesChart = new Chart(document.getElementById('cMes').getContext('2d'),{
     type:'bar',
     data:{labels:MESES_ABR,
       datasets:[
-        {label:'Real facturado',
-         data:_RS_MENS_SCALED.map(v=>v/1e6),
-         backgroundColor:MESES_ABR.map((_,i)=>i<MES_CORTE?C.az3:'#B8BFCB'),
-         borderRadius:5,borderSkipped:false,order:3},
+        {label:'Real facturado',data:_getData('total'),backgroundColor:_colors.total,borderRadius:5,borderSkipped:false,order:3},
         {label:'Ppto total TS',
-         data:_pmRs ? _pmRs.map(v=>v/1e6) : MESES_ABR.map(()=>TOTAL_PRESUP/12/1e6),
-         backgroundColor:'rgba(100,160,230,.45)',
-         borderColor:'#5090D0', borderWidth:1.5, borderRadius:4, borderSkipped:false,
-         order:4},
+         data:_pmRs?_pmRs.map(v=>v/1e6):MESES_ABR.map(()=>TOTAL_PRESUP/12/1e6),
+         backgroundColor:'rgba(100,160,230,.45)',borderColor:'#5090D0',borderWidth:1.5,borderRadius:4,borderSkipped:false,order:4},
         {label:'Ppto contratos',
-         data:_pmRs ? _pmRs.map(v=>v/2/1e6) : APP_DATA.mensual.presup_contr.map(v=>v/1e6),
-         type:'line',
-         borderColor:C.te,backgroundColor:'rgba(40,210,195,.1)',
-         borderWidth:2.5, tension:0.3, pointRadius:4, pointBackgroundColor:C.te, order:2, fill:false}
+         data:_pmRs?_pmRs.map(v=>v/2/1e6):APP_DATA.mensual.presup_contr.map(v=>v/1e6),
+         type:'line',borderColor:C.te,backgroundColor:'rgba(40,210,195,.1)',
+         borderWidth:2.5,tension:0.3,pointRadius:4,pointBackgroundColor:C.te,order:2,fill:false}
       ]},
     options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},
       tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`}}},
       scales:{y:{grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v}},x:{grid:{display:false}}}}
   });
+
+  document.querySelectorAll('#rs-mes-seg .btn').forEach(b=>b.addEventListener('click',()=>{
+    document.querySelectorAll('#rs-mes-seg .btn').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    _seg=b.dataset.seg;
+    _cMesChart.data.datasets[0].label=_getLbl(_seg);
+    _cMesChart.data.datasets[0].data=_getData(_seg);
+    _cMesChart.data.datasets[0].backgroundColor=_colors[_seg];
+    // Ocultar Ppto total cuando se ve segmento
+    _cMesChart.data.datasets[1].hidden=(_seg!=='total');
+    _cMesChart.update();
+  }));
 })();
 (function(){
   // Misma fuente que KPI6: presup_contr_ytd / ts_ingresos → coincide con indicador % Fact = Contratos
@@ -540,4 +562,79 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
         tooltip:{mode:'index',callbacks:{label:c=>` ${c.dataset.label}: ${c.raw} visitas`}}},
       scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{stepSize:5}}}}
   });
+})();
+
+// ─── RESUMEN BAJO CONTRATO ────────────────────────────────────
+(function(){
+  const body=document.getElementById('rs-alerta-body');if(!body)return;
+  const _allAlt=window.ALERTA_DATA||[];
+  if(!_allAlt.length){body.innerHTML='<div style="color:var(--mut);font-size:.7rem;text-align:center;padding:1rem">Sin clientes bajo contrato</div>';return;}
+
+  const gapFmt=v=>v===0?'—':(v>0?'−':'+')+'MM$'+(Math.abs(v)/1e6).toFixed(1);
+  const gapCol=v=>v>0?'var(--rd)':v<0?'var(--teal)':'var(--mut)';
+
+  // Botones de coordinador — default: Cynthia
+  const coords=[...new Set(_allAlt.map(c=>c.coord).filter(Boolean))].sort();
+  const _defaultCoord=coords.find(c=>c.toLowerCase().startsWith('cynthia'))||'todas';
+  let _rsAltCoord=_defaultCoord;
+  const seg=document.getElementById('rs-alt-seg');
+  if(seg){
+    seg.innerHTML='';
+    const btnSt='font-size:.55rem;padding:.18rem .45rem';
+    const bAll=document.createElement('button');
+    bAll.className='btn'+(_defaultCoord==='todas'?' on':'');bAll.textContent='Todos';bAll.style.cssText=btnSt;
+    bAll.addEventListener('click',()=>{seg.querySelectorAll('button').forEach(x=>x.classList.remove('on'));bAll.classList.add('on');_rsAltCoord='todas';_renderAltTable();});
+    seg.appendChild(bAll);
+    coords.forEach(coord=>{
+      const b=document.createElement('button');
+      b.className='btn'+(coord===_defaultCoord?' on':'');
+      b.textContent=coord.split(' ')[0];b.style.cssText=btnSt;
+      b.addEventListener('click',()=>{seg.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');_rsAltCoord=coord;_renderAltTable();});
+      seg.appendChild(b);
+    });
+  }
+
+  function _renderAltTable(){
+    const data=_rsAltCoord==='todas'?_allAlt:_allAlt.filter(cli=>cli.coord===_rsAltCoord);
+    const totCli=data.length;
+    const totContr=data.reduce((s,cli)=>s+cli.contratos.length,0);
+    const totEsp=data.reduce((s,cli)=>s+cli.total_expected,0);
+    const totReal=data.reduce((s,cli)=>s+cli.total_real,0);
+    const totGap=totEsp-totReal;
+
+    const rowsHtml=data.map(cli=>{
+      const d=cli.total_gap;
+      return`<tr>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${cli.cliente}"><strong>${cli.cliente}</strong></td>
+        <td style="color:var(--mut);font-size:.58rem;white-space:nowrap">${cli.coord.split(' ')[0]}</td>
+        <td style="text-align:center;color:var(--az2);font-size:.6rem;font-weight:700">${cli.contratos.length}</td>
+        <td class="num" style="color:var(--az2)">${mm(cli.total_expected)}</td>
+        <td class="num" style="color:var(--teal)">${mm(cli.total_real)}</td>
+        <td class="num" style="color:${gapCol(d)};font-weight:800">${gapFmt(d)}</td>
+      </tr>`;
+    }).join('');
+
+    const totRow=`<tr style="background:var(--az3);font-weight:700">
+      <td colspan="3" style="padding:.4rem .7rem;font-size:.62rem;color:rgba(255,255,255,.7)">
+        Total · ${totCli} cliente${totCli!==1?'s':''} · ${totContr} contrato${totContr!==1?'s':''}
+      </td>
+      <td class="num" style="color:rgba(255,255,255,.9)">${mm(totEsp)}</td>
+      <td class="num" style="color:var(--teal)">${mm(totReal)}</td>
+      <td class="num" style="color:${gapCol(totGap)}">${gapFmt(totGap)}</td>
+    </tr>`;
+
+    body.innerHTML=`
+      <div style="overflow-x:auto">
+        <table class="tbl" style="font-size:.63rem;width:100%">
+          <thead><tr>
+            <th>Cliente</th><th>Coord.</th>
+            <th style="text-align:center">N° Contratos</th>
+            <th>Esperado a la fecha</th><th>Real a la fecha</th><th>Diferencia a la fecha</th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
+          <tfoot>${totRow}</tfoot>
+        </table>
+      </div>`;
+  }
+  _renderAltTable();
 })();

@@ -93,10 +93,57 @@ function renderVG(){
     :(mm(totalVal)+' cartera total filtrada');
 }
 
+function _renderProgTable(){
+  const KEYS=['BASIC','ADVANCED','PROFESIONAL','INTEGRAL'];
+  const hdrStyle='padding:.42rem .7rem;font-size:.6rem;font-weight:700;letter-spacing:.06em;color:rgba(255,255,255,.7);background:rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.08)';
+
+  // Actualizar encabezados fijos de columna (en thead)
+  ['prog-th-basic','prog-th-advanced','prog-th-profesional','prog-th-integral'].forEach((id,i)=>{
+    const el=document.getElementById(id);
+    if(el)el.style.display='none'; // los ocultamos; usamos el thead del template
+  });
+
+  const rows=[];
+
+  // Fila de encabezado de sección
+  rows.push(`<tr>
+    <td style="${hdrStyle}">PROGRAMA DE SERVICIO</td>
+    <td style="${hdrStyle}">OBJETIVO</td>
+    <td style="${hdrStyle}">SERVICIOS CONSIDERADOS</td>
+  </tr>`);
+
+  KEYS.forEach(k=>{
+    const {label,objetivo,items,solidBg,textColor,color,bg}=_PROG_FEATURES[k];
+    const n=items.length;
+    const nameCell=`<td rowspan="${n}" style="font-weight:800;font-size:.72rem;font-family:'Roboto Condensed',sans-serif;letter-spacing:.04em;text-align:center;vertical-align:middle;background:${solidBg};color:#111;padding:.6rem .8rem;border-right:1px solid rgba(0,0,0,.12)">${label.toUpperCase()} CARE PROGRAM</td>`;
+    const objCell=`<td rowspan="${n}" style="font-size:.7rem;color:#111;line-height:1.65;vertical-align:middle;padding:.55rem 1rem;border-right:1px solid rgba(0,0,0,.08);background:${solidBg}33">${objetivo}</td>`;
+    items.forEach((svc,i)=>{
+      rows.push(`<tr>
+        ${i===0?nameCell:''}
+        ${i===0?objCell:''}
+        <td style="font-size:.7rem;padding:.38rem 1rem;background:${solidBg}55;color:#111;border-top:1px solid rgba(0,0,0,.07)">${svc}</td>
+      </tr>`);
+    });
+
+    // Fila separadora entre programas (excepto el último)
+    if(k!=='INTEGRAL'){
+      rows.push(`<tr>
+        <td style="${hdrStyle}">PROGRAMA DE SERVICIO</td>
+        <td style="${hdrStyle}">OBJETIVO</td>
+        <td style="${hdrStyle}">SERVICIOS CONSIDERADOS</td>
+      </tr>`);
+    }
+  });
+
+  const tb=document.getElementById('tb-prog-care');
+  if(tb)tb.innerHTML=rows.join('');
+}
+
 function initVision(){
   document.querySelectorAll('#vg-sort .btn').forEach(b=>{b.addEventListener('click',()=>{vgSortF=b.dataset.vs;vgSortCF='';document.querySelectorAll('#vg-sort .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
   document.querySelectorAll('#vg-filt .btn').forEach(b=>{b.addEventListener('click',()=>{vgFilt=b.dataset.vf;document.querySelectorAll('#vg-filt .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
   document.querySelectorAll('#vg-rel-filt .btn').forEach(b=>{b.addEventListener('click',()=>{vgRelF=b.dataset.vrf;document.querySelectorAll('#vg-rel-filt .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
   document.getElementById('vg-srch').oninput=e=>{vgSrch=e.target.value.toLowerCase();renderVG();};
   renderVG();
+  _renderProgTable();
 }

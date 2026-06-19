@@ -583,7 +583,7 @@ function initBaseInstalada(){
     <input type="search" placeholder="🔍 Buscar cliente…" oninput="biSearch(this.value)"
       style="margin-left:auto;border:1px solid var(--brd);border-radius:20px;padding:.28rem .8rem;font-size:.65rem;outline:none;width:190px;font-family:'Roboto',sans-serif">
   </div>
-  <div class="card" style="overflow-x:auto">
+  <div class="card" style="overflow:auto;max-height:72vh">
     <table class="tbl" style="font-size:.65rem">
       <thead><tr>
         <th style="width:2rem">#</th>

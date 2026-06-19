@@ -37,6 +37,7 @@ function sv(name,btn){
   document.querySelectorAll('.nb').forEach(b=>b.classList.remove('on'));
   document.getElementById('view-'+name).classList.add('on');
   btn.classList.add('on');
+  window.scrollTo({top:0,behavior:'instant'});
   const inits={
     tipos:initTipos,
     nuevos:initNuevos,
@@ -142,10 +143,18 @@ setTimeout(()=>{document.querySelectorAll('.prf').forEach(el=>{const w=el.style.
 
 // ─── PROGRAMAS CARE (usado en todas las hojas de contratos) ───────
 const _PROG_FEATURES={
-  BASIC:{label:'Basic',color:'#1a7a1a',bg:'rgba(30,130,30,.15)',items:['Mantenimiento Preventivo según indicación del fabricante (2 visitas x año)','Atención técnica en terreno, con valor preferente','Hasta 2 actividades de capacitación sin costo, al año']},
-  ADVANCED:{label:'Advanced',color:'#a07800',bg:'rgba(255,192,0,.15)',items:['Mantenimiento Preventivo','Mantenimiento Correctivo (Solo Mano de obra)','Hasta 2 actividades de capacitación sin costo, al año','Precio preferente para repuestos (descuento 7%)']},
-  PROFESIONAL:{label:'Profesional',color:'#1155aa',bg:'rgba(17,85,170,.15)',items:['Mantenimiento Preventivo','Mantenimiento Correctivo','Bolsa de repuestos incluidos','Hasta 4 actividades de capacitación sin costo, al año','Precio preferente para repuestos, fuera de la bolsa (descuento 10%)','Soporte técnico 24/7, según área de cobertura']},
-  INTEGRAL:{label:'Integral',color:'#1a237e',bg:'rgba(26,35,126,.15)',items:['Mantenimiento Preventivo','Mantenimiento Correctivo','Repuestos incluidos','Hasta 10 actividades de capacitación sin costo, al año','Soporte técnico 24/7, según área de cobertura','Servicio de Backup (según corresponda - ver archivo equipos)']}
+  BASIC:{label:'Basic',color:'#4caf50',bg:'rgba(76,175,80,.15)',solidBg:'#81c784',
+    objetivo:'Cobertura esencial para el mantenimiento preventivo de su equipo médico.',
+    items:['Mantenimiento Preventivo según indicación del fabricante (2 visitas x año)','Atención técnica en terreno, con valor preferente','Hasta 2 actividades de capacitación sin costo, al año']},
+  ADVANCED:{label:'Advanced',color:'#fbc02d',bg:'rgba(251,192,45,.15)',solidBg:'#fdd835',
+    objetivo:'Servicio completo que incluye mantenimiento preventivo y correctivo (mano de obra).',
+    items:['Mantenimiento Preventivo','Mantenimiento Correctivo (Solo Mano de obra)','Hasta 2 actividades de capacitación sin costo, al año','Precio preferente para repuestos (descuento 7%)']},
+  PROFESIONAL:{label:'Profesional',color:'#42a5f5',bg:'rgba(66,165,245,.15)',solidBg:'#64b5f6',
+    objetivo:'Atención prioritaria con monitoreo continuo y soporte técnico especializado, que considera mantenimiento preventivo y correctivo con bolsa de repuestos originales.',
+    items:['Mantenimiento Preventivo','Mantenimiento Correctivo','Bolsa de repuestos incluidos','Hasta 4 actividades de capacitación sin costo, al año','Precio preferente para repuestos, fuera de la bolsa (descuento 10%)','Soporte técnico 24/7, según área de cobertura']},
+  INTEGRAL:{label:'Integral',color:'#7986cb',bg:'rgba(121,134,203,.15)',solidBg:'#9fa8da',
+    objetivo:'Servicio total con todas las coberturas anteriores, más actualizaciones de software, revisiones exhaustivas y servicios de soporte prioritario.',
+    items:['Mantenimiento Preventivo','Mantenimiento Correctivo','Repuestos incluidos','Hasta 10 actividades de capacitación sin costo, al año','Soporte técnico 24/7, según área de cobertura','Servicio de Backup (según corresponda - ver archivo equipos)']}
 };
 function _progKey(p){const u=(p||'').toUpperCase();if(u.includes('BASIC'))return'BASIC';if(u.includes('ADVANCED'))return'ADVANCED';if(u.includes('PROFESIONAL')||u.includes('PROFESSIONAL'))return'PROFESIONAL';if(u.includes('INTEGRAL'))return'INTEGRAL';return null;}
 function _ensureProgTip(){if(document.getElementById('_prog-tip'))return;const d=document.createElement('div');d.id='_prog-tip';d.style.cssText='position:fixed;z-index:99999;background:#1e2434;border:1px solid #3a4460;border-radius:8px;padding:.7rem .9rem;min-width:280px;max-width:360px;pointer-events:none;display:none;box-shadow:0 6px 24px rgba(0,0,0,.55);font-family:Roboto,sans-serif';document.body.appendChild(d);}

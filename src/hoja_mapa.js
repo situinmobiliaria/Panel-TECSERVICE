@@ -15,6 +15,8 @@ const REGIONES_MAPA=['todas','Metropolitana','Valparaíso',"O'Higgins",'Maule','
   'Antofagasta','Atacama','Coquimbo','Arica y Parinacota','Tarapacá'];
 
 function _fMM(v){if(!v||v===0)return 'MM$0';return 'MM$'+(v/1e6).toFixed(1).replace('.',',');}
+// Formato con separador de miles para tabla de regiones
+function _fT(v){if(!v||v===0)return '—';return 'MM$'+Math.round(v/1e6).toLocaleString('es-CL');}
 
 function _getIngreso(c){
   if(_mapaIngrYear==='2025')return c.ingreso_2025||0;
@@ -141,6 +143,7 @@ function _mapaHTML(){
         <thead><tr>
           <th>Región</th><th>Clientes</th><th>Con Contrato</th><th>% Contrato</th>
           <th>Equipos ST</th><th>Ingreso</th><th>Potencial Eq.</th><th>Potencial ST</th>
+          <th>Pot. ST<br><span style="font-weight:400;font-size:.55rem">/ cliente</span></th>
         </tr></thead>
         <tbody id="mp-reg-tbody"></tbody>
       </table>
@@ -184,6 +187,7 @@ function _renderMapa(){
   _renderMarkers();
   _renderRegTable();
   _kpis(MAPA_DATA);
+  _showRegPanel();
 }
 
 function _renderMarkers(){
@@ -360,9 +364,10 @@ function _renderRegTable(){
       <td><span class="pill pte">${d.cc}</span> <span style="font-size:.57rem;color:var(--mut)">/ ${d.n}</span></td>
       <td class="num" style="color:${d.cc/d.n>=0.5?'var(--teal)':'var(--mut)'}">${pctFmt(d)}</td>
       <td class="num">${d.bi}</td>
-      <td class="num" style="color:var(--az2)">${_fMM(d.ing)}</td>
-      <td class="num" style="color:var(--am)">${_fMM(d.pot_eq)}</td>
-      <td class="num" style="color:var(--teal)">${_fMM(d.pot_st)}</td>
+      <td class="num" style="color:var(--az2)">${_fT(d.ing)}</td>
+      <td class="num" style="color:var(--am)">${_fT(d.pot_eq)}</td>
+      <td class="num" style="color:var(--teal)">${_fT(d.pot_st)}</td>
+      <td class="num" style="color:var(--teal)">${d.n>0?_fT(d.pot_st/d.n):'—'}</td>
     </tr>`).join('')+`
     <tr style="background:rgba(30,90,200,.08);font-weight:800;border-top:2px solid var(--az2)">
       <td><strong>TOTAL</strong></td>
@@ -370,9 +375,10 @@ function _renderRegTable(){
       <td class="num"><strong>${tot.cc}</strong> <span style="font-size:.57rem;color:var(--mut)">/ ${tot.n}</span></td>
       <td class="num" style="color:var(--az2)">${pctFmt(tot)}</td>
       <td class="num">${tot.bi}</td>
-      <td class="num" style="color:var(--az2)">${_fMM(tot.ing)}</td>
-      <td class="num" style="color:var(--am)">${_fMM(tot.pot_eq)}</td>
-      <td class="num" style="color:var(--teal)">${_fMM(tot.pot_st)}</td>
+      <td class="num" style="color:var(--az2)">${_fT(tot.ing)}</td>
+      <td class="num" style="color:var(--am)">${_fT(tot.pot_eq)}</td>
+      <td class="num" style="color:var(--teal)">${_fT(tot.pot_st)}</td>
+      <td class="num" style="color:var(--teal)">${tot.n>0?_fT(tot.pot_st/tot.n):'—'}</td>
     </tr>`;
 }
 

@@ -91,15 +91,15 @@ function _casosHTML() {
           <th style="min-width:90px">Marca</th>
           <th style="min-width:100px">Estado</th>
           <th style="min-width:110px">Coordinadora</th>
-          <th style="min-width:230px">Comentario Coordinadora</th>
-          <th style="min-width:200px">Comentario Matilde</th>
+          <th style="min-width:260px">Comentario Coordinadora</th>
           <th style="min-width:90px">N° Contrato</th>
           <th style="min-width:120px">Estado Garantía</th>
           <th style="min-width:200px">Nombre Cliente</th>
-          <th style="min-width:105px">Fact. Anual</th>
+          <th style="min-width:110px">Neta Mes</th>
+          <th style="min-width:115px">Fact. Anual Esp.</th>
+          <th style="min-width:115px">Fact. a la Fecha</th>
           <th style="min-width:90px">Inicio</th>
-          <th style="min-width:90px">Vigencia</th>
-          <th style="min-width:75px">% Cartera</th>
+          <th style="min-width:90px">Término</th>
         </tr></thead>
         <tbody id="cas-tbody2"></tbody>
       </table>
@@ -200,18 +200,11 @@ function renderCasos() {
       .toLowerCase().includes(busq);
   });
 
-  // ── Lookup NC_DATA por número de contrato ────────────────────
-  const _ncMap = {};
-  let _totalPortfolio = 0;
-  if (typeof NC_DATA !== 'undefined') {
-    NC_DATA.forEach(c => {
-      _ncMap[c.n] = c;
-      _totalPortfolio += (c.val || 0);
-    });
-  }
-
   const tbody2 = document.getElementById('cas-tbody2');
   if (tbody2) {
+    const _fmtM = v => v > 0 ? 'MM$' + (v / 1e6).toFixed(1).replace('.', ',') : '—';
+    const _dash = '<span style="color:var(--mut);font-size:.6rem">—</span>';
+    const _mono = s => s ? `<span style="font-size:.6rem;font-family:'Roboto Mono',monospace">${_escH(s)}</span>` : _dash;
     tbody2.innerHTML = eqFilt.map(e => {
       const garVigente = e.garantia.toUpperCase().includes('VIGENTE');
       const garBadge = garVigente
@@ -220,36 +213,20 @@ function renderCasos() {
       const estadoBadge = e.estado.toUpperCase().includes('NO OPER')
         ? `<span class="badge brd2" style="font-size:.52rem">No Operativo</span>`
         : `<span class="badge bgy" style="font-size:.52rem">${_escH(e.estado)}</span>`;
-      const contrNum = e.contrato_num
-        ? `<span class="pill pte" style="font-size:.52rem;font-family:'Roboto Mono',monospace">${_escH(e.contrato_num)}</span>`
-        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
-
-      // ── Cruce con NC_DATA ──────────────────────────────────────
-      const _nc = _ncMap[e.contrato_num] || null;
-      const _facAnual = _nc && _nc.long_dias > 0
-        ? _nc.val / (_nc.long_dias / 365)
-        : null;
-      const _pctCartera = _nc && _totalPortfolio > 0
-        ? (_nc.val / _totalPortfolio * 100)
-        : null;
-      const _fmtM = v => 'MM$' + (v / 1e6).toFixed(1).replace('.', ',');
-
-      const _clienteCell = _nc
-        ? `<strong style="font-size:.62rem">${_escH(_nc.cliente)}</strong>`
-        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
-      const _facCell = _facAnual !== null
-        ? `<span style="font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM(_facAnual)}</span>`
-        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
-      const _inicioCell = _nc
-        ? `<span style="font-size:.6rem;font-family:'Roboto Mono',monospace">${_escH(_nc.inicio_fmt)}</span>`
-        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
-      const _vigCell = _nc
-        ? `<span style="font-size:.6rem;font-family:'Roboto Mono',monospace">${_escH(_nc.fin_fmt)}</span>`
-        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
-      const _pctCell = _pctCartera !== null
-        ? `<span class="pill" style="font-size:.52rem;background:rgba(30,100,255,.13);color:var(--az2);font-weight:700">${_pctCartera.toFixed(1).replace('.', ',')}%</span>`
-        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
-
+      const sinContrato = !e.contrato_num;
+      const _noContr = `<span style="font-size:.57rem;color:var(--mut);font-style:italic">NO ASOCIADO A CONTRATO</span>`;
+      const contrNum = sinContrato ? _noContr
+        : `<span class="pill pte" style="font-size:.52rem;font-family:'Roboto Mono',monospace">${_escH(e.contrato_num)}</span>`;
+      const clienteCell = sinContrato ? _noContr
+        : e.nombre_cliente ? `<strong style="font-size:.62rem">${_escH(e.nombre_cliente)}</strong>` : _dash;
+      const netaCell = sinContrato ? _noContr
+        : e.neta_mes > 0 ? `<span style="font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM(e.neta_mes)}</span>` : _dash;
+      const facAnualCell = sinContrato ? _noContr
+        : e.fac_anual > 0 ? `<span style="font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM(e.fac_anual)}</span>` : _dash;
+      const facYtdCell = sinContrato ? _noContr
+        : e.fac_ytd > 0 ? `<span style="font-size:.63rem;font-weight:700;color:var(--teal)">${_fmtM(e.fac_ytd)}</span>` : _dash;
+      const inicioCell = sinContrato ? _noContr : _mono(e.fecha_inicio);
+      const finCell    = sinContrato ? _noContr : _mono(e.fecha_fin);
       return `<tr>
         <td><strong style="font-size:.63rem;color:var(--am)">${_escH(e.modelo)}</strong></td>
         <td><span style="font-size:.63rem">${_escH(e.nombre)}</span></td>
@@ -257,23 +234,15 @@ function renderCasos() {
         <td><span style="font-size:.62rem">${_escH(e.marca)}</span></td>
         <td style="text-align:center">${estadoBadge}</td>
         <td><span style="font-size:.62rem;color:var(--az3)">${_escH(e.coordinadora)||'—'}</span></td>
-        <td>
-          <div style="font-size:.6rem;line-height:1.5;max-width:260px;color:rgba(255,255,255,.82)">
-            ${_escH(e.comentario_coord)||'<span style="color:var(--mut)">—</span>'}
-          </div>
-        </td>
-        <td>
-          <div style="font-size:.6rem;line-height:1.5;max-width:220px;color:rgba(255,255,255,.7)">
-            ${_escH(e.comentario_mat)||'<span style="color:var(--mut)">—</span>'}
-          </div>
-        </td>
+        <td><div style="font-size:.6rem;line-height:1.5;max-width:280px;color:#111;font-weight:600">${_escH(e.comentario_coord)||_dash}</div></td>
         <td style="text-align:center">${contrNum}</td>
         <td style="text-align:center">${garBadge}</td>
-        <td>${_clienteCell}</td>
-        <td style="text-align:right">${_facCell}</td>
-        <td style="text-align:center">${_inicioCell}</td>
-        <td style="text-align:center">${_vigCell}</td>
-        <td style="text-align:center">${_pctCell}</td>
+        <td>${clienteCell}</td>
+        <td style="text-align:right">${netaCell}</td>
+        <td style="text-align:right">${facAnualCell}</td>
+        <td style="text-align:right">${facYtdCell}</td>
+        <td style="text-align:center">${inicioCell}</td>
+        <td style="text-align:center">${finCell}</td>
       </tr>`;
     }).join('');
   }
