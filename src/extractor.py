@@ -1401,7 +1401,10 @@ def build_alerta_data(contratos, panel_raw, mes_corte):
         if not p.get("_fac_menor_contr", False):
             continue
         cli = p["cliente"]
-        cli_contratos = sorted(activos_by_cli.get(cli, []), key=lambda x: x["inicio"])
+        cli_contratos = sorted(
+            [c for c in activos_by_cli.get(cli, []) if c["tipo"] != "Garantia"],
+            key=lambda x: x["inicio"]
+        )
         if not cli_contratos:
             continue
 
