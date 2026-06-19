@@ -1441,14 +1441,14 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
     <div class="card">
       <div class="ch">
         <span class="ct">Contratos · Mensual vs Ppto 2026</span>
-        <span style="font-size:.6rem;color:var(--mut)">Barras = Real contratos · Línea naranja = Ppto contratos (50% ppto) · Línea teal = Acumulado</span>
+        <span style="font-size:.6rem;color:var(--mut)">Barras = Real contratos · Línea naranja = Ppto contratos (50% ppto anual)</span>
       </div>
       <div style="position:relative;height:230px"><canvas id="cFcVspTotMensual"></canvas></div>
     </div>
     <div class="card">
       <div class="ch">
         <span class="ct">Otras Facturaciones · Mensual vs Ppto 2026</span>
-        <span style="font-size:.6rem;color:var(--mut)">Barras = Real otras fact. · Línea naranja = Meta otras fact. (50% ppto) · Línea teal = Acumulado</span>
+        <span style="font-size:.6rem;color:var(--mut)">Barras = Real otras facturaciones · Línea naranja = Meta otras fact. (50% ppto anual)</span>
       </div>
       <div style="position:relative;height:230px"><canvas id="cFcVspConMensual"></canvas></div>
     </div>
@@ -4272,9 +4272,6 @@ function renderFcVsPptoMensual(){
   const pptoOtrosMes=pptoMes.map(v=>v*0.5);
   // Acumulados
   const acum=arr=>arr.reduce((a,v,i)=>{a.push((a[i-1]||0)+v);return a;},[]);
-  const realConAcum=acum(realConMes),pptoConAcum=acum(pptoConMes);
-  const realOtrosAcum=acum(realOtrosMes),pptoOtrosAcum=acum(pptoOtrosMes);
-
   const barConColor=(i)=>i<MES_CORTE?'rgba(40,210,195,.78)':'rgba(184,193,216,.28)';
   const barOtrColor=(i)=>i<MES_CORTE?'rgba(212,96,0,.72)':'rgba(184,193,216,.28)';
   const chartOpts=()=>({
@@ -4285,30 +4282,27 @@ function renderFcVsPptoMensual(){
     },
     scales:{
       x:{grid:{display:false},ticks:{font:{size:9}}},
-      y:{beginAtZero:true,position:'left',grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v,font:{size:9}}},
-      yA:{beginAtZero:true,position:'right',grid:{display:false},ticks:{callback:v=>'MM$'+v,font:{size:9}}}
+      y:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v,font:{size:9}}}
     }
   });
 
-  const mkDatasets=(real,ppto,realAc,pptoAc,barFn,lineColor,lineAcumColor)=>[
-    {label:'Real mensual',data:real.map(v=>v/1e6),backgroundColor:real.map((_,i)=>barFn(i)),borderRadius:4,order:3},
-    {label:'Ppto mensual',data:ppto.map(v=>v/1e6),type:'line',borderColor:'#FFC000',backgroundColor:'transparent',borderWidth:2,borderDash:[5,3],pointRadius:3,pointBackgroundColor:'#FFC000',tension:0.3,order:2},
-    {label:'Acum. Real',data:realAc.map(v=>v/1e6),type:'line',borderColor:lineAcumColor||C.te,backgroundColor:'rgba(40,210,195,.07)',borderWidth:2.5,pointRadius:0,tension:0.4,fill:false,yAxisID:'yA',order:1},
-    {label:'Acum. Ppto',data:pptoAc.map(v=>v/1e6),type:'line',borderColor:'rgba(255,192,0,.5)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[3,2],pointRadius:0,tension:0.3,yAxisID:'yA',order:0}
+  const mkDatasets=(real,ppto,barFn)=>[
+    {label:'Real mensual',data:real.map(v=>v/1e6),backgroundColor:real.map((_,i)=>barFn(i)),borderRadius:4,order:2},
+    {label:'Ppto mensual',data:ppto.map(v=>v/1e6),type:'line',borderColor:'#FFC000',backgroundColor:'transparent',borderWidth:2,borderDash:[5,3],pointRadius:3,pointBackgroundColor:'#FFC000',tension:0.3,order:1}
   ];
 
   // Gráfico 1: Contratos
   const ctxT=document.getElementById('cFcVspTotMensual');
   if(ctxT){if(_chFcVspTotMen)_chFcVspTotMen.destroy();
     _chFcVspTotMen=new Chart(ctxT.getContext('2d'),{type:'bar',
-      data:{labels:MESES_ABR,datasets:mkDatasets(realConMes,pptoConMes,realConAcum,pptoConAcum,barConColor,C.te,C.te)},
+      data:{labels:MESES_ABR,datasets:mkDatasets(realConMes,pptoConMes,barConColor)},
       options:chartOpts()});}
 
   // Gráfico 2: Otras Facturaciones
   const ctxC=document.getElementById('cFcVspConMensual');
   if(ctxC){if(_chFcVspConMen)_chFcVspConMen.destroy();
     _chFcVspConMen=new Chart(ctxC.getContext('2d'),{type:'bar',
-      data:{labels:MESES_ABR,datasets:mkDatasets(realOtrosMes,pptoOtrosMes,realOtrosAcum,pptoOtrosAcum,barOtrColor,C.or,C.or)},
+      data:{labels:MESES_ABR,datasets:mkDatasets(realOtrosMes,pptoOtrosMes,barOtrColor)},
       options:chartOpts()});}
 }
 
