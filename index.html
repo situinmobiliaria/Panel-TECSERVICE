@@ -7604,6 +7604,15 @@ function initAlertas(){
   const coords=[...new Set(data.map(c=>c.coord).filter(Boolean))].sort();
   const filtDiv=document.getElementById('alt-filt-coord');
   if(filtDiv){
+    // Botón "Todos"
+    const bAll=document.createElement('button');
+    bAll.className='btn on';bAll.dataset.altc='todas';bAll.textContent='Todos';
+    bAll.addEventListener('click',()=>{
+      filtDiv.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+      bAll.classList.add('on');_altCoordF='todas';renderAlertas();
+    });
+    filtDiv.appendChild(bAll);
+    // Un botón por coordinador
     coords.forEach(coord=>{
       const b=document.createElement('button');
       b.className='btn';b.dataset.altc=coord;
@@ -7672,7 +7681,10 @@ function renderAlertas(){
     const gap=r.gap;
     const gapColor=gap>0?'var(--rd)':gap<0?'var(--teal)':'var(--mut)';
     const gapTxt=gap===0?'—':(gap>0?'−':'+')+'MM$'+(Math.abs(gap)/1e6).toFixed(1);
-    const cuotaTxt=r.cuota_uf>0?r.cuota_uf.toFixed(2)+' UF':'—';
+    // Si cuota_uf ≈ neta_mes significa que la columna Z tiene el valor en CLP, no en UF
+    const cuotaEsCLP=r.cuota_uf>0&&Math.abs(r.cuota_uf-r.neta_mes)<=1;
+    const cuotaTxt=r.cuota_uf>0&&!cuotaEsCLP?r.cuota_uf.toFixed(2)+' UF':'—';
+    const cuotaTitle=cuotaEsCLP?'title="Cuota no definida en UF, valor en CLP"':'';
 
     return`<tr>
       <td style="font-size:.6rem;color:var(--mut);white-space:nowrap">${r.coord.split(' ')[0]}</td>
@@ -7682,7 +7694,7 @@ function renderAlertas(){
       <td style="font-size:.6rem;white-space:nowrap;color:var(--mut)">${r.fin_fmt}</td>
       <td style="white-space:nowrap;padding:.3rem .5rem;text-align:center">${flags}</td>
       <td class="num" style="font-size:.68rem;font-weight:700;color:var(--az2)">${r.n_mant_fecha||0}</td>
-      <td class="num" style="font-size:.62rem">${cuotaTxt}</td>
+      <td class="num" style="font-size:.62rem;color:${cuotaEsCLP?'var(--mut)':'inherit'}" ${cuotaTitle}>${cuotaTxt}</td>
       <td class="num">${mm(r.neta_mes)}</td>
       <td class="num" style="color:var(--az2)">${mm(r.expected_ytd)}</td>
       <td class="num" style="color:var(--teal)">${mm(r.real_ytd)}</td>
