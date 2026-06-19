@@ -1415,17 +1415,18 @@ def build_alerta_data(contratos, panel_raw, mes_corte):
             total_expected += expected_ytd
             total_real     += real
             contracts_out.append({
-                "n":            c["n"],
-                "coord":        c["coord"],
-                "inicio_fmt":   c["inicio_fmt"],
-                "fin_fmt":      c["fin_fmt"],
-                "fact_flags":   c["fact_flags"],
-                "cuota_uf":     round(c.get("cuota_uf", 0), 2),
-                "neta_mes":     round(c["val_mes"]),
-                "n_mant":       c.get("n_mant", 0),
-                "real_ytd":     real,
-                "expected_ytd": expected_ytd,
-                "gap":          expected_ytd - real,
+                "n":             c["n"],
+                "coord":         c["coord"],
+                "inicio_fmt":    c["inicio_fmt"],
+                "fin_fmt":       c["fin_fmt"],
+                "fact_flags":    c["fact_flags"],
+                "n_mant_fecha":  n_exp,
+                "cuota_uf":      round(c.get("cuota_uf", 0), 2),
+                "neta_mes":      round(c["val_mes"]),
+                "n_mant":        c.get("n_mant", 0),
+                "real_ytd":      real,
+                "expected_ytd":  expected_ytd,
+                "gap":           expected_ytd - real,
             })
 
         result.append({
