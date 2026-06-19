@@ -355,13 +355,9 @@ def read_bbdd(xlsx_path):
     ytd_contr_2024 = ytd_contr_total(ANO - 2, mes_corte)
     ytd_contr_2025 = ytd_contr_total(ANO - 1, mes_corte)
 
-    # Contratos reales mensuales: misma fuente que mensual_facturado + Vendedor ST*
-    mensual_contr_real = monthly_dict(df_ytd_contr)
-
     return {
         "mensual_total":         mensual_total,
         "mensual_facturado":     mensual_facturado,
-        "mensual_contr_real":    mensual_contr_real,
         "mensual_priv":          mensual_priv,
         "mensual_pub":           mensual_pub,
         "mensual_contr":         mensual_contr,
@@ -1272,11 +1268,14 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         str(ANO):     ytd_agg(mt, ANO),
     }
 
-    # Contratos reales mensuales desde BBDD filtrada (misma fuente que mensual_facturado)
-    # Vendedor ST* = contratos; el resto = otras facturaciones
-    contr_real_monthly = to_arr(bbdd["mensual_contr_real"], ANO)
-    _fac_arr = to_arr(bbdd["mensual_facturado"], ANO)
-    nocontr_real_monthly = [max(0, _fac_arr[m] - contr_real_monthly[m]) for m in range(12)]
+    # Ratio contrato/no-contrato desde hoja FACTURACIÓN (contr_2026 / real_ytd por cliente)
+    _total_ytd_fac = sum(p.get("real_ytd", 0) for p in panel_raw)
+    _contr_ytd_fac = sum(p.get("presup_contr_ytd", 0) for p in panel_raw)
+    _ratio_contr   = _contr_ytd_fac / _total_ytd_fac if _total_ytd_fac > 0 else 0
+
+    _monthly_2026 = to_arr(mt, ANO)
+    contr_real_monthly   = [round(v * _ratio_contr)       for v in _monthly_2026]
+    nocontr_real_monthly = [round(v * (1 - _ratio_contr)) for v in _monthly_2026]
 
     _MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
               "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
