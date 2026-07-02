@@ -464,6 +464,233 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
   _renderEjeChart();
 })();
 
+// ─── FACTURACIÓN POR LÍNEA DE NEGOCIO ─────────────────────────
+(function(){
+  const ctx = document.getElementById('cRsLineaFac'); if(!ctx) return;
+  const lineas = (APP_DATA.analisis_fac && APP_DATA.analisis_fac.lineas_mensual) || {};
+  const nombres = Object.keys(lineas);
+  if(!nombres.length){ ctx.parentElement.innerHTML='<div style="text-align:center;color:var(--mut);padding:2rem;font-style:italic">Sin datos de línea de negocio</div>'; return; }
+
+  const _PAL = { STESTERILIZACION:'#002D73', STMEDICO:'#7B2FBE', STENDOSCOPIA:'#FFC000', STDENTAL:'#D46000' };
+  const _PAL_DEF = ['#33448D','#00832F','#C00000','#28D2C3'];
+  const colorOf = (n,i) => _PAL[n.toUpperCase().replace(/[^A-Z]/g,'')] || _PAL_DEF[i % _PAL_DEF.length];
+
+  const anoStr = String(ANO_ACTUAL);
+  let _lineaFilter = 'todos';
+  let _chartLinea = null;
+
+  const card = ctx.closest('.card');
+  const filtrDiv = document.createElement('div');
+  filtrDiv.style.cssText = 'display:flex;flex-wrap:wrap;gap:.3rem;padding:.4rem .8rem .2rem;border-bottom:1px solid var(--brd)';
+  const btnTodos = document.createElement('button');
+  btnTodos.className = 'btn on'; btnTodos.textContent = 'Todos'; btnTodos.dataset.ln = 'todos';
+  filtrDiv.appendChild(btnTodos);
+  nombres.forEach((n, i) => {
+    const b = document.createElement('button');
+    b.className = 'btn'; b.textContent = n;
+    b.dataset.ln = n;
+    b.style.borderLeft = '3px solid ' + colorOf(n, i);
+    filtrDiv.appendChild(b);
+  });
+  card.insertBefore(filtrDiv, card.querySelector('.cb'));
+
+  filtrDiv.querySelectorAll('.btn').forEach(b => b.addEventListener('click', () => {
+    filtrDiv.querySelectorAll('.btn').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    _lineaFilter = b.dataset.ln;
+    _renderLineaChart();
+  }));
+
+  function _renderLineaChart(){
+    const labels = MESES_ABR.slice(0, MES_CORTE);
+    const activos = _lineaFilter === 'todos' ? nombres : [_lineaFilter];
+
+    const datasets = activos.map((n, i) => {
+      const arr = lineas[n] || Array(12).fill(0);
+      return {
+        label: n,
+        data: arr.slice(0, MES_CORTE).map(v => v / 1e6),
+        backgroundColor: colorOf(n, i),
+        borderRadius: 3,
+        stack: _lineaFilter === 'todos' ? 's' : n
+      };
+    });
+
+    const totalYTD = activos.reduce((s, n) => {
+      const arr = lineas[n] || Array(12).fill(0);
+      return s + arr.slice(0, MES_CORTE).reduce((a, v) => a + v, 0);
+    }, 0);
+
+    const foot = document.getElementById('rs-linea-foot');
+    if(foot) foot.textContent = (_lineaFilter === 'todos' ? activos.length + ' líneas' : _lineaFilter) + ' · YTD: ' + fmtMM(totalYTD);
+
+    if(_chartLinea) _chartLinea.destroy();
+    _chartLinea = new Chart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 }, padding: 8 },
+            display: _lineaFilter === 'todos' },
+          tooltip: {
+            mode: 'index',
+            callbacks: {
+              label: c => ` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`,
+              footer: items => _lineaFilter === 'todos' ? ' Total: MM$' + items.reduce((s,i) => s + i.raw, 0).toFixed(1) : ''
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false } },
+          y: { stacked: true, beginAtZero: true, grid: { color: '#E2E6F0' }, ticks: { callback: v => 'MM$' + v } }
+        }
+      }
+    });
+  }
+
+  _renderLineaChart();
+})();
+
+// ─── RATIOS DE COSTOS ─────────────────────────────────────────
+(function(){
+  const RC = (APP_DATA && APP_DATA.ratios_costos) || {};
+  if(!RC.ratios || !RC.ratios.length) return;
+
+  const mesEl = document.getElementById('rs-ratios-mes');
+  if(mesEl) mesEl.textContent = (RC.mes_cierre_nombre||'') + ' 2026';
+
+  const RATIO_COLORS = ['#0A5C8C','#007A72','#7A1FAA','#E87722','#C00000'];
+  const meses = RC.meses || [];
+  const n = meses.length;
+
+  // Helpers
+  const fmm  = v => { const a=Math.abs(v||0); return (v<0?'−':'')+a.toFixed(1); };
+  const fpct = v => (v*100).toFixed(1)+'%';
+  const numTd = (v, col, bold) =>
+    `<td class="num" style="color:${col||'inherit'};${bold?'font-weight:700':''}">MM$${fmm(v)}</td>`;
+
+  // ── Tabla de valores base ──────────────────────────────────────
+  const valsEl = document.getElementById('rs-ratios-vals');
+  if(valsEl){
+    const colHdr = 'background:var(--az3);color:rgba(255,255,255,.85);font-size:.6rem;font-weight:700;text-align:center;padding:.35rem .4rem';
+    const thMeses = meses.map(m=>`<th style="${colHdr}">${m.slice(0,3)}</th>`).join('');
+    const thTot   = `<th style="${colHdr};background:#1a3a6b">Total</th>`;
+
+    const rowBase = (label, arr, total, colorFn, fmt) => {
+      const tds = arr.map(v=>{
+        const col = colorFn ? colorFn(v) : 'inherit';
+        const disp = fmt==='pct' ? fpct(v) : 'MM$'+fmm(v);
+        return `<td class="num" style="color:${col}">${disp}</td>`;
+      }).join('');
+      const totCol = colorFn ? colorFn(total) : 'inherit';
+      const totDisp = fmt==='pct' ? fpct(total) : 'MM$'+fmm(total);
+      return `<tr>
+        <td style="font-size:.62rem;white-space:nowrap;padding:.3rem .6rem">${label}</td>
+        ${tds}
+        <td class="num" style="color:${totCol};font-weight:700">${totDisp}</td>
+      </tr>`;
+    };
+
+    const colIng  = v => v>0?'var(--az2)':'var(--rd)';
+    const colContr = v => v>0?'var(--teal)':'var(--rd)';
+    const colOtras = v => v>0?'var(--or)':'var(--rd)';
+    const colCost  = () => '#b03030';
+    const colMarg  = v => v>=0?'#007A72':'var(--rd)';
+    const colPct   = v => v>=0.5?'#007A72':v>=0.3?'var(--or)':'var(--rd)';
+    const colEbit  = v => v>=0?'#007A72':'var(--rd)';
+
+    const sepRow = (label, bg='rgba(0,45,115,.07)') =>
+      `<tr style="background:${bg}"><td colspan="${n+2}" style="font-size:.58rem;font-weight:700;color:var(--mut);padding:.25rem .6rem;letter-spacing:.05em">${label.toUpperCase()}</td></tr>`;
+
+    valsEl.innerHTML = `
+      <div style="overflow-x:auto">
+        <table class="tbl" style="font-size:.63rem;width:100%;min-width:500px">
+          <thead><tr>
+            <th style="${colHdr};text-align:left;min-width:200px">Concepto</th>
+            ${thMeses}${thTot}
+          </tr></thead>
+          <tbody>
+            ${sepRow('Ingresos')}
+            ${rowBase('Ingresos Totales (MM$)',RC.ingresos_totales,RC.total_ingresos_totales,colIng)}
+            ${rowBase('Ingresos por Contratos (MM$)',RC.ingresos_contratos,RC.total_ingresos_contratos,colContr)}
+            ${rowBase('Ingresos Otras Facturaciones (MM$)',RC.ingresos_otras,RC.total_ingresos_otras,colOtras)}
+            ${sepRow('Costos')}
+            ${rowBase('Costo de Ventas (MM$)',RC.costo_ventas,RC.total_costo_ventas,colCost)}
+            ${rowBase('Gasto Beneficio Empleados (MM$)',RC.gastos_empleados,RC.total_gastos_empleados,colCost)}
+            ${rowBase('Otros Gastos por Naturaleza (MM$)',RC.otros_gastos,RC.total_otros_gastos,colCost)}
+            ${rowBase('GAV Total (MM$)',RC.gav_total,RC.total_gav,colCost)}
+            ${sepRow('Resultados','rgba(0,122,114,.07)')}
+            ${rowBase('Margen del Producto (MM$)',RC.margen_mm,RC.total_margen_mm,colMarg)}
+            ${rowBase('Margen %',RC.margen_pct,RC.total_margen_pct,colPct,'pct')}
+            ${rowBase('EBITDA (MM$)',RC.ebitda,RC.total_ebitda,colEbit)}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  // ── Toggle + tabla de ratios ───────────────────────────────────
+  let _rcMode = 'totales';
+  const seg = document.getElementById('rs-ratios-seg');
+  if(seg){
+    [{key:'totales',label:'Ingresos Totales'},{key:'contratos',label:'Ingresos Contratos'}].forEach((opt,idx)=>{
+      const b = document.createElement('button');
+      b.className = 'btn'+(idx===0?' on':'');
+      b.textContent = opt.label;
+      b.style.cssText = 'font-size:.58rem;padding:.18rem .5rem';
+      b.addEventListener('click',()=>{
+        seg.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+        b.classList.add('on');
+        _rcMode = opt.key;
+        _renderRatios();
+      });
+      seg.appendChild(b);
+    });
+  }
+
+  function _renderRatios(){
+    const cardsEl = document.getElementById('rs-ratios-cards'); if(!cardsEl) return;
+    const colHdr = 'background:var(--az3);color:rgba(255,255,255,.85);font-size:.6rem;font-weight:700;text-align:center;padding:.35rem .4rem';
+    const thMeses = meses.map(m=>`<th style="${colHdr}">${m.slice(0,3)}</th>`).join('');
+    const thTot   = `<th style="${colHdr};background:#1a3a6b">Total</th>`;
+
+    const modoLabel = _rcMode==='totales' ? 'Ingresos Totales' : 'Ingresos Contratos';
+
+    const ratioRows = RC.ratios.map((r,i)=>{
+      const col = RATIO_COLORS[i];
+      const vals = _rcMode==='totales' ? r.totales : r.contratos;
+      const total = _rcMode==='totales' ? r.total_totales : r.total_contratos;
+      const tds = vals.map(v=>{
+        const x = v===null ? 0 : v;
+        const c = x>=1?'#007A72':x>=0.7?'var(--or)':'var(--rd)';
+        return `<td class="num" style="color:${c}">${x.toFixed(2)}x</td>`;
+      }).join('');
+      const totC = total>=1?'#007A72':total>=0.7?'var(--or)':'var(--rd)';
+      const labelFull = `<span style="color:var(--mut);font-weight:400">${modoLabel}</span><span style="color:var(--mut)"> / </span>${r.nombre}`;
+      return `<tr>
+        <td style="white-space:nowrap;padding:.35rem .6rem">
+          <span style="display:inline-block;width:8px;height:8px;background:${col};border-radius:50%;margin-right:.4rem;vertical-align:middle"></span>
+          <span style="font-size:.62rem;font-weight:600">${labelFull}</span>
+        </td>
+        ${tds}
+        <td class="num" style="color:${totC};font-weight:700">${total.toFixed(2)}x</td>
+      </tr>`;
+    }).join('');
+    cardsEl.innerHTML = `
+      <div style="overflow-x:auto">
+        <table class="tbl" style="font-size:.63rem;width:100%;min-width:500px">
+          <thead><tr>
+            <th style="${colHdr};text-align:left;min-width:200px">Indicador</th>
+            ${thMeses}${thTot}
+          </tr></thead>
+          <tbody>${ratioRows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  _renderRatios();
+})();
+
 // ─── TOP CLIENTES FACTURACIÓN 2026 ────────────────────────────
 (function(){
   const mesLbl=document.getElementById('rs-fac-mes-lbl');if(mesLbl)mesLbl.textContent=MES_CORTE_NOMBRE;

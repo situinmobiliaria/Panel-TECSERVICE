@@ -8,6 +8,27 @@ let _satDomUnif=[]; // dominio data unificado (promedio si hay duplicados)
 let _satComUnif=[]; // comentarios unificados por institución
 let _satTipoFilt='todos',_satComFiltDet=false,_satBIFiltTramo='todos';
 
+// ─── Badge de categoría detractor (nivel módulo, usada en 2 tablas) ──
+const _DET_CAT_PAL = ['#7A1FAA','#0A5C8C','#C05000','#007A72','#8B3A00','#1a6b2a'];
+let _detCatColorMap = null;
+function _buildDetCatMap(){
+  if(_detCatColorMap) return;
+  _detCatColorMap = {};
+  const inst = (APP_DATA.satisf && APP_DATA.satisf.instituciones) || [];
+  inst.filter(d => d.recom < 7).forEach(d => {
+    const c = (d.cat_detractor||'').trim();
+    if(c && !(c in _detCatColorMap))
+      _detCatColorMap[c] = _DET_CAT_PAL[Object.keys(_detCatColorMap).length % _DET_CAT_PAL.length];
+  });
+}
+function _catBadge(cat){
+  _buildDetCatMap();
+  const c = (cat||'').trim();
+  if(!c) return `<span style="font-size:.57rem;color:var(--mut);font-style:italic">—</span>`;
+  const bg = _detCatColorMap[c] || '#555';
+  return `<span style="font-size:.57rem;font-weight:700;color:#fff;background:${bg};border-radius:4px;padding:.12rem .4rem;white-space:nowrap">${c}</span>`;
+}
+
 // ─── Constantes de tipo BI (compartidas entre gráficos) ──────────
 const _BD_LABELS=['Esterilización','Endoscopía','Mobiliario Clínico','Dental','Incardia','MMQ','REAS','Otro'];
 const _BD_KEYS  =['ester','endo','mob','dent','inc','mmq','reas','otro'];
@@ -522,6 +543,7 @@ function initSatisfaccion(){
   // Detractores: usar instituciones completas (no solo las con comentario)
   const _biCliPotDet = _satGetBICliPot();
   const det=(s.instituciones||[]).filter(d=>d.recom<7).sort((a,b)=>a.recom-b.recom);
+
   const detTb=document.getElementById('tb-sat-det');
   if(detTb){
     detTb.innerHTML=det.map((d,i)=>{
@@ -541,6 +563,7 @@ function initSatisfaccion(){
         <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">${i+1}</td>
         <td><strong>${d.institucion}</strong>${nTag}</td>
         <td><span class="pill ${cls}">${d.categoria}</span></td>
+        <td>${_catBadge(d.cat_detractor)}</td>
         ${contrCell}
         <td style="text-align:center;font-family:'Roboto Mono',monospace">${d.n}</td>
         <td style="text-align:right;font-family:'Roboto Mono',monospace;${biStyle}">${biSi!=null?biSi:'—'}</td>
@@ -548,7 +571,7 @@ function initSatisfaccion(){
         <td class="num" style="text-align:right;color:var(--mut)">${d.tiempo.toFixed(2).replace('.',',')}</td>
         <td class="num" style="text-align:right;color:var(--rd);font-weight:700">${d.recom.toFixed(2).replace('.',',')}</td>
       </tr>`;
-    }).join('')||'<tr><td colspan="9" style="text-align:center;color:var(--gn);padding:1rem">No hay detractores registrados</td></tr>';
+    }).join('')||'<tr><td colspan="10" style="text-align:center;color:var(--gn);padding:1rem">No hay detractores registrados</td></tr>';
   }
   const detCount=document.getElementById('sat-det-count');
   if(detCount)detCount.textContent=det.length+' instituciones con recom. < 7';
@@ -679,6 +702,7 @@ function _renderSatDetBI(){
     return `<tr>
       <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">${i+1}</td>
       <td><strong style="font-size:.7rem;color:var(--az1)">${d.institucion}</strong>${nTag}</td>
+      <td>${_catBadge(d.cat_detractor)}</td>
       <td style="text-align:center;font-family:'Roboto Mono',monospace;font-weight:700;color:${rcol}">${d.recom.toFixed(d.n>1?2:0)}</td>
       <td style="text-align:center;font-family:'Roboto Mono',monospace;color:${calCol}">${d.calidad.toFixed(d.n>1?2:0)}</td>
       <td style="text-align:center;font-family:'Roboto Mono',monospace;color:${tieCol}">${d.tiempo.toFixed(d.n>1?2:0)}</td>
@@ -705,6 +729,7 @@ function _renderSatDetBI(){
         <tr style="background:var(--az3);color:#fff">
           <th style="padding:.5rem .6rem;width:2rem">#</th>
           <th style="padding:.5rem .6rem;text-align:left">Institución</th>
+          <th style="padding:.5rem .6rem;text-align:left">Categoría</th>
           <th style="padding:.5rem .6rem;text-align:center;color:#FF9090">Recom.</th>
           <th style="padding:.5rem .6rem;text-align:center;color:#90C090">Calidad</th>
           <th style="padding:.5rem .6rem;text-align:center;color:#90B8D8">Tiempo</th>
@@ -719,7 +744,7 @@ function _renderSatDetBI(){
         </tr>
       </thead>
       <tbody>
-        ${rows || `<tr><td colspan="13" style="text-align:center;color:var(--gn);padding:1rem">No hay detractores registrados</td></tr>`}
+        ${rows || `<tr><td colspan="14" style="text-align:center;color:var(--gn);padding:1rem">No hay detractores registrados</td></tr>`}
       </tbody>
     </table>
   </div>

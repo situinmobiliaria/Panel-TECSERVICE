@@ -532,6 +532,8 @@ def read_satisfaccion(wb):
         tiempo   = to_float(row[12])
         recom    = to_float(row[13])
         mejora   = safe_str(row[14])
+        # Columna AD (row[29]) = categoría detractor (llenada manualmente en Excel)
+        cat_det  = safe_str(row[29]).strip() if len(row) > 29 and row[29] else ""
         # Columna R (row[17]) = contratos asociados al cliente (monto CLP)
         contr_asoc = round(to_float(row[17] if len(row) > 17 else 0))
         _BD_KEYS = ["ester","endo","mob","dent","inc","mmq","reas","otro"]
@@ -553,6 +555,7 @@ def read_satisfaccion(wb):
             "recom":          recom,
             "resuelto":       resuelto,
             "mejora":         mejora,
+            "cat_detractor":  cat_det,
             "bi_total":       bi,
             "bi_detalle":     bi_det,
             "contr_asociados": contr_asoc,
@@ -647,6 +650,7 @@ def read_satisfaccion(wb):
                 "n": 0, "cal": [], "tie": [], "rec": [],
                 "_bi": None, "_bi_det": None, "_contr": None, "_fac2026": None,
                 "_nombre_bi": r.get("nombre_bi", ""),
+                "_cat_det": r.get("cat_detractor", ""),
                 "categoria": r["categoria"]
             }
         d = inst_data[key]
@@ -670,6 +674,9 @@ def read_satisfaccion(wb):
         # nombre_bi: primer valor no vacío (mismo cliente = mismo valor)
         if not d["_nombre_bi"] and r.get("nombre_bi"):
             d["_nombre_bi"] = r["nombre_bi"]
+        # cat_detractor: primer valor no vacío entre todas las respuestas de la institución
+        if not d["_cat_det"] and r.get("cat_detractor"):
+            d["_cat_det"] = r["cat_detractor"]
         if _CAT_PRIO.get(r["categoria"], 9) < _CAT_PRIO.get(d["categoria"], 9):
             d["categoria"] = r["categoria"]
 
@@ -685,6 +692,7 @@ def read_satisfaccion(wb):
             "contr_asociados": d["_contr"] or 0,
             "fac_2026":       d["_fac2026"] or 0,
             "nombre_bi":      d["_nombre_bi"] or "",
+            "cat_detractor":  d["_cat_det"] or "",
             "categoria":      d["categoria"],
         }
         for key, d in inst_data.items()
@@ -933,7 +941,7 @@ def read_analisis_fac(wb):
     }
 
     if ws_anal:
-        rows = list(ws_anal.iter_rows(min_row=1, max_row=20, values_only=True))
+        rows = list(ws_anal.iter_rows(min_row=1, max_row=35, values_only=True))
 
         # Fila 2 (idx 1): semana y mes
         r2 = rows[1] if len(rows) > 1 else []
@@ -998,6 +1006,19 @@ def read_analisis_fac(wb):
                 result["ts_ppto_anual"]  = r["ppto_anual"]
                 result["ts_ingresos_aa"] = r["ingresos_aa"]
                 break
+
+    # ── Líneas de negocio mensuales: filas 31-34 (índices 30-33 en rows) ────
+    result["lineas_mensual"] = {}
+    if ws_anal:
+        for row in rows[30:34]:
+            label = safe_str(row[1]).strip() if row[1] else ""
+            if not label:
+                continue
+            meses = []
+            for m in range(12):
+                v = row[2 + m] if len(row) > 2 + m else 0
+                meses.append(round(to_float(v)))
+            result["lineas_mensual"][label] = meses
 
     # ── GD-PPTO: presupuesto mensual (fila 23 = total TECSERVICE) ───────────
     if ws_gd:
@@ -1183,6 +1204,148 @@ def read_casos(wb):
     return {"casos": casos, "equipos": equipos}
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# HOJA: RATIOS COSTOS
+# ══════════════════════════════════════════════════════════════════════════════
+def read_ratios_costos(wb):
+    ws = None
+    for name in wb.sheetnames:
+        if "ratio" in name.lower() and "costo" in name.lower():
+            ws = wb[name]
+            break
+    if ws is None:
+        return {}
+
+    rows = list(ws.iter_rows(min_row=1, max_row=40, values_only=True))
+
+    MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
+
+    # Detectar fila de encabezados buscando "Enero" en alguna columna
+    hdr_col = None  # columna donde empiezan los meses
+    for row in rows:
+        for ci, cell in enumerate(row):
+            if safe_str(cell).strip().lower() == "enero":
+                hdr_col = ci
+                break
+        if hdr_col is not None:
+            break
+    if hdr_col is None:
+        return {}
+
+    def get_mes_vals(row_idx):
+        row = rows[row_idx] if row_idx < len(rows) else []
+        return [to_float(row[hdr_col + i]) if len(row) > hdr_col + i and row[hdr_col + i] is not None else 0.0 for i in range(12)]
+
+    def get_total_col(row_idx):
+        row = rows[row_idx] if row_idx < len(rows) else []
+        total_ci = hdr_col + 12
+        v = row[total_ci] if len(row) > total_ci and row[total_ci] is not None else None
+        return to_float(v) if v is not None else 0.0
+
+    # Buscar filas por etiqueta (col B = hdr_col - 1)
+    label_col = hdr_col - 1
+    label_idx = {}  # label_key → row_idx
+    for i, row in enumerate(rows):
+        lbl = safe_str(row[label_col]).strip().lower() if len(row) > label_col and row[label_col] else ""
+        if lbl:
+            label_idx[lbl] = i
+
+    def find_row(keywords):
+        """Devuelve el primer row_idx cuya etiqueta contiene todas las keywords."""
+        for lbl, idx in label_idx.items():
+            if all(k in lbl for k in keywords):
+                return idx
+        return None
+
+    # Filas de datos base
+    idx_ing_tot   = find_row(["ingresos totales"])
+    idx_ing_con   = find_row(["ingresos por contrato"])
+    idx_ing_otras = find_row(["otras facturaciones"])
+    idx_costo_v   = find_row(["costo de ventas"])
+    idx_gasto_emp = find_row(["beneficios a los empleados"])
+    idx_otros_g   = find_row(["otros gastos por naturaleza"])
+    idx_gav       = find_row(["gav total"])
+    idx_margen_mm = find_row(["margen del producto"])
+    idx_margen_pct= find_row(["margen %"])
+    idx_ebitda    = find_row(["ebitda"])
+
+    if idx_ing_tot is None or idx_costo_v is None:
+        return {}
+
+    # Detectar último mes completo: último mes donde Costo de Ventas ≠ 0
+    costo_vals = get_mes_vals(idx_costo_v)
+    mes_cierre = 0
+    for i, v in enumerate(costo_vals):
+        if abs(v) > 0.001:
+            mes_cierre = i + 1
+    if mes_cierre == 0:
+        return {}
+
+    def row_slice(idx):
+        if idx is None: return [0.0] * mes_cierre
+        return [round(v, 3) for v in get_mes_vals(idx)[:mes_cierre]]
+
+    def ratio_slice(idx):
+        if idx is None: return [None] * mes_cierre
+        vals = get_mes_vals(idx)
+        return [round(v, 4) if abs(v) > 0.0001 else None for v in vals[:mes_cierre]]
+
+    def period_sum(idx):
+        if idx is None: return 0.0
+        return round(sum(get_mes_vals(idx)[:mes_cierre]), 2)
+
+    total_ing  = period_sum(idx_ing_tot)
+    total_marg = period_sum(idx_margen_mm)
+    margen_pct_periodo = round(total_marg / total_ing, 4) if total_ing else 0
+
+    # Ratios: buscar pares por etiqueta
+    ratio_defs = [
+        (["ingresos totales","costo de venta"],    ["contrato","costo de venta"],    "Costo de Venta"),
+        (["ingresos totales","beneficio"],          ["contrato","beneficio"],          "Gasto por Beneficio a los Empleados Directos"),
+        (["ingresos totales","otros gastos"],       ["recurrentes","otros gastos"],    "Otros Gastos por Naturaleza Directos"),
+        (["ingresos totales","gav"],                ["contrato","gav"],                "GAV Total (Beneficio Empleados + Otros Gastos)"),
+        (["ingreso total","costo total"],           ["ingreso por contrato","costo total"], "Costo Total"),
+    ]
+    ratios = []
+    for kw_tot, kw_con, nombre in ratio_defs:
+        idx_t = find_row(kw_tot)
+        idx_c = find_row(kw_con)
+        ratios.append({
+            "nombre":          nombre,
+            "totales":         ratio_slice(idx_t),
+            "contratos":       ratio_slice(idx_c),
+            "total_totales":   round(get_total_col(idx_t), 4) if idx_t is not None else 0,
+            "total_contratos": round(get_total_col(idx_c), 4) if idx_c is not None else 0,
+        })
+
+    return {
+        "mes_cierre":               mes_cierre,
+        "mes_cierre_nombre":        MESES[mes_cierre - 1],
+        "meses":                    MESES[:mes_cierre],
+        "ingresos_totales":         row_slice(idx_ing_tot),
+        "ingresos_contratos":       row_slice(idx_ing_con),
+        "ingresos_otras":           row_slice(idx_ing_otras),
+        "costo_ventas":             row_slice(idx_costo_v),
+        "gastos_empleados":         row_slice(idx_gasto_emp),
+        "otros_gastos":             row_slice(idx_otros_g),
+        "gav_total":                row_slice(idx_gav),
+        "margen_mm":                row_slice(idx_margen_mm),
+        "margen_pct":               [round(v, 4) for v in get_mes_vals(idx_margen_pct)[:mes_cierre]] if idx_margen_pct else [0]*mes_cierre,
+        "ebitda":                   row_slice(idx_ebitda),
+        "total_ingresos_totales":   total_ing,
+        "total_ingresos_contratos": period_sum(idx_ing_con),
+        "total_ingresos_otras":     period_sum(idx_ing_otras),
+        "total_costo_ventas":       period_sum(idx_costo_v),
+        "total_gastos_empleados":   period_sum(idx_gasto_emp),
+        "total_otros_gastos":       period_sum(idx_otros_g),
+        "total_gav":                period_sum(idx_gav),
+        "total_margen_mm":          total_marg,
+        "total_margen_pct":         margen_pct_periodo,
+        "total_ebitda":             period_sum(idx_ebitda),
+        "ratios":                   ratios,
+    }
+
+
 def enrich_mapa_data(mapa_data, contratos, satisf):
     """Agrega conteo de contratos activos y satisfacción. cc ya viene del Excel."""
     active_by_cli = {}
@@ -1339,6 +1502,7 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         "visitas":              visitas,
         "analisis_fac":         analisis_fac or {},
         "base_instalada":       base_instalada or {"total":0,"por_linea":{},"por_tipo":[],"por_estado":{},"clientes":[]},
+        "ratios_costos":        {},
     }
 
 
@@ -1619,6 +1783,7 @@ def main():
     base_instalada = read_base_instalada(wb2)
     mapa_data  = read_mapa(wb2)
     casos_data = read_casos(wb2)
+    ratios_costos = read_ratios_costos(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -1631,6 +1796,7 @@ def main():
     # ── Construir estructuras de datos ───────────────────────────────────────
     print("[6/6] Construyendo estructuras de datos...")
     app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada)
+    app_data["ratios_costos"] = ratios_costos
     data, nc_data, perdidos = build_data_arrays(contratos, panel_raw)
     total_com_val = sum(d["val"] for d in data if d["tipo"] == "Comercial")
     total_gar_val = sum(d["val"] for d in data if d["tipo"] == "Garantia")
