@@ -689,6 +689,167 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
   }
 
   _renderRatios();
+
+  // ── Gráficos ──────────────────────────────────────────────────
+  const safeArr = (arr) => Array.isArray(arr) ? arr : [];
+
+  // Opciones de ingreso base (denominador del ratio)
+  const BASE_OPTS = [
+    { key:'totales',   label:'Ingresos Totales',   dataKey:'ingresos_totales',   color:'#002D73' },
+    { key:'contratos', label:'Ingresos Contratos',  dataKey:'ingresos_contratos', color:'#0A5C8C' },
+  ];
+  // Opciones de costo a comparar (denominador del ratio)
+  const COSTO_OPTS = [
+    { key:'costo_total',     label:'Costos Totales',               dataKey:null,              color:'#8B0000' },
+    { key:'costo_ventas',    label:'Costo de Ventas',              dataKey:'costo_ventas',    color:'#C00000' },
+    { key:'gastos_empleados',label:'Gasto Beneficio Empleados',    dataKey:'gastos_empleados', color:'#7A1FAA' },
+    { key:'otros_gastos',    label:'Otros Gastos por Naturaleza',  dataKey:'otros_gastos',    color:'#E87722' },
+    { key:'gav_total',       label:'GAV Total',                    dataKey:'gav_total',       color:'#C05000' },
+  ];
+
+  let _rcBaseKey  = 'totales';
+  let _rcCostoKey = 'costo_ventas';
+  let _rcChart    = null;
+
+  function _makeSeg(el, opts, getKey, setKey){
+    if(!el) return;
+    opts.forEach((opt, idx) => {
+      const b = document.createElement('button');
+      b.className = 'btn' + (idx===0?' on':'');
+      b.textContent = opt.label;
+      b.style.cssText = 'font-size:.58rem;padding:.18rem .5rem';
+      b.addEventListener('click', () => {
+        el.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+        b.classList.add('on');
+        setKey(opt.key);
+        try{ _renderRCChart(); }catch(e){ console.error('RC chart error:', e); }
+      });
+      el.appendChild(b);
+    });
+  }
+
+  _makeSeg(
+    document.getElementById('rs-rc-base-seg'),
+    BASE_OPTS,
+    () => _rcBaseKey,
+    k => { _rcBaseKey = k; }
+  );
+  _makeSeg(
+    document.getElementById('rs-rc-costo-seg'),
+    COSTO_OPTS,
+    () => _rcCostoKey,
+    k => { _rcCostoKey = k; }
+  );
+
+  function _renderRCChart(){
+    const ctx = document.getElementById('cRsRatios'); if(!ctx) return;
+    if(_rcChart){ _rcChart.destroy(); _rcChart=null; }
+    const labels = safeArr(RC.meses);
+
+    const baseOpt  = BASE_OPTS.find(o=>o.key===_rcBaseKey)  || BASE_OPTS[0];
+    const costoOpt = COSTO_OPTS.find(o=>o.key===_rcCostoKey)|| COSTO_OPTS[0];
+
+    const baseData = safeArr(RC[baseOpt.dataKey]);
+
+    // Costos Totales se computa sumando los 3 componentes
+    let costoData;
+    if(costoOpt.key === 'costo_total'){
+      const n = baseData.length;
+      const cv = safeArr(RC.costo_ventas);
+      const ge = safeArr(RC.gastos_empleados);
+      const og = safeArr(RC.otros_gastos);
+      costoData = Array.from({length: n}, (_,i) => Math.abs(cv[i]||0) + Math.abs(ge[i]||0) + Math.abs(og[i]||0));
+    } else {
+      costoData = safeArr(RC[costoOpt.dataKey]).map(v=>Math.abs(v||0));
+    }
+
+    // Ratio mes a mes: ingreso base / costo
+    const ratioData = baseData.map((ing, i) => {
+      const b = Math.abs(ing || 0);
+      const c = costoData[i] || 0;
+      return c > 0 ? +((b / c).toFixed(3)) : null;
+    });
+
+    const datasets = [
+      {
+        label: baseOpt.label,
+        data: baseData,
+        backgroundColor: baseOpt.color + 'BB',
+        borderColor: baseOpt.color,
+        borderWidth: 2,
+        borderRadius: 4,
+        yAxisID: 'y',
+        order: 2,
+      },
+      {
+        label: costoOpt.label,
+        data: costoData,
+        backgroundColor: costoOpt.color + 'BB',
+        borderColor: costoOpt.color,
+        borderWidth: 2,
+        borderRadius: 4,
+        yAxisID: 'y',
+        order: 3,
+      },
+      {
+        label: 'Ratio ' + baseOpt.label + ' / ' + costoOpt.label,
+        data: ratioData,
+        type: 'line',
+        borderColor: '#FFC000',
+        backgroundColor: '#FFC00033',
+        borderWidth: 2,
+        tension: 0.4,
+        pointRadius: 5,
+        pointBackgroundColor: '#FFC000',
+        fill: false,
+        yAxisID: 'yRatio',
+        order: 1,
+      },
+    ];
+
+    _rcChart = new Chart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode:'index', intersect:false },
+        plugins:{
+          legend:{ position:'bottom', labels:{ boxWidth:12, font:{size:9}, padding:10 } },
+          tooltip:{
+            filter: item => item.dataset.yAxisID !== 'yRatio',
+            callbacks:{
+              label: c => ` ${c.dataset.label}: MM$${(c.raw||0).toFixed(1)}`,
+              footer: items => {
+                if(!items.length) return '';
+                const i = items[0].dataIndex;
+                const r = ratioData[i];
+                return r !== null ? `Ratio: ${r.toFixed(2)}x` : '';
+              }
+            }
+          }
+        },
+        scales:{
+          x:{ grid:{display:false}, ticks:{font:{size:9}} },
+          y:{
+            beginAtZero:true,
+            grid:{ color:'#E2E6F0' },
+            ticks:{ font:{size:9}, callback: v=>'MM$'+v },
+            title:{ display:true, text:'MM$', font:{size:8}, color:'var(--mut)' }
+          },
+          yRatio:{
+            position:'right',
+            beginAtZero:true,
+            grid:{ display:false },
+            ticks:{ font:{size:9}, callback: v=>v.toFixed(2)+'x' },
+            title:{ display:true, text:'Ratio', font:{size:8}, color:'#B8860B' }
+          }
+        }
+      }
+    });
+  }
+
+  try{ _renderRCChart(); }catch(e){ console.error('RC chart error:', e); }
 })();
 
 // ─── TOP CLIENTES FACTURACIÓN 2026 ────────────────────────────
