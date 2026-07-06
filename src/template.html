@@ -1175,6 +1175,15 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
         <button class="btn" data-vrf="Renovado" title="19 clientes únicos (Tipos de Contrato)">🔄 Renovados</button>
         <button class="btn" data-vrf="Perdido" title="21 clientes perdidos (Tipos de Contrato)">📉 Perdidos</button>
       </div>
+      <div class="btn-g" id="vg-prog-filt">
+        <span class="ctrl-lbl">Programa:</span>
+        <button class="btn on" data-vpf="todos">Todos</button>
+        <button class="btn" data-vpf="BASIC">Basic Care</button>
+        <button class="btn" data-vpf="ADVANCED">Advanced Care</button>
+        <button class="btn" data-vpf="PROFESIONAL">Profesional Care</button>
+        <button class="btn" data-vpf="INTEGRAL">Integral Care</button>
+        <button class="btn" data-vpf="">Sin programa</button>
+      </div>
       <div style="flex:1;min-width:150px">
         <input class="search-inp" id="vg-srch" placeholder="🔍 Buscar cliente o coordinadora...">
       </div>
@@ -1214,6 +1223,8 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="vgSortCol('coord')">Coordinadora ↕</th>
           <th>Tipo</th>
           <th>Programa</th>
+          <th>% Margen</th>
+          <th>Margen MM$</th>
           <th>Relación</th>
           <th>🆕</th>
           <th>Inicio</th>
@@ -1226,7 +1237,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="vgSortCol('dias_vence')">Días rest. ↕</th>
         </tr></thead>
         <tbody id="tb-vg"></tbody>
-<tfoot><tr id="tfoot-vg"><td class="flab" colspan="15" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-vg"><td class="flab" colspan="17" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
       </table>
     </div>
     <div style="padding:.55rem .95rem;background:var(--gy);border-top:1px solid var(--brd);
@@ -1245,6 +1256,30 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <col style="width:18%"><col style="width:32%"><col style="width:50%">
         </colgroup>
         <tbody id="tb-prog-care"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Resumen por Programa: clientes, facturación y margen ──── -->
+  <div class="card" style="margin-top:.75rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(30,90,200,.13),rgba(30,90,200,.04))">
+      <span class="ct">Resumen por Programa</span>
+      <span style="font-size:.58rem;color:var(--mut);margin-left:auto" id="vg-prog-note">Según filtros activos</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="tb-vg-prog">
+        <thead><tr>
+          <th>Programa</th>
+          <th style="text-align:center">Clientes</th>
+          <th style="text-align:center">Contratos</th>
+          <th style="text-align:right">Fact. Anual Total</th>
+          <th style="text-align:center">% s/Cartera</th>
+          <th style="text-align:right">Fact. Anual Prom./Cliente</th>
+          <th style="text-align:center">% Margen</th>
+          <th style="text-align:right">Margen Total</th>
+          <th style="text-align:right">Margen Prom./Cliente</th>
+        </tr></thead>
+        <tbody id="tb-vg-prog-summary"></tbody>
       </table>
     </div>
   </div>
