@@ -186,7 +186,20 @@ def read_contratos(wb):
             "dias_inicio_cli": tpo_activo,
         })
 
-    return contratos
+    # Eliminar duplicados por número de contrato (filas ocultas/filtradas en Excel)
+    seen = {}
+    for c in contratos:
+        key = c["n"]
+        if key not in seen:
+            seen[key] = c
+        else:
+            # Si el duplicado está Activado y el existente no, reemplazar
+            if c["estado"] == "Activado" and seen[key]["estado"] != "Activado":
+                seen[key] = c
+    duplicados = len(contratos) - len(seen)
+    if duplicados > 0:
+        print(f"       ADVERTENCIA: {duplicados} contrato(s) duplicado(s) eliminado(s) de CONTRATOS TODOS")
+    return list(seen.values())
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1010,7 +1023,7 @@ def read_analisis_fac(wb):
     # ── Líneas de negocio mensuales: filas 31-34 (índices 30-33 en rows) ────
     result["lineas_mensual"] = {}
     if ws_anal:
-        for row in rows[30:34]:
+        for row in rows[30:35]:
             label = safe_str(row[1]).strip() if row[1] else ""
             if not label:
                 continue
@@ -1216,7 +1229,7 @@ def read_ratios_costos(wb):
     if ws is None:
         return {}
 
-    rows = list(ws.iter_rows(min_row=1, max_row=40, values_only=True))
+    rows = list(ws.iter_rows(min_row=1, max_row=43, values_only=True))
 
     MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
 
@@ -1298,24 +1311,27 @@ def read_ratios_costos(wb):
     total_marg = period_sum(idx_margen_mm)
     margen_pct_periodo = round(total_marg / total_ing, 4) if total_ing else 0
 
-    # Ratios: buscar pares por etiqueta
+    # Ratios: buscar tríos (totales, contratos, margen) por etiqueta
     ratio_defs = [
-        (["ingresos totales","costo de venta"],    ["contrato","costo de venta"],    "Costo de Venta"),
-        (["ingresos totales","beneficio"],          ["contrato","beneficio"],          "Gasto por Beneficio a los Empleados Directos"),
-        (["ingresos totales","otros gastos"],       ["recurrentes","otros gastos"],    "Otros Gastos por Naturaleza Directos"),
-        (["ingresos totales","gav"],                ["contrato","gav"],                "GAV Total (Beneficio Empleados + Otros Gastos)"),
-        (["ingreso total","costo total"],           ["ingreso por contrato","costo total"], "Costo Total"),
+        (["ingresos totales","costo de venta"],  ["contrato","costo de venta"],          ["margen","costo de venta"],  "Costo de Venta"),
+        (["ingresos totales","beneficio"],        ["contrato","beneficio"],               ["margen","beneficio"],        "Gasto por Beneficio a los Empleados Directos"),
+        (["ingresos totales","otros gastos"],     ["recurrentes","otros gastos"],         ["margen","otros gastos"],     "Otros Gastos por Naturaleza Directos"),
+        (["ingresos totales","gav"],              ["contrato","gav"],                     ["margen","gav"],              "GAV Total (Beneficio Empleados + Otros Gastos)"),
+        (["ingreso total","costo total"],         ["ingreso por contrato","costo total"], ["margen","costo total"],      "Costo Total"),
     ]
     ratios = []
-    for kw_tot, kw_con, nombre in ratio_defs:
+    for kw_tot, kw_con, kw_mar, nombre in ratio_defs:
         idx_t = find_row(kw_tot)
         idx_c = find_row(kw_con)
+        idx_m = find_row(kw_mar)
         ratios.append({
             "nombre":          nombre,
             "totales":         ratio_slice(idx_t),
             "contratos":       ratio_slice(idx_c),
+            "margen":          ratio_slice(idx_m),
             "total_totales":   round(get_total_col(idx_t), 4) if idx_t is not None else 0,
             "total_contratos": round(get_total_col(idx_c), 4) if idx_c is not None else 0,
+            "total_margen":    round(get_total_col(idx_m), 4) if idx_m is not None else 0,
         })
 
     return {
@@ -1344,6 +1360,29 @@ def read_ratios_costos(wb):
         "total_ebitda":             period_sum(idx_ebitda),
         "ratios":                   ratios,
     }
+
+
+def read_resumen_tipos_programas(wb):
+    ws = wb['Resumen Tipos Programas']
+    rows_out = []
+    for row in ws.iter_rows(min_row=3, max_row=7, values_only=True):
+        prog = safe_str(row[1]) if row[1] else ""
+        if not prog:
+            continue
+        rows_out.append({
+            "programa":        prog,
+            "clientes":        round(to_float(row[2])),
+            "contratos":       to_int(row[3]),
+            "fac_promedio":    round(to_float(row[4])),
+            "fac_esperada":    round(to_float(row[5])),
+            "pct_cartera":     round(to_float(row[6]), 4) if row[6] is not None else None,
+            "pct_margen":      round(to_float(row[7]), 4) if row[7] is not None else None,
+            "margen_total":    round(to_float(row[8])),
+            "margen_promedio": round(to_float(row[9])),
+            "dur_promedio":    round(to_float(row[10]), 1),
+            "vig_promedio":    round(to_float(row[11]), 1),
+        })
+    return rows_out
 
 
 def enrich_mapa_data(mapa_data, contratos, satisf):
@@ -1784,6 +1823,7 @@ def main():
     mapa_data  = read_mapa(wb2)
     casos_data = read_casos(wb2)
     ratios_costos = read_ratios_costos(wb2)
+    resumen_programas = read_resumen_tipos_programas(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -1797,6 +1837,7 @@ def main():
     print("[6/6] Construyendo estructuras de datos...")
     app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada)
     app_data["ratios_costos"] = ratios_costos
+    app_data["resumen_programas"] = resumen_programas
     data, nc_data, perdidos = build_data_arrays(contratos, panel_raw)
     total_com_val = sum(d["val"] for d in data if d["tipo"] == "Comercial")
     total_gar_val = sum(d["val"] for d in data if d["tipo"] == "Garantia")

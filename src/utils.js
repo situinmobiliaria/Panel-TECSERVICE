@@ -13,7 +13,7 @@ Chart.defaults.font.family="'Roboto',sans-serif";
 Chart.defaults.color='#6B7BA8';
 
 // ─── HELPERS ──────────────────────────────────────────────────
-const mm=v=>(v===null||v===undefined||isNaN(v))?'—':'MM$'+(v/1e6).toFixed(1);
+const mm=v=>(v===null||v===undefined||isNaN(v))?'—':'MM$'+fN1(v/1e6);
 const pctOf=(v,t)=>t>0&&!isNaN(v)?((v/t)*100).toFixed(1)+'%':'—';
 const shortN=s=>s.length>35?s.slice(0,34)+'…':s;
 const shortC=s=>s.split(' ')[0];

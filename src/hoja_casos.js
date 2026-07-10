@@ -202,7 +202,7 @@ function renderCasos() {
 
   const tbody2 = document.getElementById('cas-tbody2');
   if (tbody2) {
-    const _fmtM = v => v > 0 ? 'MM$' + (v / 1e6).toFixed(1).replace('.', ',') : '—';
+    const _fmtM = v => v > 0 ? 'MM$' + fN1(v / 1e6) : '—';
     const _dash = '<span style="color:var(--mut);font-size:.6rem">—</span>';
     const _mono = s => s ? `<span style="font-size:.6rem;font-family:'Roboto Mono',monospace">${_escH(s)}</span>` : _dash;
     tbody2.innerHTML = eqFilt.map(e => {

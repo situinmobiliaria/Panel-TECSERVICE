@@ -6,7 +6,7 @@
 // ─── HELPERS LOCALES ──────────────────────────────────────────
 function ytdSum(arr12,hastaMes){let s=0;for(let i=0;i<hastaMes;i++)s+=arr12[i]||0;return s;}
 function clpFmt(v){return Math.round(v).toLocaleString('es-CL');}
-function fmtMM2(v){return 'MM$'+(v/1e6).toFixed(1).replace('.',',');}
+function fmtMM2(v){return 'MM$'+fN1(v/1e6);}
 function fmtMMint2(v){return 'MM$'+Math.round(v/1e6).toLocaleString('es-CL');}
 
 // ─── ACTUALIZAR TAG Y FECHA ───────────────────────────────────
@@ -273,7 +273,7 @@ function renderFcCharts(){
   fcChartAno=new Chart(document.getElementById('cFcAno'),{
     type:'bar',
     data:{labels:['2024','2025','2026 (a la fecha)'],datasets:[{label:'Facturación',data:[t24/1e6,t25/1e6,t26/1e6],backgroundColor:bgCols,borderColor:boCols,borderWidth:1.5,borderRadius:6}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'MM$'+c.parsed.y.toFixed(1)}}},scales:{y:{beginAtZero:true,ticks:{callback:v=>'MM$'+v}}}}
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'MM$'+fN1(c.parsed.y)}}},scales:{y:{beginAtZero:true,ticks:{callback:v=>'MM$'+fN0(v)}}}}
   });
 
   // Donut: contratos usando Vendedor "ST*" para 2024/2025, presup_contr_ytd para 2026
@@ -298,7 +298,7 @@ function renderFcCharts(){
   fcChartTop=new Chart(document.getElementById('cFcTop'),{
     type:'bar',
     data:{labels:top10.map(d=>shortN(d.cliente).slice(0,28)),datasets:[{label:'Contratos',data:top10.map(d=>fcYrContr(d)/1e6),backgroundColor:C.te,stack:'s'},{label:'Otras Facturaciones',data:top10.map(d=>fcYrCorr(d)/1e6),backgroundColor:C.or,stack:'s'}]},
-    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}},tooltip:{callbacks:{label:c=>c.dataset.label+': MM$'+c.parsed.x.toFixed(1)}}},scales:{x:{stacked:true,ticks:{callback:v=>'MM$'+v}},y:{stacked:true,ticks:{font:{size:9}}}}}
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}},tooltip:{callbacks:{label:c=>c.dataset.label+': MM$'+fN1(c.parsed.x)}}},scales:{x:{stacked:true,ticks:{callback:v=>'MM$'+fN0(v)}},y:{stacked:true,ticks:{font:{size:9}}}}}
   });
 
   const top10Corr=[...FAC_DATA].filter(d=>fcYrCorr(d)>0).sort((a,b)=>fcYrCorr(b)-fcYrCorr(a)).slice(0,10);
@@ -306,7 +306,7 @@ function renderFcCharts(){
   fcChartTopCorr=new Chart(document.getElementById('cFcTopCorr'),{
     type:'bar',
     data:{labels:top10Corr.map(d=>shortN(d.cliente).slice(0,28)),datasets:[{label:'Otras Facturaciones',data:top10Corr.map(d=>fcYrCorr(d)/1e6),backgroundColor:C.or,borderColor:'#8b3a00',borderWidth:1,borderRadius:4}]},
-    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'MM$'+c.parsed.x.toFixed(1)}}},scales:{x:{ticks:{callback:v=>'MM$'+v}},y:{ticks:{font:{size:9}}}}}
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'MM$'+fN1(c.parsed.x)}}},scales:{x:{ticks:{callback:v=>'MM$'+fN0(v)}},y:{ticks:{font:{size:9}}}}}
   });
 }
 
@@ -325,7 +325,7 @@ function renderFcLineSingle(cliente){
   fcChartLineSingle=new Chart(document.getElementById('cFcLineSingle'),{
     type:'line',
     data:{labels:['2024','2025','2026 (a la fecha)'],datasets:[{label:d.cliente,data:[v24/1e6,v25/1e6,v26/1e6],borderColor:C.te,backgroundColor:'rgba(40,210,195,0.18)',borderWidth:3,fill:true,tension:0.3,pointBackgroundColor:C.az1,pointBorderColor:'#fff',pointBorderWidth:2,pointRadius:6,pointHoverRadius:8}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{title:()=>d.cliente,label:c=>c.label+': MM$'+c.parsed.y.toFixed(1)}}},scales:{y:{beginAtZero:true,ticks:{callback:v=>'MM$'+v}}}}
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{title:()=>d.cliente,label:c=>c.label+': MM$'+fN1(c.parsed.y)}}},scales:{y:{beginAtZero:true,ticks:{callback:v=>'MM$'+fN0(v)}}}}
   });
 }
 
@@ -336,7 +336,7 @@ function renderFcLineTop5(){
   if(fcChartLineTop5)fcChartLineTop5.destroy();
   fcChartLineTop5=new Chart(document.getElementById('cFcLineTop5'),{
     type:'line',data:{labels:['2024','2025','2026'],datasets:datasets},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:9},boxWidth:10,padding:6}},tooltip:{callbacks:{label:c=>c.dataset.label+': MM$'+c.parsed.y.toFixed(1)}}},scales:{y:{beginAtZero:true,ticks:{callback:v=>'MM$'+v}}}}
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:9},boxWidth:10,padding:6}},tooltip:{callbacks:{label:c=>c.dataset.label+': MM$'+fN1(c.parsed.y)}}},scales:{y:{beginAtZero:true,ticks:{callback:v=>'MM$'+fN0(v)}}}}
   });
 }
 
@@ -368,7 +368,7 @@ function renderFcTipoCliente(){
   if(fcChartTipoMonto)fcChartTipoMonto.destroy();
   fcChartTipoMonto=new Chart(document.getElementById('cFcTipoMonto'),{type:'doughnut',data:{labels:['Público','Privado'],datasets:[{data:[pubMonto,priMonto],backgroundColor:[C.az2,C.am],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+mm(c.parsed)}}}}});
   if(fcChartTipoCR)fcChartTipoCR.destroy();
-  fcChartTipoCR=new Chart(document.getElementById('cFcTipoCR'),{type:'bar',data:{labels:['Público','Privado'],datasets:[{label:'Contratos',data:[pub.contr/1e6,pri.contr/1e6],backgroundColor:C.te,stack:'s',borderRadius:4},{label:'Otras Facturaciones',data:[pub.corr/1e6,pri.corr/1e6],backgroundColor:C.or,stack:'s',borderRadius:4}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:12,padding:8}},tooltip:{callbacks:{label:c=>c.dataset.label+': MM$'+c.parsed.x.toFixed(1)}}},scales:{x:{stacked:true,ticks:{callback:v=>'MM$'+v}},y:{stacked:true}}}});
+  fcChartTipoCR=new Chart(document.getElementById('cFcTipoCR'),{type:'bar',data:{labels:['Público','Privado'],datasets:[{label:'Contratos',data:[pub.contr/1e6,pri.contr/1e6],backgroundColor:C.te,stack:'s',borderRadius:4},{label:'Otras Facturaciones',data:[pub.corr/1e6,pri.corr/1e6],backgroundColor:C.or,stack:'s',borderRadius:4}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:12,padding:8}},tooltip:{callbacks:{label:c=>c.dataset.label+': MM$'+fN1(c.parsed.x)}}},scales:{x:{stacked:true,ticks:{callback:v=>'MM$'+fN0(v)}},y:{stacked:true}}}});
 }
 
 function renderFcAlertas(){
@@ -509,17 +509,17 @@ function renderFcGraficos(){
   const ctxA=document.getElementById('cFcAnual');
   if(ctxA){
     if(_chFcAnual){_chFcAnual.destroy();}
-    _chFcAnual=new Chart(ctxA.getContext('2d'),{type:'bar',data:{labels:labels,datasets:[{label:'Ene-'+MES_CORTE_NOMBRE+' (YTD)',data:ytdData.map(v=>v/1e6),backgroundColor:C.te,borderRadius:4,stack:'s'},{label:'Resto año',data:fullData.map(v=>v/1e6),backgroundColor:'rgba(184,191,203,.6)',borderRadius:4,stack:'s'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`}}},scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v}}}}});
+    _chFcAnual=new Chart(ctxA.getContext('2d'),{type:'bar',data:{labels:labels,datasets:[{label:'Ene-'+MES_CORTE_NOMBRE+' (YTD)',data:ytdData.map(v=>v/1e6),backgroundColor:C.te,borderRadius:4,stack:'s'},{label:'Resto año',data:fullData.map(v=>v/1e6),backgroundColor:'rgba(184,191,203,.6)',borderRadius:4,stack:'s'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${fN1(c.raw)}`}}},scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+fN0(v)}}}}});
   }
   const tit=document.getElementById('fc-anual-tit');if(tit)tit.textContent=fcYrF==='todos'?'Comparativo 2024-2026 (YTD '+MES_CORTE_NOMBRE+')':'Año '+fcYrF;
-  const nota=document.getElementById('fc-anual-nota');if(nota){const tots=labels.map((l,i)=>`${l}: YTD MM$${(ytdData[i]/1e6).toFixed(0)}`).join(' · ');const pnota=APP_DATA.periodo_nota||('Ene–'+MES_CORTE_NOMBRE+' '+ANO_ACTUAL);nota.textContent=pnota+' · '+tots+' · Catálogos: ST / REAS / Trazabilidad · Incluye provisiones';}
+  const nota=document.getElementById('fc-anual-nota');if(nota){const tots=labels.map((l,i)=>`${l}: YTD MM$${fN0(ytdData[i]/1e6)}`).join(' · ');const pnota=APP_DATA.periodo_nota||('Ene–'+MES_CORTE_NOMBRE+' '+ANO_ACTUAL);nota.textContent=pnota+' · '+tots+' · Catálogos: ST / REAS / Trazabilidad · Incluye provisiones';}
   let datasetsMes;
   if(fcYrF==='todos'){datasetsMes=[{label:'2024',data:(mf['2024']||[]).map(v=>v/1e6),backgroundColor:'rgba(0,45,115,.6)',borderRadius:3},{label:'2025',data:(mf['2025']||[]).map(v=>v/1e6),backgroundColor:'rgba(255,192,0,.7)',borderRadius:3},{label:'2026',data:(mf['2026']||[]).map(v=>v/1e6),backgroundColor:'rgba(40,210,195,.85)',borderRadius:3}];}
   else{const arr=mf[fcYrF]||[];datasetsMes=[{label:'Real '+fcYrF,data:arr.map(v=>v/1e6),backgroundColor:C.te,borderRadius:3}];if(fcYrF==='2026'){const _pm=APP_DATA.analisis_fac&&APP_DATA.analisis_fac.ppto_mensual&&APP_DATA.analisis_fac.ppto_mensual.some(v=>v>0)?APP_DATA.analisis_fac.ppto_mensual.map(v=>v/2/1e6):m.presup_contr.map(v=>v/1e6);datasetsMes.push({label:'Ppto contratos',data:_pm,type:'line',borderColor:C.te,backgroundColor:'rgba(40,210,195,.1)',borderWidth:2.5,tension:0.3,pointRadius:4,pointBackgroundColor:C.te,fill:false});}}
   const ctxM=document.getElementById('cFcMensual');
   if(ctxM){
     if(_chFcMensual){_chFcMensual.destroy();}
-    _chFcMensual=new Chart(ctxM.getContext('2d'),{type:'bar',data:{labels:MESES_ABR,datasets:datasetsMes},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`}}},scales:{x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v}}}}});
+    _chFcMensual=new Chart(ctxM.getContext('2d'),{type:'bar',data:{labels:MESES_ABR,datasets:datasetsMes},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${fN1(c.raw)}`}}},scales:{x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+fN0(v)}}}}});
   }
   const titM=document.getElementById('fc-mensual-tit');if(titM)titM.textContent=fcYrF==='todos'?'Comparativo mensual 2024-2026':'Año '+fcYrF+(fcYrF==='2026'?' (vs ppto)':'');
   const notaM=document.getElementById('fc-mensual-nota');
@@ -551,11 +551,11 @@ function renderFcVsPptoMensual(){
     responsive:true,maintainAspectRatio:false,
     plugins:{
       legend:{position:'bottom',labels:{boxWidth:10,font:{size:9},padding:8}},
-      tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${c.parsed.y.toFixed(1)}`}}
+      tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${fN1(c.parsed.y)}`}}
     },
     scales:{
       x:{grid:{display:false},ticks:{font:{size:9}}},
-      y:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v,font:{size:9}}}
+      y:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+fN0(v),font:{size:9}}}
     }
   });
 

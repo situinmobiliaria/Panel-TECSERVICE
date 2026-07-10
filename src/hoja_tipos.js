@@ -79,8 +79,8 @@ function initTipos(){
     data:{labels,datasets:[{label:'MM$ cartera',
       data:coords.map(c=>DATA.filter(d=>d.tipo==='Comercial'&&d.coord===c).reduce((s,d)=>s+d.val,0)/1e6),
       backgroundColor:coords.map((_,i)=>_COORD_PALETTE[i%_COORD_PALETTE.length]),borderRadius:5,borderSkipped:false}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` MM$${c.raw.toFixed(1)}`}}},
-      scales:{y:{grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v}},x:{grid:{display:false}}}}
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` MM$${fN1(c.raw)}`}}},
+      scales:{y:{grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+fN0(v)}},x:{grid:{display:false}}}}
   });
   new Chart(document.getElementById('cTcStack').getContext('2d'),{
     type:'bar',
@@ -112,7 +112,13 @@ const _normCli=s=>s?s.trim().toUpperCase().replace(/\s+/g,' '):'';
 
 function renderRelCharts(){
   const grupos={Nuevo:0,Renovado:0,Perdido:0};
-  FAC_DATA.forEach(d=>{if(grupos[d.estado_relacion]!==undefined)grupos[d.estado_relacion]++;});
+  const _perdVgClis=new Set(PERDIDOS_VG.map(d=>_normCli(d.cliente)));
+  FAC_DATA.forEach(d=>{
+    if(grupos[d.estado_relacion]===undefined) return;
+    // No contar Perdidos de FAC_DATA que ya están en PERDIDOS_VG
+    if(d.estado_relacion==='Perdido'&&_perdVgClis.has(_normCli(d.cliente))) return;
+    grupos[d.estado_relacion]++;
+  });
   PERDIDOS_VG.forEach(d=>{grupos.Perdido++;});
   const totalCli=grupos.Nuevo+grupos.Renovado+grupos.Perdido;
   const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
@@ -140,7 +146,9 @@ function renderRelCharts(){
   const coords={};
   FAC_DATA.forEach(d=>{
     if(!coords[d.coord])coords[d.coord]={Nuevo:0,Renovado:0,Perdido:0};
-    if(coords[d.coord][d.estado_relacion]!==undefined)coords[d.coord][d.estado_relacion]++;
+    if(coords[d.coord][d.estado_relacion]===undefined) return;
+    if(d.estado_relacion==='Perdido'&&_perdVgClis.has(_normCli(d.cliente))) return;
+    coords[d.coord][d.estado_relacion]++;
   });
   PERDIDOS_VG.forEach(d=>{
     const c=d.coord||'Sin asignar';
@@ -182,10 +190,14 @@ function renderRelTabla(){
     }
   });
   const ESTADOS_REL=['Nuevo','Renovado','Perdido'];
+  // Clientes ya cubiertos por PERDIDOS_VG (fuente más completa: tiene fechas y coordinadora)
+  const perdClis=new Set(PERDIDOS_VG.map(d=>_normCli(d.cliente)));
   const facRows=FAC_DATA.filter(d=>{
     if(!ESTADOS_REL.includes(d.estado_relacion)) return false;
     const okEstado=relFilter==='todos'||d.estado_relacion===relFilter;
     if(!okEstado) return false;
+    // Excluir Perdidos de FAC_DATA que ya tienen entrada en PERDIDOS_VG
+    if(d.estado_relacion==='Perdido'&&perdClis.has(_normCli(d.cliente))) return false;
     if(relFiltroFecha===9999) return true;
     if(d.estado_relacion==='Nuevo'){
       const dias=diasCliMap[_normCli(d.cliente)];

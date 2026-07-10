@@ -184,7 +184,7 @@ function _buildPDF(){
   const kpis=[
     ['Total Contratos',DATA.length],
     ['Com. Activos',com.length],
-    ['Cartera Anual','MM$'+(totalVal/1e6).toFixed(0)],
+    ['Cartera Anual','MM$'+fN0(totalVal/1e6)],
     ['Garantías',DATA.filter(d=>d.tipo==='Garantia').length],
     ['Por Vencer 90d',vence90.length],
     ['Nuevos',DATA.filter(d=>d.es_nuevo).length],
@@ -225,12 +225,12 @@ function _buildPDF(){
     doc.setFillColor(ri%2===0?242:250,ri%2===0?244:251,ri%2===0?250:253);
     doc.rect(14,y,269,6,'F');
     doc.setTextColor(2,3,6);doc.setFont('helvetica','normal');doc.setFontSize(7);
-    const row=[c,ccom.length,cgar.length,'MM$'+(val/1e6).toFixed(1),avgPct.toFixed(1)+'%',urg];
+    const row=[c,ccom.length,cgar.length,'MM$'+fN1(val/1e6),avgPct.toFixed(1)+'%',urg];
     tx=14;row.forEach((v,i)=>{doc.text(String(v),tx+2,y+4);tx+=tw2[i];});y+=6;
   });
   doc.setFillColor(14,45,85);doc.rect(14,y,269,6,'F');
   doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(7);
-  tx=14;[`TOTAL (${coords.length} coords)`,totCOM,totGAR,'MM$'+(totMM/1e6).toFixed(1),'—',totUrg].forEach((v,i)=>{doc.text(String(v),tx+2,y+4);tx+=tw2[i];});
+  tx=14;[`TOTAL (${coords.length} coords)`,totCOM,totGAR,'MM$'+fN1(totMM/1e6),'—',totUrg].forEach((v,i)=>{doc.text(String(v),tx+2,y+4);tx+=tw2[i];});
   y+=10;
 
   doc.setFillColor(192,0,0);doc.rect(14,y,269,7,'F');
@@ -250,7 +250,7 @@ function _buildPDF(){
     doc.setFillColor(ri%2===0?255:252,ri%2===0?242:246,ri%2===0?242:246);
     doc.rect(14,y,269,6,'F');
     doc.setTextColor(2,3,6);doc.setFont('helvetica','normal');doc.setFontSize(7);
-    const row=[x.n,x.cliente.slice(0,52),x.coord.split(' ')[0],x.fin_fmt,x.dias_vence+'d','MM$'+(x.val/1e6).toFixed(1),x.pct_consumido+'%'];
+    const row=[x.n,x.cliente.slice(0,52),x.coord.split(' ')[0],x.fin_fmt,x.dias_vence+'d','MM$'+fN1(x.val/1e6),x.pct_consumido+'%'];
     tx=14;row.forEach((v,i)=>{doc.text(String(v),tx+2,y+4);tx+=utw[i];});y+=6;
   });
 

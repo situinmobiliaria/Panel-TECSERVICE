@@ -107,7 +107,7 @@ function renderAlertas(){
     // Fila subtotal del cliente
     const dif=cli.total_gap;   // Esperado − Real (positivo = déficit)
     const difColor=dif>0?'var(--rd)':dif<0?'var(--teal)':'var(--mut)';
-    const difTxt=dif===0?'—':(dif>0?'−':'+')+'MM$'+(Math.abs(dif)/1e6).toFixed(1);
+    const difTxt=dif===0?'—':(dif>0?'−':'+')+'MM$'+fN1(Math.abs(dif)/1e6);
     const subBg='background:rgba(14,45,85,.55)';
 
     html.push(`<tr style="${subBg}">
@@ -130,7 +130,7 @@ function renderAlertas(){
     const totReal    = data.reduce((s,cli)=>s+cli.total_real,0);
     const totDif     = totEsp - totReal;   // Esperado − Real
     const difColor   = totDif>0?'var(--rd)':totDif<0?'var(--teal)':'var(--mut)';
-    const difTxt     = totDif===0?'—':(totDif>0?'−':'+')+'MM$'+(Math.abs(totDif)/1e6).toFixed(1);
+    const difTxt     = totDif===0?'—':(totDif>0?'−':'+')+'MM$'+fN1(Math.abs(totDif)/1e6);
     const nContr     = data.reduce((s,cli)=>s+cli.contratos.length,0);
     tfoot.innerHTML=`<tr style="background:var(--az3);font-weight:700">
       <td colspan="9" style="padding:.4rem .7rem;font-size:.62rem;color:rgba(255,255,255,.7)">

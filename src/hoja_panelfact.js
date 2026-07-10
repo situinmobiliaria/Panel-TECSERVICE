@@ -59,7 +59,7 @@ function renderPanelFact(){
     _chPfBar=safeChart(ctxB.getContext('2d'),{
       type:'bar',
       data:{labels:labels15,datasets:[{label:'Real Servicio Técnico YTD',data:realData15,backgroundColor:C.te},{label:'Ppto Contratos YTD',data:pres15,backgroundColor:'#FFC000'}]},
-      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`}}},scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v}},y:{grid:{display:false},ticks:{font:{size:9}}}}}
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${fN1(c.raw)}`}}},scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+fN0(v)}},y:{grid:{display:false},ticks:{font:{size:9}}}}}
     });
   }
 

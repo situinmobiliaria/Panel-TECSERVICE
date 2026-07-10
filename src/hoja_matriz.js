@@ -27,7 +27,7 @@ function _focoLabel(score,p80,p60){
   if(score>=p60)return '<span class="badge bwn">Foco B</span>';
   return '<span class="badge bgy">—</span>';
 }
-function _fMMz(v){if(!v||v===0)return 'MM$0';return 'MM$'+(v/1e6).toFixed(1).replace('.',',');}
+function _fMMz(v){if(!v||v===0)return 'MM$0';return 'MM$'+fN1(v/1e6);}
 
 // ── INIT ──────────────────────────────────────────────────────────
 function initMatriz(){
@@ -501,8 +501,8 @@ function _renderScatSat(data,p80,p60){
         tooltip:{callbacks:{label:ctx=>{
           const d=ctx.raw;
           return [`${d.label.length>38?d.label.slice(0,36)+'…':d.label}`,
-            `Potencial total: MM$${d.y.toFixed(1)}`,
-            `  Equipos: MM$${(d.pot_eq/1e6).toFixed(1)} · ST: MM$${(d.pot_st/1e6).toFixed(1)}`,
+            `Potencial total: MM$${fN1(d.y)}`,
+            `  Equipos: MM$${fN1(d.pot_eq/1e6)} · ST: MM$${fN1(d.pot_st/1e6)}`,
             `Satisfacción: ${d.x}/5`,`Equipos ST: ${d.eq}`,
             `Foco ${d.foco} · ${d.cc?'Con contrato':'Sin contrato'}`,
             '→ Clic para ver detalle'];
@@ -559,8 +559,8 @@ function _renderScatEq(data,p80,p60){
         tooltip:{callbacks:{label:ctx=>{
           const d=ctx.raw;
           return [`${d.label.length>38?d.label.slice(0,36)+'…':d.label}`,
-            `Pot. Equipos: MM$${(d.pot_eq/1e6).toFixed(1)}`,
-            `Pot. ST: MM$${(d.pot_st/1e6).toFixed(1)}`,
+            `Pot. Equipos: MM$${fN1(d.pot_eq/1e6)}`,
+            `Pot. ST: MM$${fN1(d.pot_st/1e6)}`,
             `Equipos ST: ${d.x}`,
             `Satisfacción: ${d.sat??'Sin dato'}`,
             `Foco ${d.foco} · ${d.region}`,

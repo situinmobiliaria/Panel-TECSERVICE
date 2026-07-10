@@ -14,7 +14,7 @@ const REGIONES_MAPA=['todas','Metropolitana','Valparaíso',"O'Higgins",'Maule','
   'Ñuble','Araucanía','Los Ríos','Los Lagos','Aysén','Magallanes',
   'Antofagasta','Atacama','Coquimbo','Arica y Parinacota','Tarapacá'];
 
-function _fMM(v){if(!v||v===0)return 'MM$0';return 'MM$'+(v/1e6).toFixed(1).replace('.',',');}
+function _fMM(v){if(!v||v===0)return 'MM$0';return 'MM$'+fN1(v/1e6);}
 // Formato con separador de miles para tabla de regiones
 function _fT(v){if(!v||v===0)return '—';return 'MM$'+Math.round(v/1e6).toLocaleString('es-CL');}
 

@@ -129,8 +129,8 @@
          borderWidth:2.5,tension:0.3,pointRadius:4,pointBackgroundColor:C.te,order:2,fill:false}
       ]},
     options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},
-      tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`}}},
-      scales:{y:{grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v}},x:{grid:{display:false}}}}
+      tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${fN1(c.raw)}`}}},
+      scales:{y:{grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+fN0(v)}},x:{grid:{display:false}}}}
   });
 
   document.querySelectorAll('#rs-mes-seg .btn').forEach(b=>b.addEventListener('click',()=>{
@@ -206,7 +206,7 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
   type:'bar',data:{labels:['Cartera COM+GAR','Brecha'],
     datasets:[{data:[(TOTAL_CARTERA_VAL/PPTO_CONTRATOS*100).toFixed(1),(Math.max(0,PPTO_CONTRATOS-TOTAL_CARTERA_VAL)/PPTO_CONTRATOS*100).toFixed(1)],backgroundColor:[C.az2,'#E2E6F0'],borderRadius:4,borderSkipped:false}]},
   options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},
-    tooltip:{callbacks:{label:c=>` ${c.raw}% del ppto contratos (MM$${(PPTO_CONTRATOS/1e6).toFixed(1)})`}}},
+    tooltip:{callbacks:{label:c=>` ${c.raw}% del ppto contratos (MM$${fN1(PPTO_CONTRATOS/1e6)})`}}},
     scales:{x:{max:100,grid:{color:'#E2E6F0'},ticks:{callback:v=>v+'%'}},y:{grid:{display:false}}}}
 });
 
@@ -219,7 +219,7 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
   set('rs-anal-semana-tag', 'Semana ' + (af.semana||'—'));
   set('rs-sem-mes-lbl', af.mes_nombre || MES_CORTE_NOMBRE);
 
-  function _mm(v){return v===0||!v?'—':'MM$'+(v/1e6).toFixed(1).replace('.',',');}
+  function _mm(v){return v===0||!v?'—':'MM$'+fN1(v/1e6);}
   function _pct(v){if(!v&&v!==0)return'—';const s=v>=0?'+':'';return s+v.toFixed(1).replace('.',',')+'%';}
   function _col(v){return v>0?'color:var(--gn)':v<0?'color:var(--rd)':'';}
   function _isTotal(r){return r.linea&&r.linea.toLowerCase().includes('total');}
@@ -339,9 +339,9 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
       const cls = dif>=0?'+':'';
       const difCol = dif>=0?'var(--teal)':'var(--rd)';
       cards.innerHTML += `<div style="background:var(--gy);border-radius:5px;padding:.5rem;text-align:center;border-top:2px solid ${col}">
-        <div style="font-family:'Roboto Condensed',sans-serif;font-weight:900;font-size:1.05rem;color:${col}">${v.toFixed(0)}</div>
+        <div style="font-family:'Roboto Condensed',sans-serif;font-weight:900;font-size:1.05rem;color:${col}">${fN0(v)}</div>
         <div style="font-size:.55rem;color:var(--mut)">${MESES_FULL[i]}</div>
-        <div style="font-size:.5rem;color:${difCol};font-family:'Roboto Mono',monospace">${cls}${dif.toFixed(0)} vs ppto</div>
+        <div style="font-size:.5rem;color:${difCol};font-family:'Roboto Mono',monospace">${cls}${fN0(Math.abs(dif))} vs ppto</div>
       </div>`;
     }
   }
@@ -448,8 +448,12 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
           tooltip: {
             mode: 'index',
             callbacks: {
-              label: c => ` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`,
-              footer: items => _ejeFilter === 'todos' ? ' Total: MM$' + items.reduce((s,i) => s + i.raw, 0).toFixed(1) : ''
+              label: c => {
+                const total = c.chart.data.datasets.reduce((s, ds) => s + (ds.data[c.dataIndex] || 0), 0);
+                const pct = total > 0 ? fN1(c.raw / total * 100) : '0,0';
+                return ` ${c.dataset.label}: MM$${fN1(c.raw)} (${pct}%)`;
+              },
+              footer: items => _ejeFilter === 'todos' ? ' Total: MM$' + fN1(items.reduce((s,i) => s + i.raw, 0)) : ''
             }
           }
         },
@@ -471,7 +475,7 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
   const nombres = Object.keys(lineas);
   if(!nombres.length){ ctx.parentElement.innerHTML='<div style="text-align:center;color:var(--mut);padding:2rem;font-style:italic">Sin datos de línea de negocio</div>'; return; }
 
-  const _PAL = { STESTERILIZACION:'#002D73', STMEDICO:'#7B2FBE', STENDOSCOPIA:'#FFC000', STDENTAL:'#D46000' };
+  const _PAL = { STESTERILIZACION:'#002D73', STMEDICO:'#7B2FBE', STENDOSCOPIA:'#FFC000', STDENTAL:'#D46000', REAS:'#00832F' };
   const _PAL_DEF = ['#33448D','#00832F','#C00000','#28D2C3'];
   const colorOf = (n,i) => _PAL[n.toUpperCase().replace(/[^A-Z]/g,'')] || _PAL_DEF[i % _PAL_DEF.length];
 
@@ -536,8 +540,12 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
           tooltip: {
             mode: 'index',
             callbacks: {
-              label: c => ` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`,
-              footer: items => _lineaFilter === 'todos' ? ' Total: MM$' + items.reduce((s,i) => s + i.raw, 0).toFixed(1) : ''
+              label: c => {
+                const total = c.chart.data.datasets.reduce((s, ds) => s + (ds.data[c.dataIndex] || 0), 0);
+                const pct = total > 0 ? fN1(c.raw / total * 100) : '0,0';
+                return ` ${c.dataset.label}: MM$${fN1(c.raw)} (${pct}%)`;
+              },
+              footer: items => _lineaFilter === 'todos' ? ' Total: MM$' + fN1(items.reduce((s,i) => s + i.raw, 0)) : ''
             }
           }
         },
@@ -563,9 +571,10 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
   const RATIO_COLORS = ['#0A5C8C','#007A72','#7A1FAA','#E87722','#C00000'];
   const meses = RC.meses || [];
   const n = meses.length;
+  let _gastosCentrales = Array(n).fill(-50);
 
   // Helpers
-  const fmm  = v => { const a=Math.abs(v||0); return (v<0?'−':'')+a.toFixed(1); };
+  const fmm  = v => { const a=Math.abs(v||0); return (v<0?'−':'')+fN1(a); };
   const fpct = v => (v*100).toFixed(1)+'%';
   const numTd = (v, col, bold) =>
     `<td class="num" style="color:${col||'inherit'};${bold?'font-weight:700':''}">MM$${fmm(v)}</td>`;
@@ -603,6 +612,22 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
     const sepRow = (label, bg='rgba(0,45,115,.07)') =>
       `<tr style="background:${bg}"><td colspan="${n+2}" style="font-size:.58rem;font-weight:700;color:var(--mut);padding:.25rem .6rem;letter-spacing:.05em">${label.toUpperCase()}</td></tr>`;
 
+    // Fila resultado (destacada, fondo suave)
+    const rowResult = (label, arr, total, colorFn, fmt) => {
+      const tds = arr.map(v=>{
+        const col = colorFn ? colorFn(v) : 'inherit';
+        const disp = fmt==='pct' ? fpct(v) : 'MM$'+fmm(v);
+        return `<td class="num" style="color:${col};font-weight:700">${disp}</td>`;
+      }).join('');
+      const totCol  = colorFn ? colorFn(total) : 'inherit';
+      const totDisp = fmt==='pct' ? fpct(total) : 'MM$'+fmm(total);
+      return `<tr style="background:rgba(0,45,115,.04)">
+        <td style="font-size:.62rem;white-space:nowrap;padding:.35rem .6rem;font-weight:700">${label}</td>
+        ${tds}
+        <td class="num" style="color:${totCol};font-weight:700">${totDisp}</td>
+      </tr>`;
+    };
+
     valsEl.innerHTML = `
       <div style="overflow-x:auto">
         <table class="tbl" style="font-size:.63rem;width:100%;min-width:500px">
@@ -615,25 +640,118 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
             ${rowBase('Ingresos Totales (MM$)',RC.ingresos_totales,RC.total_ingresos_totales,colIng)}
             ${rowBase('Ingresos por Contratos (MM$)',RC.ingresos_contratos,RC.total_ingresos_contratos,colContr)}
             ${rowBase('Ingresos Otras Facturaciones (MM$)',RC.ingresos_otras,RC.total_ingresos_otras,colOtras)}
-            ${sepRow('Costos')}
-            ${rowBase('Costo de Ventas (MM$)',RC.costo_ventas,RC.total_costo_ventas,colCost)}
-            ${rowBase('Gasto Beneficio Empleados (MM$)',RC.gastos_empleados,RC.total_gastos_empleados,colCost)}
-            ${rowBase('Otros Gastos por Naturaleza (MM$)',RC.otros_gastos,RC.total_otros_gastos,colCost)}
-            ${rowBase('GAV Total (MM$)',RC.gav_total,RC.total_gav,colCost)}
-            ${sepRow('Resultados','rgba(0,122,114,.07)')}
-            ${rowBase('Margen del Producto (MM$)',RC.margen_mm,RC.total_margen_mm,colMarg)}
+            ${rowBase('(−) Costo de Ventas (MM$)',RC.costo_ventas,RC.total_costo_ventas,colCost)}
+            ${rowResult('= Margen del Producto (MM$)',RC.margen_mm,RC.total_margen_mm,colMarg)}
             ${rowBase('Margen %',RC.margen_pct,RC.total_margen_pct,colPct,'pct')}
-            ${rowBase('EBITDA (MM$)',RC.ebitda,RC.total_ebitda,colEbit)}
+            ${sepRow('Gastos Operacionales')}
+            ${rowBase('(−) Gasto Beneficio Empleados (MM$)',RC.gastos_empleados,RC.total_gastos_empleados,colCost)}
+            ${rowBase('(−) Otros Gastos por Naturaleza (MM$)',RC.otros_gastos,RC.total_otros_gastos,colCost)}
+            ${rowResult('= EBITDA Directo (MM$)',RC.ebitda,RC.total_ebitda,colEbit)}
+            <tr id="rc-gc-anchor"></tr>
           </tbody>
         </table>
       </div>`;
+
+    // ── Fila GC + EBITDA Empresa: DOM puro ────────────────────────
+    var gcAnchor = valsEl.querySelector('#rc-gc-anchor');
+    if(gcAnchor){
+      function makeResultRowDom(label, color, bg){
+        var row = document.createElement('tr');
+        row.style.cssText = 'background:' + bg;
+        var lbl = document.createElement('td');
+        lbl.style.cssText = 'font-size:.62rem;white-space:nowrap;padding:.35rem .6rem;font-weight:700;color:' + color;
+        lbl.textContent = label;
+        row.appendChild(lbl);
+        var cells = [];
+        for(var ci=0; ci<n; ci++){
+          var td = document.createElement('td');
+          td.className = 'num';
+          td.style.cssText = 'font-weight:700;color:' + color;
+          row.appendChild(td); cells.push(td);
+        }
+        var totTd = document.createElement('td');
+        totTd.className = 'num';
+        totTd.style.cssText = 'font-weight:700;color:' + color;
+        row.appendChild(totTd);
+        return { row: row, cells: cells, totTd: totTd };
+      }
+
+      // Fila inputs GC
+      var gcRow = document.createElement('tr');
+      gcRow.style.background = 'rgba(255,140,0,.07)';
+      var gcLbl = document.createElement('td');
+      gcLbl.style.cssText = 'font-size:.62rem;white-space:nowrap;padding:.3rem .6rem';
+      gcLbl.innerHTML = '<span style="color:var(--or);font-weight:700">(−) Gastos Centrales (MM$)</span>'
+                      + '<span style="font-size:.5rem;color:var(--mut);font-weight:400"> \xB7 editable</span>';
+      gcRow.appendChild(gcLbl);
+      var gcInputs = [];
+      for(var gi=0; gi<n; gi++){
+        var tdI = document.createElement('td');
+        tdI.className = 'num'; tdI.style.cssText = 'padding:.15rem .3rem';
+        var inp = document.createElement('input');
+        inp.type = 'number'; inp.step = '0.1'; inp.value = '-50';
+        inp.style.cssText = 'width:54px;font-size:.62rem;font-family:Roboto Mono,monospace;text-align:right;border:1px solid rgba(255,140,0,.45);border-radius:3px;padding:.15rem .3rem;background:transparent;color:inherit;outline:none';
+        tdI.appendChild(inp); gcRow.appendChild(tdI); gcInputs.push(inp);
+      }
+      var gcSumTd = document.createElement('td');
+      gcSumTd.className = 'num'; gcSumTd.style.cssText = 'font-weight:700;color:var(--or)';
+      gcRow.appendChild(gcSumTd);
+
+      // Fila EBITDA Empresa (resultado final)
+      var ebitdaEmp = makeResultRowDom('= EBITDA Empresa (MM$)', '#007A72', 'rgba(0,122,114,.1)');
+
+      var par = gcAnchor.parentNode;
+      par.insertBefore(gcRow,          gcAnchor);
+      par.insertBefore(ebitdaEmp.row,  gcAnchor);
+      gcAnchor.remove();
+
+      function _onGCChange(){
+        for(var i=0; i<n; i++){
+          _gastosCentrales[i] = parseFloat(gcInputs[i].value) || 0;
+        }
+        var gcSum = 0;
+        for(var i=0; i<n; i++) gcSum += _gastosCentrales[i];
+        gcSumTd.textContent = 'MM$' + fmm(gcSum);
+
+        var totEmp = 0;
+        for(var i=0; i<n; i++){
+          var eAdj = (RC.ebitda[i] || 0) + (_gastosCentrales[i] || 0);
+          totEmp += eAdj;
+          ebitdaEmp.cells[i].textContent = 'MM$' + fmm(eAdj);
+          ebitdaEmp.cells[i].style.color = eAdj >= 0 ? '#007A72' : 'var(--rd)';
+        }
+        ebitdaEmp.totTd.textContent = 'MM$' + fmm(totEmp);
+        ebitdaEmp.totTd.style.color = totEmp >= 0 ? '#007A72' : 'var(--rd)';
+
+        _renderRatios();
+        if(_rcChart){ try{ _renderRCChart(); }catch(e){ console.error(e); } }
+      }
+
+      for(var gi=0; gi<n; gi++){
+        gcInputs[gi].addEventListener('input',  _onGCChange);
+        gcInputs[gi].addEventListener('change', _onGCChange);
+      }
+      // Poblar valores iniciales directamente (sin llamar _onGCChange que accede a let aún no declarados)
+      var gcSumInit = 0;
+      for(var ii=0; ii<n; ii++) gcSumInit += _gastosCentrales[ii];
+      gcSumTd.textContent = 'MM$' + fmm(gcSumInit);
+      var totEmpInit = 0;
+      for(var ii=0; ii<n; ii++){
+        var eAdjInit = (RC.ebitda[ii] || 0) + (_gastosCentrales[ii] || 0);
+        totEmpInit += eAdjInit;
+        ebitdaEmp.cells[ii].textContent = 'MM$' + fmm(eAdjInit);
+        ebitdaEmp.cells[ii].style.color = eAdjInit >= 0 ? '#007A72' : 'var(--rd)';
+      }
+      ebitdaEmp.totTd.textContent = 'MM$' + fmm(totEmpInit);
+      ebitdaEmp.totTd.style.color = totEmpInit >= 0 ? '#007A72' : 'var(--rd)';
+    }
   }
 
   // ── Toggle + tabla de ratios ───────────────────────────────────
   let _rcMode = 'totales';
   const seg = document.getElementById('rs-ratios-seg');
   if(seg){
-    [{key:'totales',label:'Ingresos Totales'},{key:'contratos',label:'Ingresos Contratos'}].forEach((opt,idx)=>{
+    [{key:'totales',label:'Ingresos Totales'},{key:'contratos',label:'Ingresos Contratos'},{key:'margen',label:'Margen del Producto'}].forEach((opt,idx)=>{
       const b = document.createElement('button');
       b.className = 'btn'+(idx===0?' on':'');
       b.textContent = opt.label;
@@ -654,28 +772,61 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
     const thMeses = meses.map(m=>`<th style="${colHdr}">${m.slice(0,3)}</th>`).join('');
     const thTot   = `<th style="${colHdr};background:#1a3a6b">Total</th>`;
 
-    const modoLabel = _rcMode==='totales' ? 'Ingresos Totales' : 'Ingresos Contratos';
+    const modoLabel = _rcMode==='totales' ? 'Ingresos Totales' : _rcMode==='contratos' ? 'Ingresos Contratos' : 'Margen del Producto';
+    const gcHasValues = _gastosCentrales.some(v=>v!==0);
 
-    const ratioRows = RC.ratios.map((r,i)=>{
-      const col = RATIO_COLORS[i];
-      const vals = _rcMode==='totales' ? r.totales : r.contratos;
-      const total = _rcMode==='totales' ? r.total_totales : r.total_contratos;
+    // Denominador: ingreso base según modo
+    const ingBase = _rcMode==='totales'   ? (RC.ingresos_totales  ||[]) :
+                    _rcMode==='contratos' ? (RC.ingresos_contratos ||[]) :
+                                            (RC.margen_mm          ||[]);
+
+    // Numeradores MM$ (valores absolutos) para los 5 ratios
+    const cdvArr = (RC.costo_ventas    ||[]).map(v=>Math.abs(v||0));
+    const empArr = (RC.gastos_empleados||[]).map(v=>Math.abs(v||0));
+    const otrArr = (RC.otros_gastos    ||[]).map(v=>Math.abs(v||0));
+    const gavArr = (RC.gav_total       ||[]).map(v=>Math.abs(v||0));
+
+    // GC: el usuario ingresa negativo (-50 = 50 MM$ de costo); usamos abs para sumar al costo
+    const gavAdjArr  = Array.from({length:n}, (_,i)=> gavArr[i]             + Math.abs(_gastosCentrales[i]||0));
+    const costAdjArr = Array.from({length:n}, (_,i)=> gavArr[i] + cdvArr[i] + Math.abs(_gastosCentrales[i]||0));
+
+    // Numeradores por índice de ratio: 0=CdV, 1=Emp, 2=Otr, 3=GAV(+GC), 4=Costo(+GC)
+    const numArrays = [cdvArr, empArr, otrArr, gavAdjArr, costAdjArr];
+
+    const computeVals = (nums) =>
+      Array.from({length:n}, (_,i)=>{
+        const den = Math.abs(ingBase[i]||0);
+        return den>0 ? nums[i]/den : null;
+      });
+
+    const computeTotal = (nums) => {
+      const sumNum = nums.slice(0,n).reduce((s,v)=>s+v, 0);
+      const sumDen = ingBase.slice(0,n).reduce((s,v)=>s+Math.abs(v||0), 0);
+      return sumDen>0 ? sumNum/sumDen : 0;
+    };
+
+    const ratioRows = RC.ratios.map((r,idx)=>{
+      const nums   = numArrays[idx];
+      const vals   = computeVals(nums);
+      const total  = computeTotal(nums);
+      const isAdj  = gcHasValues && (idx===3 || idx===4);
+
       const tds = vals.map(v=>{
         const x = v===null ? 0 : v;
-        const c = x>=1?'#007A72':x>=0.7?'var(--or)':'var(--rd)';
-        return `<td class="num" style="color:${c}">${x.toFixed(2)}x</td>`;
+        return `<td class="num"${isAdj?` style="color:var(--or);font-weight:600"`:``}>${fN1(x*100)}%</td>`;
       }).join('');
-      const totC = total>=1?'#007A72':total>=0.7?'var(--or)':'var(--rd)';
-      const labelFull = `<span style="color:var(--mut);font-weight:400">${modoLabel}</span><span style="color:var(--mut)"> / </span>${r.nombre}`;
-      return `<tr>
+      const adjBadge  = isAdj ? `<span style="font-size:.5rem;background:rgba(255,140,0,.18);color:var(--or);border-radius:3px;padding:.05rem .3rem;margin-left:.3rem">+GC</span>` : '';
+      const labelFull = `${r.nombre}${adjBadge}<span style="color:var(--mut)"> / </span><span style="color:var(--mut);font-weight:400">${modoLabel}</span>`;
+      const rowBg     = isAdj ? 'background:rgba(255,140,0,.06)' : '';
+      return `<tr style="${rowBg}">
         <td style="white-space:nowrap;padding:.35rem .6rem">
-          <span style="display:inline-block;width:8px;height:8px;background:${col};border-radius:50%;margin-right:.4rem;vertical-align:middle"></span>
           <span style="font-size:.62rem;font-weight:600">${labelFull}</span>
         </td>
         ${tds}
-        <td class="num" style="color:${totC};font-weight:700">${total.toFixed(2)}x</td>
+        <td class="num" style="font-weight:700${isAdj?';color:var(--or)':''}">${fN1(total*100)}%</td>
       </tr>`;
     }).join('');
+
     cardsEl.innerHTML = `
       <div style="overflow-x:auto">
         <table class="tbl" style="font-size:.63rem;width:100%;min-width:500px">
@@ -695,8 +846,9 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
 
   // Opciones de ingreso base (denominador del ratio)
   const BASE_OPTS = [
-    { key:'totales',   label:'Ingresos Totales',   dataKey:'ingresos_totales',   color:'#002D73' },
+    { key:'totales',   label:'Ingresos Totales',    dataKey:'ingresos_totales',   color:'#002D73' },
     { key:'contratos', label:'Ingresos Contratos',  dataKey:'ingresos_contratos', color:'#0A5C8C' },
+    { key:'margen',    label:'Margen del Producto', dataKey:'margen_mm',          color:'#007A72' },
   ];
   // Opciones de costo a comparar (denominador del ratio)
   const COSTO_OPTS = [
@@ -763,11 +915,16 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
       costoData = safeArr(RC[costoOpt.dataKey]).map(v=>Math.abs(v||0));
     }
 
-    // Ratio mes a mes: ingreso base / costo
+    // Ajuste de Gastos Centrales a GAV Total y Costos Totales (GC negativo = costo, usamos abs)
+    if(_gastosCentrales.some(v=>v!==0) && (costoOpt.key==='gav_total'||costoOpt.key==='costo_total')){
+      costoData = costoData.map((v,i)=>v+Math.abs(_gastosCentrales[i]||0));
+    }
+
+    // Ratio mes a mes: costo / ingreso base (% del ingreso)
     const ratioData = baseData.map((ing, i) => {
       const b = Math.abs(ing || 0);
-      const c = costoData[i] || 0;
-      return c > 0 ? +((b / c).toFixed(3)) : null;
+      const c = Math.abs(costoData[i] || 0);
+      return b > 0 ? +((c / b).toFixed(4)) : null;
     });
 
     const datasets = [
@@ -792,7 +949,7 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
         order: 3,
       },
       {
-        label: 'Ratio ' + baseOpt.label + ' / ' + costoOpt.label,
+        label: 'Ratio ' + costoOpt.label + ' / ' + baseOpt.label,
         data: ratioData,
         type: 'line',
         borderColor: '#FFC000',
@@ -819,12 +976,12 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
           tooltip:{
             filter: item => item.dataset.yAxisID !== 'yRatio',
             callbacks:{
-              label: c => ` ${c.dataset.label}: MM$${(c.raw||0).toFixed(1)}`,
+              label: c => ` ${c.dataset.label}: MM$${fN1(c.raw||0)}`,
               footer: items => {
                 if(!items.length) return '';
                 const i = items[0].dataIndex;
                 const r = ratioData[i];
-                return r !== null ? `Ratio: ${r.toFixed(2)}x` : '';
+                return r !== null ? `Ratio: ${fN1(r*100)}%` : '';
               }
             }
           }
@@ -834,15 +991,15 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
           y:{
             beginAtZero:true,
             grid:{ color:'#E2E6F0' },
-            ticks:{ font:{size:9}, callback: v=>'MM$'+v },
+            ticks:{ font:{size:9}, callback: v=>'MM$'+fN0(v) },
             title:{ display:true, text:'MM$', font:{size:8}, color:'var(--mut)' }
           },
           yRatio:{
             position:'right',
             beginAtZero:true,
             grid:{ display:false },
-            ticks:{ font:{size:9}, callback: v=>v.toFixed(2)+'x' },
-            title:{ display:true, text:'Ratio', font:{size:8}, color:'#B8860B' }
+            ticks:{ font:{size:9}, callback: v=>fN1(v*100)+'%' },
+            title:{ display:true, text:'% Costo / Ingreso', font:{size:8}, color:'#B8860B' }
           }
         }
       }
@@ -866,8 +1023,8 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
       datasets:[{label:'Facturación YTD 2026',data:top.map(p=>(p.real_ytd||0)/1e6),
         backgroundColor:top.map((_,i)=>i<3?C.az2:i<6?C.az3:'#8AAEF0'),borderRadius:4}]},
     options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` MM$${c.raw.toFixed(1)}`}}},
-      scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` MM$${fN1(c.raw)}`}}},
+      scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+fN0(v)}},
         y:{grid:{display:false},ticks:{font:{size:9}}}}}
   });
 })();
@@ -891,8 +1048,8 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
       datasets:[{label:'Cartera COM (MM$)',data:arr.map(([,g])=>g.val/1e6),
         backgroundColor:arr.map((_,i)=>COORD_COLORS[i%COORD_COLORS.length]),borderRadius:4}]},
     options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:(c)=>{const g=arr[c.dataIndex][1];return ` MM$${c.raw.toFixed(1)} · ${g.n} contratos`;} }}},
-      scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v,font:{size:9}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:(c)=>{const g=arr[c.dataIndex][1];return ` MM$${fN1(c.raw)} · ${g.n} contratos`;} }}},
+      scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+fN0(v),font:{size:9}}},
         y:{grid:{display:false},ticks:{font:{size:9}}}}}
   });
 })();
@@ -958,7 +1115,7 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
   const _allAlt=window.ALERTA_DATA||[];
   if(!_allAlt.length){body.innerHTML='<div style="color:var(--mut);font-size:.7rem;text-align:center;padding:1rem">Sin clientes bajo contrato</div>';return;}
 
-  const gapFmt=v=>v===0?'—':(v>0?'−':'+')+'MM$'+(Math.abs(v)/1e6).toFixed(1);
+  const gapFmt=v=>v===0?'—':(v>0?'−':'+')+'MM$'+fN1(Math.abs(v)/1e6);
   const gapCol=v=>v>0?'var(--rd)':v<0?'var(--teal)':'var(--mut)';
 
   // Botones de coordinador — default: Cynthia

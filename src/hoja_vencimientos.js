@@ -75,8 +75,8 @@ function renderHz(){
       {label:'Comercial (MM$)',data:bkeys.map(k=>buckets[k].com),backgroundColor:C.az2,borderRadius:4,stack:'s',borderSkipped:false},
       {label:'Garantía',data:bkeys.map(k=>buckets[k].gar),backgroundColor:C.te,borderRadius:4,stack:'s',borderSkipped:false}
     ]},
-    options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${c.raw.toFixed(1)}`}}},
-      scales:{y:{stacked:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+v}},x:{stacked:true,grid:{display:false},ticks:{font:{size:9}}}}}
+    options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${fN1(c.raw)}`}}},
+      scales:{y:{stacked:true,grid:{color:'#E2E6F0'},ticks:{callback:v=>'MM$'+fN0(v)}},x:{stacked:true,grid:{display:false},ticks:{font:{size:9}}}}}
   });
 }
 function hzSort(f){renderHz();}
