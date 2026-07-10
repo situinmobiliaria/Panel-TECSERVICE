@@ -1176,6 +1176,15 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
         <button class="btn" data-vrf="Renovado" title="19 clientes únicos (Tipos de Contrato)">🔄 Renovados</button>
         <button class="btn" data-vrf="Perdido" title="21 clientes perdidos (Tipos de Contrato)">📉 Perdidos</button>
       </div>
+      <div class="btn-g" id="vg-prog-filt">
+        <span class="ctrl-lbl">Programa:</span>
+        <button class="btn on" data-vpf="todos">Todos</button>
+        <button class="btn" data-vpf="BASIC">Basic Care</button>
+        <button class="btn" data-vpf="ADVANCED">Advanced Care</button>
+        <button class="btn" data-vpf="PROFESIONAL">Profesional Care</button>
+        <button class="btn" data-vpf="INTEGRAL">Integral Care</button>
+        <button class="btn" data-vpf="">Sin programa</button>
+      </div>
       <div style="flex:1;min-width:150px">
         <input class="search-inp" id="vg-srch" placeholder="🔍 Buscar cliente o coordinadora...">
       </div>
@@ -1215,6 +1224,8 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="vgSortCol('coord')">Coordinadora ↕</th>
           <th>Tipo</th>
           <th>Programa</th>
+          <th>% Margen</th>
+          <th>Margen MM$</th>
           <th>Relación</th>
           <th>🆕</th>
           <th>Inicio</th>
@@ -1227,7 +1238,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="vgSortCol('dias_vence')">Días rest. ↕</th>
         </tr></thead>
         <tbody id="tb-vg"></tbody>
-<tfoot><tr id="tfoot-vg"><td class="flab" colspan="15" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-vg"><td class="flab" colspan="17" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
       </table>
     </div>
     <div style="padding:.55rem .95rem;background:var(--gy);border-top:1px solid var(--brd);
@@ -4151,6 +4162,8 @@ function renderSemaforo(){
 
 let vgSortF='val', vgFilt='todos', vgRelF='todos', vgSrch='', vgSortA=false;
 let vgSortCF='', vgSortCA=true;
+let vgProgF='todos';
+const PROG_MARGIN={BASIC:0.55,ADVANCED:0.60,PROFESIONAL:0.65,INTEGRAL:0.65};
 
 function _getRel(cli){
   const r=DATA.find(d=>d.cliente===cli);
@@ -4171,6 +4184,7 @@ function vgData(){
     if(vgRelF!=='todos')d=d.filter(x=>(x.estado_relacion||'N/D')===vgRelF);
   }
   if(vgSrch)d=d.filter(x=>x.cliente.toLowerCase().includes(vgSrch)||x.coord.toLowerCase().includes(vgSrch));
+  if(vgProgF!=='todos')d=d.filter(x=>(_progKey(x.programa)||'')===vgProgF);
   if(window.vgCliFilter)d=d.filter(x=>x.cliente.toLowerCase().includes(vgCliFilter.toLowerCase()));
   d.sort((a,b)=>{
     if(vgSortCF){let va=a[vgSortCF],vb=b[vgSortCF];if(typeof va==='string'){va=va.toLowerCase();vb=vb.toLowerCase();}return vgSortCA?(va>vb?1:-1):(va<vb?1:-1);}
@@ -4210,6 +4224,8 @@ function renderVG(){
       <td style="font-size:.62rem;color:var(--mut)">${shortC(x.coord)}</td>
       <td>${esPerdidoFac?'<span style="font-size:.6rem;color:var(--mut)">Expirado</span>':tipoBadge(x.tipo)}</td>
       <td style="text-align:center">${esPerdidoFac?'—':_progBadge(x.programa||'')}</td>
+      <td style="text-align:center;font-family:'Roboto Mono',monospace;font-size:.63rem;font-weight:700;color:${(()=>{const k=_progKey(x.programa);return k?_PROG_FEATURES[k].color:'var(--mut)';})()}">${(()=>{const p=PROG_MARGIN[_progKey(x.programa)];return p?Math.round(p*100)+'%':'—';})()}</td>
+      <td style="text-align:right;font-size:.63rem;font-weight:700;color:var(--teal)">${(()=>{const p=PROG_MARGIN[_progKey(x.programa)];if(!p||!x.val||esPerdidoFac)return'—';const fa=x.long_dias>0?x.val/(x.long_dias/365):x.val;return mm(fa*p);})()}</td>
       <td><span style="background:${relCol};color:#fff;padding:.14rem .35rem;border-radius:3px;font-size:.55rem;font-weight:700;white-space:nowrap" title="${rel}">${relIco} ${rel}</span></td>
       <td>${esPerdidoFac?'—':nueBadge(x.es_nuevo)}</td>
       <td style="font-size:.67rem">${x.inicio_fmt}</td>
@@ -4221,7 +4237,64 @@ function renderVG(){
       <td style="min-width:75px">${esPerdidoFac?'<div class="prf" style="height:6px;background:#FF6B6B;border-radius:3px;width:100%"></div>':pbarHTML(x.pct_consumido,urgC(x.dias_vence))}<span style="font-size:.6rem;color:var(--mut)">${pctBar}%</span></td>
       <td>${diasVenceLabel}</td>
     </tr>`;
-  }).join('')||`<tr><td colspan="15" style="text-align:center;padding:2rem;color:var(--mut)">Sin resultados</td></tr>`;
+  }).join('')||`<tr><td colspan="17" style="text-align:center;padding:2rem;color:var(--mut)">Sin resultados</td></tr>`;
+
+  // ── Resumen por programa (clientes, facturación, margen) ────
+  const progKeys=['BASIC','ADVANCED','PROFESIONAL','INTEGRAL',''];
+  const progLabels={BASIC:'Basic Care Program',ADVANCED:'Advanced Care Program',PROFESIONAL:'Profesional Care Program',INTEGRAL:'Integral Care Program','':'Sin programa'};
+  const progByKey={};
+  progKeys.forEach(k=>progByKey[k]={clientes:new Set(),n:0,fa:0});
+  const dActivosProg=d.filter(x=>!x._es_perdido_fac);
+  dActivosProg.forEach(x=>{
+    const k=_progKey(x.programa)||'';
+    if(!progByKey[k])progByKey[k]={clientes:new Set(),n:0,fa:0};
+    progByKey[k].clientes.add(x.cliente);
+    progByKey[k].n++;
+    const fa=x.long_dias>0?x.val/(x.long_dias/365):x.val;
+    progByKey[k].fa+=fa;
+  });
+  const progSummaryBody=document.getElementById('tb-vg-prog-summary');
+  if(progSummaryBody){
+    const totalFaAll=Object.values(progByKey).reduce((s,v)=>s+v.fa,0);
+    // Las 4 categorías oficiales siempre se muestran (aunque tengan 0 clientes); "Sin programa" solo si hay datos
+    const rows=progKeys.filter(k=>k!==''||progByKey[k].n>0).map(k=>{
+      const g=progByKey[k]; const mg=PROG_MARGIN[k]||null;
+      const nCli=g.clientes.size;
+      const promCli=nCli>0?g.fa/nCli:0;
+      const margenT=mg?g.fa*mg:null; const margenPromCli=mg&&nCli>0?promCli*mg:null;
+      const pctShare=totalFaAll>0?(g.fa/totalFaAll*100):0;
+      const col=k?(_PROG_FEATURES[k]?_PROG_FEATURES[k].color:'#888'):'#888';
+      return `<tr>
+        <td><strong style="font-size:.67rem;color:${col}">${progLabels[k]}</strong></td>
+        <td style="text-align:center;font-weight:700">${nCli}</td>
+        <td style="text-align:center;color:var(--mut)">${g.n}</td>
+        <td style="text-align:right;font-weight:700;color:var(--az2)">${mm(g.fa)}</td>
+        <td style="text-align:center;color:var(--mut)">${pctShare.toFixed(1)}%</td>
+        <td style="text-align:right;color:var(--mut)">${nCli>0?mm(promCli):'—'}</td>
+        <td style="text-align:center;font-weight:700;color:${col}">${mg?Math.round(mg*100)+'%':'—'}</td>
+        <td style="text-align:right;font-weight:700;color:var(--teal)">${margenT!=null?mm(margenT):'—'}</td>
+        <td style="text-align:right;color:var(--mut)">${margenPromCli!=null?mm(margenPromCli):'—'}</td>
+      </tr>`;
+    });
+    // Fila de totales (clientes únicos deduplicados a través de todos los programas)
+    const totalClientesSet=new Set(dActivosProg.map(x=>x.cliente));
+    const totalN=Object.values(progByKey).reduce((s,v)=>s+v.n,0);
+    const totalFa=totalFaAll;
+    const totalMg=progKeys.reduce((s,k)=>{const g=progByKey[k];const mg=PROG_MARGIN[k];return s+(g&&mg?g.fa*mg:0);},0);
+    const totalCli=totalClientesSet.size;
+    rows.push(`<tr style="background:rgba(30,90,200,.07);font-weight:800">
+      <td>TOTAL</td>
+      <td style="text-align:center">${totalCli}</td>
+      <td style="text-align:center">${totalN}</td>
+      <td style="text-align:right;color:var(--az2)">${mm(totalFa)}</td>
+      <td style="text-align:center">100%</td>
+      <td style="text-align:right;color:var(--mut)">${totalCli?mm(totalFa/totalCli):'—'}</td>
+      <td style="text-align:center">—</td>
+      <td style="text-align:right;color:var(--teal)">${mm(totalMg)}</td>
+      <td style="text-align:right;color:var(--mut)">${totalCli?mm(totalMg/totalCli):'—'}</td>
+    </tr>`);
+    progSummaryBody.innerHTML=rows.join('');
+  }
 
   const esFiltPerdido=vgRelF==='Perdido';
   const nActivosMostrados=d.filter(x=>!x._es_perdido_fac).length;
@@ -4348,6 +4421,7 @@ function initVision(){
   document.querySelectorAll('#vg-sort .btn').forEach(b=>{b.addEventListener('click',()=>{vgSortF=b.dataset.vs;vgSortCF='';document.querySelectorAll('#vg-sort .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
   document.querySelectorAll('#vg-filt .btn').forEach(b=>{b.addEventListener('click',()=>{vgFilt=b.dataset.vf;document.querySelectorAll('#vg-filt .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
   document.querySelectorAll('#vg-rel-filt .btn').forEach(b=>{b.addEventListener('click',()=>{vgRelF=b.dataset.vrf;document.querySelectorAll('#vg-rel-filt .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
+  document.querySelectorAll('#vg-prog-filt .btn').forEach(b=>{b.addEventListener('click',()=>{vgProgF=b.dataset.vpf;document.querySelectorAll('#vg-prog-filt .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
   document.getElementById('vg-srch').oninput=e=>{vgSrch=e.target.value.toLowerCase();renderVG();};
   renderVG();
   _renderProgTable();
