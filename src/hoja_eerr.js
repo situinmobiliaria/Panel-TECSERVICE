@@ -27,136 +27,158 @@
   const sumArr = arr => (arr||[]).slice(0,n).reduce((s,v)=>s+(v||0),0);
 
   // ── EERR TABLE ────────────────────────────────────────────────
-  const eerrEl = document.getElementById('eerr-table');
-  if(eerrEl){
+  const eerrEl  = document.getElementById('eerr-table');
+  const segEl   = document.getElementById('eerr-mes-seg');
+  let _selMonths = Array.from({length:n},(_,i)=>i); // todos seleccionados por defecto
+
+  const hasGaAd = [R2.finiquitos,R2.multas,R2.prov_obsolescencias,R2.prov_incobrables,R2.prov_habilitacion]
+    .some(a=>(a||[]).some(v=>v!==0));
+
+  function renderEERR(){
+    if(!eerrEl) return;
+    const sm = _selMonths;
+    const ns = sm.length;
+    if(ns===0){ eerrEl.innerHTML='<p style="padding:1rem;color:var(--mut)">Selecciona al menos un mes.</p>'; return; }
+
     const colHdr    = 'background:var(--az3);color:rgba(255,255,255,.85);font-size:.6rem;font-weight:700;text-align:center;padding:.35rem .4rem';
     const colHdrSub = 'background:#1e4080;color:rgba(255,255,255,.7);font-size:.55rem;font-weight:600;text-align:center;padding:.2rem .3rem';
-    // 2 columnas por mes (REAL + PTTO) + 2 totales (Total R + Total P)
-    const totalCols = n * 2 + 3; // label + n*2 + totalR + totalP
-    const thMeses1  = meses.map(m=>`<th colspan="2" style="${colHdr}">${m.slice(0,3)}</th>`).join('');
-    const thMeses2  = meses.map(()=>`<th style="${colHdrSub}">REAL</th><th style="${colHdrSub}">PTTO</th>`).join('');
+    const colHdrTot = 'background:#1a3a6b;color:rgba(255,255,255,.85);font-size:.6rem;font-weight:700;text-align:center;padding:.35rem .4rem';
+    const colHdrVar = 'background:#2a4a2a;color:rgba(255,255,255,.7);font-size:.55rem;font-weight:600;text-align:center;padding:.2rem .3rem';
+    // label + ns*4 (REAL,PTTO,VAR,VAR%) + 4 totales
+    const totalCols = 1 + ns*4 + 4;
 
-    const tdR  = v => `<td class="num" style="color:#111">MM$${fmm(v)}</td>`;
-    const tdP  = v => `<td class="num" style="color:var(--mut)">MM$${fmm(v)}</td>`;
-    const tdRb = v => `<td class="num" style="font-weight:700;color:#111">MM$${fmm(v)}</td>`;
-    const tdPb = v => `<td class="num" style="font-weight:700;color:var(--mut)">MM$${fmm(v)}</td>`;
-    const tdRW = v => `<td class="num" style="font-weight:700;color:#fff">MM$${fmm(v)}</td>`;
-    const tdPW = v => `<td class="num" style="font-weight:700;color:rgba(255,255,255,.65)">MM$${fmm(v)}</td>`;
-    const tdRP = (vr, vp, style) => style==='bold'?tdRb(vr)+tdPb(vp):style==='white'?tdRW(vr)+tdPW(vp):tdR(vr)+tdP(vp);
-    const tdRPpct = (vr, vp, style) => {
-      const sr = `<td class="num" style="${style==='bold'?'font-weight:700;':''}color:#111">${fpct(vr)}</td>`;
-      const sp = `<td class="num" style="${style==='bold'?'font-weight:700;':''}color:var(--mut)">${fpct(vp)}</td>`;
-      return sr+sp;
+    const g = (arr,i) => (arr||[])[i]||0;
+    const sumSel = arr => sm.reduce((s,i)=>s+g(arr,i),0);
+
+    const thMes1 = sm.map(i=>`<th colspan="4" style="${colHdr}">${meses[i].slice(0,3)}</th>`).join('');
+    const thMes2 = sm.map(()=>`<th style="${colHdrSub}">REAL</th><th style="${colHdrSub}">PTTO</th><th style="${colHdrVar}">VAR</th><th style="${colHdrVar}">VAR%</th>`).join('');
+
+    // célula helpers
+    const cx = (v,fw,cl,pre) => `<td class="num" style="${fw?'font-weight:700;':''}color:${cl}">${pre||'MM$'}${pre?fpct(v):fmm(v)}</td>`;
+    const cN  = (v,fw) => cx(v,fw,'#111','');
+    const cP  = (v,fw) => cx(v,fw,'var(--mut)','');
+    const cVmm= v => cx(v,false,'#555','');
+    const cVpct=v => cx(v,false,'#555','%');
+    const cNW = (v,fw) => cx(v,fw,'#fff','');
+    const cPW = (v,fw) => cx(v,fw,'rgba(255,255,255,.6)','');
+    const cVW = v => `<td class="num" style="color:rgba(255,255,255,.5)">MM$${fmm(v)}</td>`;
+    const cVpW= v => `<td class="num" style="color:rgba(255,255,255,.5)">${fpct(v)}</td>`;
+
+    // 4 celdas por mes para filas MM$
+    const cells4mm = (ar,ap,av,avp, style) => sm.map(i=>{
+      if(style==='white') return cNW(g(ar,i),false)+cPW(g(ap,i),false)+cVW(g(av,i))+cVpW(g(avp,i));
+      if(style==='bold')  return cN(g(ar,i),true)+cP(g(ap,i),true)+cVmm(g(av,i))+cVpct(g(avp,i));
+      return cN(g(ar,i),false)+cP(g(ap,i),false)+cVmm(g(av,i))+cVpct(g(avp,i));
+    }).join('');
+
+    // 4 celdas por mes para filas %
+    const cells4pct = (ar,ap,av,avp) => sm.map(i=>`
+      <td class="num" style="color:#111">${fpct(g(ar,i))}</td>
+      <td class="num" style="color:var(--mut)">${fpct(g(ap,i))}</td>
+      <td class="num" style="color:#555">${fpct(g(av,i))}</td>
+      <td class="num" style="color:#888">${fpct(g(avp,i))}</td>`).join('');
+
+    // totales 4 cols para filas MM$
+    const tot4mm = (ar,ap, style) => {
+      const tR=sumSel(ar), tP=sumSel(ap), tV=tR-tP, tVp=Math.abs(tP)>0?tV/Math.abs(tP):0;
+      if(style==='white') return cNW(tR,true)+cPW(tP,true)+cVW(tV)+cVpW(tVp);
+      if(style==='bold')  return cN(tR,true)+cP(tP,true)+cVmm(tV)+cVpct(tVp);
+      return cN(tR,true)+cP(tP,true)+cVmm(tV)+cVpct(tVp);
     };
-
-    const pairCells = (ar, ap, style) =>
-      Array.from({length:n},(_,i)=>tdRP((ar||[])[i]||0,(ap||[])[i]||0,style)).join('');
-    const pairPctCells = (ar, ap, style) =>
-      Array.from({length:n},(_,i)=>tdRPpct((ar||[])[i]||0,(ap||[])[i]||0,style)).join('');
+    // totales 4 cols para filas % (promedio ponderado)
+    const tot4pct = (numR,numP,denR,denP) => {
+      const tR=Math.abs(sumSel(denR))||1, tP=Math.abs(sumSel(denP))||1;
+      const vR=sumSel(numR)/tR, vP=sumSel(numP)/tP, vV=vR-vP, vVp=Math.abs(vP)>0?vV/Math.abs(vP):0;
+      return `<td class="num" style="font-weight:700;color:#111">${fpct(vR)}</td>
+              <td class="num" style="font-weight:700;color:var(--mut)">${fpct(vP)}</td>
+              <td class="num" style="color:#555">${fpct(vV)}</td>
+              <td class="num" style="color:#888">${fpct(vVp)}</td>`;
+    };
 
     const LBL  = (txt,indent) => `<td style="font-size:.62rem;white-space:nowrap;padding:.3rem .6rem .3rem ${indent||'.6rem'}">${txt}</td>`;
     const LBLb = (txt,clr)    => `<td style="font-size:.62rem;white-space:nowrap;padding:.35rem .6rem;font-weight:700;color:${clr||'inherit'}">${txt}</td>`;
+    const sepRow = lbl => `<tr style="background:rgba(0,45,115,.07)"><td colspan="${totalCols}" style="font-size:.58rem;font-weight:700;color:var(--mut);padding:.22rem .6rem;letter-spacing:.05em">${lbl.toUpperCase()}</td></tr>`;
 
-    const rowBase = (label, ar, ap) => `<tr>
-      ${LBL(label)}${pairCells(ar,ap,'')}
-      <td class="num" style="font-weight:700;color:#111">MM$${fmm(sumArr(ar))}</td>
-      <td class="num" style="font-weight:700;color:var(--mut)">MM$${fmm(sumArr(ap))}</td></tr>`;
-
-    const rowSub = (label, ar, ap) => `<tr>
-      ${LBL('↳ '+label,'1.4rem')}${pairCells(ar,ap,'')}
-      <td class="num" style="font-weight:700;color:#555">MM$${fmm(sumArr(ar))}</td>
-      <td class="num" style="font-weight:700;color:var(--mut)">MM$${fmm(sumArr(ap))}</td></tr>`;
-
-    const rowPct = (label, ar, ap, totR, totP) => `<tr>
-      ${LBL(label)}${pairPctCells(ar,ap,'')}
-      <td class="num" style="font-weight:700;color:#111">${fpct(totR)}</td>
-      <td class="num" style="font-weight:700;color:var(--mut)">${fpct(totP)}</td></tr>`;
-
-    const rowResultCeleste = (label, ar, ap) => `<tr style="background:rgba(0,160,220,.13)">
-      ${LBLb(label)}${pairCells(ar,ap,'bold')}
-      <td class="num" style="font-weight:700;color:#111">MM$${fmm(sumArr(ar))}</td>
-      <td class="num" style="font-weight:700;color:var(--mut)">MM$${fmm(sumArr(ap))}</td></tr>`;
-
-    const rowResultAzul = (label, ar, ap) => `<tr style="background:var(--az3)">
-      ${LBLb(label,'#fff')}${pairCells(ar,ap,'white')}
-      <td class="num" style="font-weight:700;color:#fff">MM$${fmm(sumArr(ar))}</td>
-      <td class="num" style="font-weight:700;color:rgba(255,255,255,.65)">MM$${fmm(sumArr(ap))}</td></tr>`;
-
-    const sepRow = label =>
-      `<tr style="background:rgba(0,45,115,.07)"><td colspan="${totalCols}" style="font-size:.58rem;font-weight:700;color:var(--mut);padding:.22rem .6rem;letter-spacing:.05em">${label.toUpperCase()}</td></tr>`;
-
-    // Totales % Real acumulado
-    const totIng     = Math.abs(sumArr(R2.ingresos_totales)) || 1;
-    const totMargenPct = sumArr(R2.margen_mm) / totIng;
-    const totEbitDPct  = sumArr(R2.ebitda_directo) / totIng;
-    const totRejPct    = sumArr(R2.resultado_ejercicio) / totIng;
-
-    // % por mes para filas calculadas (no vienen directas del excel para EBITDA Empresa)
-    const ebitEmpPctArr  = (R2.ebitda_empresa||[]).map((v,i)=>Math.abs((R2.ingresos_totales||[])[i]||0)>0?v/Math.abs((R2.ingresos_totales||[])[i]):0);
-    const ebitEmpPctArrP = (R2.ebitda_empresa_p||[]).map((v,i)=>Math.abs((R2.ingresos_totales_p||[])[i]||0)>0?v/Math.abs((R2.ingresos_totales_p||[])[i]):0);
-    const rejPctArr      = (R2.resultado_ejercicio||[]).map((v,i)=>Math.abs((R2.ingresos_totales||[])[i]||0)>0?v/Math.abs((R2.ingresos_totales||[])[i]):0);
-    const rejPctArrP     = (R2.resultado_ejercicio_p||[]).map((v,i)=>Math.abs((R2.ingresos_totales_p||[])[i]||0)>0?v/Math.abs((R2.ingresos_totales_p||[])[i]):0);
-    const totEbitEPct    = sumArr(R2.ebitda_empresa) / totIng;
-
-    const hasGaAd = [R2.finiquitos, R2.multas, R2.prov_obsolescencias, R2.prov_incobrables, R2.prov_habilitacion]
-      .some(a=>(a||[]).some(v=>v!==0));
+    const rowBase = (lbl,ar,ap,av,avp) => `<tr>${LBL(lbl)}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
+    const rowSub  = (lbl,ar,ap,av,avp) => `<tr>${LBL('↳ '+lbl,'1.4rem')}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
+    const rowPct  = (lbl,ar,ap,av,avp,numR,numP,denR,denP) =>
+      `<tr>${LBL(lbl)}${cells4pct(ar,ap,av,avp)}${tot4pct(numR||ar,numP||ap,denR||R2.ingresos_totales,denP||R2.ingresos_totales_p)}</tr>`;
+    const rowCeleste = (lbl,ar,ap,av,avp) => `<tr style="background:rgba(0,160,220,.13)">${LBLb(lbl)}${cells4mm(ar,ap,av,avp,'bold')}${tot4mm(ar,ap,'bold')}</tr>`;
+    const rowAzul    = (lbl,ar,ap,av,avp) => `<tr style="background:var(--az3)">${LBLb(lbl,'#fff')}${cells4mm(ar,ap,av,avp,'white')}${tot4mm(ar,ap,'white')}</tr>`;
 
     eerrEl.innerHTML = `
       <div style="overflow-x:auto">
         <table class="tbl" style="font-size:.62rem;width:100%;min-width:600px">
           <thead>
             <tr>
-              <th style="${colHdr};text-align:left;min-width:220px" rowspan="2">Concepto</th>
-              ${thMeses1}
-              <th style="${colHdr};background:#1a3a6b" rowspan="2">Total R</th>
-              <th style="${colHdr};background:#233060" rowspan="2" style="color:rgba(255,255,255,.7)">Total P</th>
+              <th style="${colHdr};text-align:left;min-width:200px" rowspan="2">Concepto</th>
+              ${thMes1}
+              <th colspan="4" style="${colHdrTot}">TOTAL</th>
             </tr>
-            <tr>${thMeses2}</tr>
+            <tr>${thMes2}<th style="${colHdrSub}">REAL</th><th style="${colHdrSub}">PTTO</th><th style="${colHdrVar}">VAR</th><th style="${colHdrVar}">VAR%</th></tr>
           </thead>
           <tbody>
             ${sepRow('Ingresos')}
-            ${rowBase('Ingresos de actividades ordinarias (MM$)', R2.ingresos_totales, R2.ingresos_totales_p)}
-            ${rowSub('Ingresos por contratos (MM$)', R2.ingresos_contratos, R2.ingresos_contratos_p)}
-            ${rowSub('Ingresos por otras actividades (MM$)', R2.ingresos_otras, R2.ingresos_otras_p)}
-            ${rowBase('(−) Costo de ventas (MM$)', R2.costo_ventas, R2.costo_ventas_p)}
-            ${rowResultCeleste('= Margen del Producto (MM$)', R2.margen_mm, R2.margen_mm_p)}
-            ${rowPct('Margen %', R2.margen_pct, R2.margen_pct_p, totMargenPct, sumArr(R2.margen_mm_p)/(Math.abs(sumArr(R2.ingresos_totales_p))||1))}
+            ${rowBase('Ingresos de actividades ordinarias (MM$)',R2.ingresos_totales,R2.ingresos_totales_p,R2.ingresos_totales_v,R2.ingresos_totales_vp)}
+            ${rowSub('Ingresos por contratos (MM$)',R2.ingresos_contratos,R2.ingresos_contratos_p,R2.ingresos_contratos_v,R2.ingresos_contratos_vp)}
+            ${rowSub('Ingresos por otras actividades (MM$)',R2.ingresos_otras,R2.ingresos_otras_p,R2.ingresos_otras_v,R2.ingresos_otras_vp)}
+            ${rowBase('(−) Costo de ventas (MM$)',R2.costo_ventas,R2.costo_ventas_p,R2.costo_ventas_v,R2.costo_ventas_vp)}
+            ${rowCeleste('= Margen del Producto (MM$)',R2.margen_mm,R2.margen_mm_p,R2.margen_mm_v,R2.margen_mm_vp)}
+            ${rowPct('Margen %',R2.margen_pct,R2.margen_pct_p,R2.margen_pct_v,R2.margen_pct_vp, R2.margen_mm,R2.margen_mm_p,R2.ingresos_totales,R2.ingresos_totales_p)}
             ${sepRow('Gastos Operacionales Directos')}
-            ${rowBase('(−) Gasto beneficios empleados Directos (MM$)', R2.gastos_empleados, R2.gastos_empleados_p)}
-            ${rowBase('(−) Otros gastos por naturaleza Directos (MM$)', R2.otros_gastos, R2.otros_gastos_p)}
-            ${rowResultCeleste('= EBITDA Directo (MM$)', R2.ebitda_directo, R2.ebitda_directo_p)}
-            ${rowPct('%  EBITDA Directo', R2.ebitda_directo_pct, R2.ebitda_directo_pct_p, totEbitDPct, sumArr(R2.ebitda_directo_p)/(Math.abs(sumArr(R2.ingresos_totales_p))||1))}
+            ${rowBase('(−) Gasto beneficios empleados Directos (MM$)',R2.gastos_empleados,R2.gastos_empleados_p,R2.gastos_empleados_v,R2.gastos_empleados_vp)}
+            ${rowBase('(−) Otros gastos por naturaleza Directos (MM$)',R2.otros_gastos,R2.otros_gastos_p,R2.otros_gastos_v,R2.otros_gastos_vp)}
+            ${rowCeleste('= EBITDA Directo (MM$)',R2.ebitda_directo,R2.ebitda_directo_p,R2.ebitda_directo_v,R2.ebitda_directo_vp)}
+            ${rowPct('%  EBITDA Directo',R2.ebitda_directo_pct,R2.ebitda_directo_pct_p,R2.ebitda_directo_pct_v,R2.ebitda_directo_pct_vp, R2.ebitda_directo,R2.ebitda_directo_p,R2.ingresos_totales,R2.ingresos_totales_p)}
             ${sepRow('GAV Indirecto')}
-            ${rowBase('(−) GAV Indirecto (MM$)', R2.gav_indirecto, R2.gav_indirecto_p)}
-            ${rowResultCeleste('= EBITDA Indirecto (MM$)', R2.ebitda_indirecto, R2.ebitda_indirecto_p)}
-            ${hasGaAd ? sepRow('Gastos Adicionales') : ''}
-            ${hasGaAd ? rowBase('Finiquitos (MM$)', R2.finiquitos, R2.finiquitos_p) : ''}
-            ${hasGaAd ? rowBase('Multas (MM$)', R2.multas, R2.multas_p) : ''}
-            ${hasGaAd ? rowBase('Prov. Obsolescencias Inventarios (MM$)', R2.prov_obsolescencias, R2.prov_obsolescencias_p) : ''}
-            ${hasGaAd ? rowBase('Prov. Incobrables (MM$)', R2.prov_incobrables, R2.prov_incobrables_p) : ''}
-            ${hasGaAd ? rowBase('Prov. Habilitación Oficinas (MM$)', R2.prov_habilitacion, R2.prov_habilitacion_p) : ''}
-            ${hasGaAd ? rowBase('Total Gastos Adicionales (MM$)', R2.total_gastos_adicionales, R2.total_gastos_adicionales_p) : ''}
-            ${rowResultAzul('= EBITDA Empresa (MM$)', R2.ebitda_empresa, R2.ebitda_empresa_p)}
-            ${rowPct('%  EBITDA Empresa', ebitEmpPctArr, ebitEmpPctArrP, totEbitEPct, sumArr(R2.ebitda_empresa_p)/(Math.abs(sumArr(R2.ingresos_totales_p))||1))}
+            ${rowBase('(−) GAV Indirecto (MM$)',R2.gav_indirecto,R2.gav_indirecto_p,R2.gav_indirecto_v,R2.gav_indirecto_vp)}
+            ${rowCeleste('= EBITDA Indirecto (MM$)',R2.ebitda_indirecto,R2.ebitda_indirecto_p,R2.ebitda_indirecto_v,R2.ebitda_indirecto_vp)}
+            ${hasGaAd?sepRow('Gastos Adicionales'):''}
+            ${hasGaAd?rowBase('Finiquitos (MM$)',R2.finiquitos,R2.finiquitos_p,R2.finiquitos_v,R2.finiquitos_vp):''}
+            ${hasGaAd?rowBase('Multas (MM$)',R2.multas,R2.multas_p,R2.multas_v,R2.multas_vp):''}
+            ${hasGaAd?rowBase('Prov. Obsolescencias Inventarios (MM$)',R2.prov_obsolescencias,R2.prov_obsolescencias_p,R2.prov_obsolescencias_v,R2.prov_obsolescencias_vp):''}
+            ${hasGaAd?rowBase('Prov. Incobrables (MM$)',R2.prov_incobrables,R2.prov_incobrables_p,R2.prov_incobrables_v,R2.prov_incobrables_vp):''}
+            ${hasGaAd?rowBase('Prov. Habilitación Oficinas (MM$)',R2.prov_habilitacion,R2.prov_habilitacion_p,R2.prov_habilitacion_v,R2.prov_habilitacion_vp):''}
+            ${hasGaAd?rowBase('Total Gastos Adicionales (MM$)',R2.total_gastos_adicionales,R2.total_gastos_adicionales_p,R2.total_gastos_adicionales_v,R2.total_gastos_adicionales_vp):''}
+            ${rowAzul('= EBITDA Empresa (MM$)',R2.ebitda_empresa,R2.ebitda_empresa_p,R2.ebitda_empresa_v,R2.ebitda_empresa_vp)}
+            ${rowPct('%  EBITDA Empresa',R2.ebitda_directo_pct,R2.ebitda_directo_pct_p,R2.ebitda_directo_pct_v,R2.ebitda_directo_pct_vp, R2.ebitda_empresa,R2.ebitda_empresa_p,R2.ingresos_totales,R2.ingresos_totales_p)}
             ${sepRow('Resultado Operacional')}
-            ${rowBase('(−) Depreciación y amortización (MM$)', R2.depreciacion, R2.depreciacion_p)}
-            ${rowResultCeleste('= Resultado Operacional (MM$)', R2.resultado_operacional, R2.resultado_operacional_p)}
+            ${rowBase('(−) Depreciación y amortización (MM$)',R2.depreciacion,R2.depreciacion_p,R2.depreciacion_v,R2.depreciacion_vp)}
+            ${rowCeleste('= Resultado Operacional (MM$)',R2.resultado_operacional,R2.resultado_operacional_p,R2.resultado_operacional_v,R2.resultado_operacional_vp)}
             ${sepRow('Resultado No Operacional')}
-            ${rowBase('Otros ingresos por función (MM$)', R2.otros_ingresos_funcion, R2.otros_ingresos_funcion_p)}
-            ${rowBase('Ingreso financiero (MM$)', R2.ingreso_financiero, R2.ingreso_financiero_p)}
-            ${rowBase('Costo financiero (MM$)', R2.costo_financiero, R2.costo_financiero_p)}
-            ${rowBase('Otros gastos por función (MM$)', R2.otros_gastos_funcion, R2.otros_gastos_funcion_p)}
-            ${rowBase('Diferencia de cambio (MM$)', R2.diferencia_cambio, R2.diferencia_cambio_p)}
-            ${rowResultCeleste('= Resultado no operacional (MM$)', R2.resultado_no_operacional, R2.resultado_no_operacional_p)}
+            ${rowBase('Otros ingresos por función (MM$)',R2.otros_ingresos_funcion,R2.otros_ingresos_funcion_p,R2.otros_ingresos_funcion_v,R2.otros_ingresos_funcion_vp)}
+            ${rowBase('Ingreso financiero (MM$)',R2.ingreso_financiero,R2.ingreso_financiero_p,R2.ingreso_financiero_v,R2.ingreso_financiero_vp)}
+            ${rowBase('Costo financiero (MM$)',R2.costo_financiero,R2.costo_financiero_p,R2.costo_financiero_v,R2.costo_financiero_vp)}
+            ${rowBase('Otros gastos por función (MM$)',R2.otros_gastos_funcion,R2.otros_gastos_funcion_p,R2.otros_gastos_funcion_v,R2.otros_gastos_funcion_vp)}
+            ${rowBase('Diferencia de cambio (MM$)',R2.diferencia_cambio,R2.diferencia_cambio_p,R2.diferencia_cambio_v,R2.diferencia_cambio_vp)}
+            ${rowCeleste('= Resultado no operacional (MM$)',R2.resultado_no_operacional,R2.resultado_no_operacional_p,R2.resultado_no_operacional_v,R2.resultado_no_operacional_vp)}
             ${sepRow('Resultado Final')}
-            ${rowResultCeleste('= Resultado antes de impuestos (MM$)', R2.resultado_antes_imp, R2.resultado_antes_imp_p)}
-            ${rowBase('(−) Impuesto a la renta (MM$)', R2.impuesto_renta, R2.impuesto_renta_p)}
-            ${rowResultAzul('= Resultado del ejercicio Empresa (MM$)', R2.resultado_ejercicio, R2.resultado_ejercicio_p)}
-            ${rowPct('%  Resultado / Ingresos', rejPctArr, rejPctArrP, totRejPct, sumArr(R2.resultado_ejercicio_p)/(Math.abs(sumArr(R2.ingresos_totales_p))||1))}
+            ${rowCeleste('= Resultado antes de impuestos (MM$)',R2.resultado_antes_imp,R2.resultado_antes_imp_p,R2.resultado_antes_imp_v,R2.resultado_antes_imp_vp)}
+            ${rowBase('(−) Impuesto a la renta (MM$)',R2.impuesto_renta,R2.impuesto_renta_p,R2.impuesto_renta_v,R2.impuesto_renta_vp)}
+            ${rowAzul('= Resultado del ejercicio Empresa (MM$)',R2.resultado_ejercicio,R2.resultado_ejercicio_p,R2.resultado_ejercicio_v,R2.resultado_ejercicio_vp)}
+            ${rowPct('%  Resultado / Ingresos',R2.resultado_ejercicio,R2.resultado_ejercicio_p,R2.resultado_ejercicio_v,R2.resultado_ejercicio_vp, R2.resultado_ejercicio,R2.resultado_ejercicio_p,R2.ingresos_totales,R2.ingresos_totales_p)}
           </tbody>
         </table>
       </div>`;
   }
+
+  // Segmentador de meses
+  if(segEl){
+    meses.forEach((m,i)=>{
+      const b = document.createElement('button');
+      b.className = 'btn on';
+      b.textContent = m.slice(0,3);
+      b.style.cssText = 'font-size:.55rem;padding:.15rem .45rem';
+      b.addEventListener('click',()=>{
+        b.classList.toggle('on');
+        if(_selMonths.includes(i)) _selMonths = _selMonths.filter(x=>x!==i);
+        else _selMonths = [..._selMonths,i].sort((a,b)=>a-b);
+        renderEERR();
+      });
+      segEl.appendChild(b);
+    });
+  }
+  renderEERR();
 
   // ── RATIO ANALYSIS ────────────────────────────────────────────
   const absArr = arr => (arr||[]).slice(0,n).map(v=>Math.abs(v||0));
@@ -240,30 +262,33 @@
     if(!el) return;
     const colHdr    = 'background:var(--az3);color:rgba(255,255,255,.85);font-size:.6rem;font-weight:700;text-align:center;padding:.35rem .4rem';
     const colHdrSub = 'background:#1e4080;color:rgba(255,255,255,.7);font-size:.55rem;font-weight:600;text-align:center;padding:.2rem .3rem';
-    const ingOpt    = getIngOpt();
-    const totalColsR = n * 2 + 2;
-    const thMeses1  = meses.map(m=>`<th colspan="2" style="${colHdr}">${m.slice(0,3)}</th>`).join('');
-    const thMeses2  = meses.map(()=>`<th style="${colHdrSub}">REAL</th><th style="${colHdrSub}">PTTO</th>`).join('');
-    const thTot     = `<th style="${colHdr};background:#1a3a6b">Total R</th>`;
-
+    const ingOpt   = getIngOpt();
+    const colHdrV  = 'background:#2a4a2a;color:rgba(255,255,255,.7);font-size:.55rem;font-weight:600;text-align:center;padding:.2rem .3rem';
+    const colHdrTt = 'background:#1a3a6b;color:rgba(255,255,255,.85);font-size:.6rem;font-weight:700;text-align:center;padding:.35rem .4rem';
+    const thMeses1 = meses.map(m=>`<th colspan="3" style="${colHdr}">${m.slice(0,3)}</th>`).join('');
+    const thMeses2 = meses.map(()=>`<th style="${colHdrSub}">REAL</th><th style="${colHdrSub}">PTTO</th><th style="${colHdrV}">VAR</th>`).join('');
     const fpR = v => `${((v||0)*100).toFixed(1).replace('.',',')}%`;
 
     const rows = COSTO_OPTS.map(cOpt=>{
       const ratiosR = computeRatio(cOpt.arr,  ingOpt.arr);
       const ratiosP = computeRatio(cOpt.arrP, ingOpt.arrP);
-      const totR    = computeRatioTotal(cOpt.arr, ingOpt.arr);
+      const totR    = computeRatioTotal(cOpt.arr,  ingOpt.arr);
+      const totP    = computeRatioTotal(cOpt.arrP, ingOpt.arrP);
+      const totV    = totR - totP;
       const active  = cOpt.key === _costoKey;
       const bg      = active ? 'background:rgba(255,140,0,.07)' : '';
       const fw      = active ? 'font-weight:700' : 'font-weight:400';
       const clrR    = active ? 'color:var(--or);font-weight:700' : 'color:#111';
-      const clrP    = 'color:var(--mut)';
       const tds = Array.from({length:n},(_,i)=>`
         <td class="num" style="${clrR}">${fpR(ratiosR[i])}</td>
-        <td class="num" style="${clrP}">${fpR(ratiosP[i])}</td>`).join('');
+        <td class="num" style="color:var(--mut)">${fpR(ratiosP[i])}</td>
+        <td class="num" style="color:#777">${fpR((ratiosR[i]||0)-(ratiosP[i]||0))}</td>`).join('');
       return `<tr style="${bg}">
         <td style="font-size:.62rem;white-space:nowrap;padding:.35rem .6rem;${fw}">${cOpt.label}<span style="color:var(--mut);font-weight:400"> / ${ingOpt.label}</span></td>
         ${tds}
         <td class="num" style="font-weight:700${active?';color:var(--or)':''}">${fpR(totR)}</td>
+        <td class="num" style="font-weight:700;color:var(--mut)">${fpR(totP)}</td>
+        <td class="num" style="font-weight:700;color:#777">${fpR(totV)}</td>
       </tr>`;
     }).join('');
 
@@ -274,9 +299,9 @@
             <tr>
               <th style="${colHdr};text-align:left;min-width:220px" rowspan="2">Indicador</th>
               ${thMeses1}
-              <th style="${colHdr};background:#1a3a6b" rowspan="2">Total R</th>
+              <th colspan="3" style="${colHdrTt}">TOTAL</th>
             </tr>
-            <tr>${thMeses2}</tr>
+            <tr>${thMeses2}<th style="${colHdrSub}">REAL</th><th style="${colHdrSub}">PTTO</th><th style="${colHdrV}">VAR</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>

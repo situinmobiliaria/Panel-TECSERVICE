@@ -1244,17 +1244,15 @@ def read_ratios2(wb):
             except: return 0.0
         return 0.0
 
-    def get_real(row_idx, month_i):
-        return get_val(row_idx, 2 + month_i * 4)
+    def get_real(row_idx, month_i):   return get_val(row_idx, 2 + month_i * 4)
+    def get_ptto(row_idx, month_i):   return get_val(row_idx, 3 + month_i * 4)
+    def get_var(row_idx, month_i):    return get_val(row_idx, 4 + month_i * 4)
+    def get_varpct(row_idx, month_i): return get_val(row_idx, 5 + month_i * 4)
 
-    def get_ptto(row_idx, month_i):
-        return get_val(row_idx, 3 + month_i * 4)
-
-    def arr(row_idx, n):
-        return [round(get_real(row_idx, i), 3) for i in range(n)]
-
-    def arrp(row_idx, n):
-        return [round(get_ptto(row_idx, i), 3) for i in range(n)]
+    def arr(row_idx, n):    return [round(get_real(row_idx, i),   3) for i in range(n)]
+    def arrp(row_idx, n):   return [round(get_ptto(row_idx, i),   3) for i in range(n)]
+    def arrv(row_idx, n):   return [round(get_var(row_idx, i),    3) for i in range(n)]
+    def arrvp(row_idx, n):  return [round(get_varpct(row_idx, i), 4) for i in range(n)]
 
     # Detectar mes_cierre: meses consecutivos con Ingresos != 0 (row 7 → idx 6)
     # Paramos en el primer cero para no capturar columna Total al final
@@ -1268,51 +1266,89 @@ def read_ratios2(wb):
         return {}
 
     n = mes_cierre
-    pct  = lambda idx: [round(get_real(idx, i), 4) for i in range(n)]
-    pctp = lambda idx: [round(get_ptto(idx, i), 4) for i in range(n)]
+    pct  = lambda idx: [round(get_real(idx, i),   4) for i in range(n)]
+    pctp = lambda idx: [round(get_ptto(idx, i),   4) for i in range(n)]
+    pctv = lambda idx: [round(get_var(idx, i),    4) for i in range(n)]
+    pctvp= lambda idx: [round(get_varpct(idx, i), 4) for i in range(n)]
+
+    def row4(ri):  # (real, ptto, var, varpct) para filas MM$
+        return arr(ri,n), arrp(ri,n), arrv(ri,n), arrvp(ri,n)
+    def pct4(ri):  # idem para filas %
+        return pct(ri), pctp(ri), pctv(ri), pctvp(ri)
+
+    r6,  p6,  v6,  vp6  = row4(6)
+    r7,  p7,  v7,  vp7  = row4(7)
+    r8,  p8,  v8,  vp8  = row4(8)
+    r9,  p9,  v9,  vp9  = row4(9)
+    r10, p10, v10, vp10 = row4(10)
+    r11, p11, v11, vp11 = pct4(11)
+    r13, p13, v13, vp13 = row4(13)
+    r14, p14, v14, vp14 = row4(14)
+    r16, p16, v16, vp16 = row4(16)
+    r17, p17, v17, vp17 = pct4(17)
+    r19, p19, v19, vp19 = row4(19)
+    r20, p20, v20, vp20 = row4(20)
+    r21, p21, v21, vp21 = row4(21)
+    r22, p22, v22, vp22 = row4(22)
+    r23, p23, v23, vp23 = row4(23)
+    r24, p24, v24, vp24 = row4(24)
+    r25, p25, v25, vp25 = row4(25)
+    r27, p27, v27, vp27 = row4(27)
+    r29, p29, v29, vp29 = row4(29)
+    r32, p32, v32, vp32 = row4(32)
+    r33, p33, v33, vp33 = row4(33)
+    r35, p35, v35, vp35 = row4(35)
+    r36, p36, v36, vp36 = row4(36)
+    r37, p37, v37, vp37 = row4(37)
+    r38, p38, v38, vp38 = row4(38)
+    r39, p39, v39, vp39 = row4(39)
+    r40, p40, v40, vp40 = row4(40)
+    r42, p42, v42, vp42 = row4(42)
+    r44, p44, v44, vp44 = row4(44)
+    r45, p45, v45, vp45 = row4(45)
+
     return {
-        "mes_cierre":                   mes_cierre,
-        "meses":                        MESES[:n],
+        "mes_cierre": mes_cierre, "meses": MESES[:n],
         # Ingresos
-        "ingresos_totales":             arr(6,  n), "ingresos_totales_p":        arrp(6,  n),
-        "ingresos_contratos":           arr(7,  n), "ingresos_contratos_p":      arrp(7,  n),
-        "ingresos_otras":               arr(8,  n), "ingresos_otras_p":          arrp(8,  n),
+        "ingresos_totales":  r6,  "ingresos_totales_p":  p6,  "ingresos_totales_v":  v6,  "ingresos_totales_vp":  vp6,
+        "ingresos_contratos":r7,  "ingresos_contratos_p":p7,  "ingresos_contratos_v":v7,  "ingresos_contratos_vp":vp7,
+        "ingresos_otras":    r8,  "ingresos_otras_p":    p8,  "ingresos_otras_v":    v8,  "ingresos_otras_vp":    vp8,
         # Costo y margen
-        "costo_ventas":                 arr(9,  n), "costo_ventas_p":            arrp(9,  n),
-        "margen_mm":                    arr(10, n), "margen_mm_p":               arrp(10, n),
-        "margen_pct":                   pct(11),    "margen_pct_p":              pctp(11),
+        "costo_ventas":      r9,  "costo_ventas_p":      p9,  "costo_ventas_v":      v9,  "costo_ventas_vp":      vp9,
+        "margen_mm":         r10, "margen_mm_p":         p10, "margen_mm_v":         v10, "margen_mm_vp":         vp10,
+        "margen_pct":        r11, "margen_pct_p":        p11, "margen_pct_v":        v11, "margen_pct_vp":        vp11,
         # Gastos directos
-        "gastos_empleados":             arr(13, n), "gastos_empleados_p":        arrp(13, n),
-        "otros_gastos":                 arr(14, n), "otros_gastos_p":            arrp(14, n),
+        "gastos_empleados":  r13, "gastos_empleados_p":  p13, "gastos_empleados_v":  v13, "gastos_empleados_vp":  vp13,
+        "otros_gastos":      r14, "otros_gastos_p":      p14, "otros_gastos_v":      v14, "otros_gastos_vp":      vp14,
         # EBITDA Directo
-        "ebitda_directo":               arr(16, n), "ebitda_directo_p":          arrp(16, n),
-        "ebitda_directo_pct":           pct(17),    "ebitda_directo_pct_p":      pctp(17),
+        "ebitda_directo":       r16, "ebitda_directo_p":       p16, "ebitda_directo_v":       v16, "ebitda_directo_vp":       vp16,
+        "ebitda_directo_pct":   r17, "ebitda_directo_pct_p":   p17, "ebitda_directo_pct_v":   v17, "ebitda_directo_pct_vp":   vp17,
         # GAV Indirecto
-        "gav_indirecto":                arr(19, n), "gav_indirecto_p":           arrp(19, n),
-        "ebitda_indirecto":             arr(20, n), "ebitda_indirecto_p":        arrp(20, n),
+        "gav_indirecto":     r19, "gav_indirecto_p":     p19, "gav_indirecto_v":     v19, "gav_indirecto_vp":     vp19,
+        "ebitda_indirecto":  r20, "ebitda_indirecto_p":  p20, "ebitda_indirecto_v":  v20, "ebitda_indirecto_vp":  vp20,
         # Gastos adicionales
-        "finiquitos":                   arr(21, n), "finiquitos_p":              arrp(21, n),
-        "multas":                       arr(22, n), "multas_p":                  arrp(22, n),
-        "prov_obsolescencias":          arr(23, n), "prov_obsolescencias_p":     arrp(23, n),
-        "prov_incobrables":             arr(24, n), "prov_incobrables_p":        arrp(24, n),
-        "prov_habilitacion":            arr(25, n), "prov_habilitacion_p":       arrp(25, n),
-        "total_gastos_adicionales":     arr(27, n), "total_gastos_adicionales_p":arrp(27, n),
+        "finiquitos":             r21, "finiquitos_p":             p21, "finiquitos_v":             v21, "finiquitos_vp":             vp21,
+        "multas":                 r22, "multas_p":                 p22, "multas_v":                 v22, "multas_vp":                 vp22,
+        "prov_obsolescencias":    r23, "prov_obsolescencias_p":    p23, "prov_obsolescencias_v":    v23, "prov_obsolescencias_vp":    vp23,
+        "prov_incobrables":       r24, "prov_incobrables_p":       p24, "prov_incobrables_v":       v24, "prov_incobrables_vp":       vp24,
+        "prov_habilitacion":      r25, "prov_habilitacion_p":      p25, "prov_habilitacion_v":      v25, "prov_habilitacion_vp":      vp25,
+        "total_gastos_adicionales":r27,"total_gastos_adicionales_p":p27,"total_gastos_adicionales_v":v27,"total_gastos_adicionales_vp":vp27,
         # EBITDA Empresa
-        "ebitda_empresa":               arr(29, n), "ebitda_empresa_p":          arrp(29, n),
-        # Depreciación y resultado operacional
-        "depreciacion":                 arr(32, n), "depreciacion_p":            arrp(32, n),
-        "resultado_operacional":        arr(33, n), "resultado_operacional_p":   arrp(33, n),
-        # Resultado no operacional
-        "otros_ingresos_funcion":       arr(35, n), "otros_ingresos_funcion_p":  arrp(35, n),
-        "ingreso_financiero":           arr(36, n), "ingreso_financiero_p":      arrp(36, n),
-        "costo_financiero":             arr(37, n), "costo_financiero_p":        arrp(37, n),
-        "otros_gastos_funcion":         arr(38, n), "otros_gastos_funcion_p":    arrp(38, n),
-        "diferencia_cambio":            arr(39, n), "diferencia_cambio_p":       arrp(39, n),
-        "resultado_no_operacional":     arr(40, n), "resultado_no_operacional_p":arrp(40, n),
+        "ebitda_empresa":    r29, "ebitda_empresa_p":    p29, "ebitda_empresa_v":    v29, "ebitda_empresa_vp":    vp29,
+        # Depreciación
+        "depreciacion":      r32, "depreciacion_p":      p32, "depreciacion_v":      v32, "depreciacion_vp":      vp32,
+        "resultado_operacional":  r33, "resultado_operacional_p":  p33, "resultado_operacional_v":  v33, "resultado_operacional_vp":  vp33,
+        # No operacional
+        "otros_ingresos_funcion": r35, "otros_ingresos_funcion_p": p35, "otros_ingresos_funcion_v": v35, "otros_ingresos_funcion_vp": vp35,
+        "ingreso_financiero":     r36, "ingreso_financiero_p":     p36, "ingreso_financiero_v":     v36, "ingreso_financiero_vp":     vp36,
+        "costo_financiero":       r37, "costo_financiero_p":       p37, "costo_financiero_v":       v37, "costo_financiero_vp":       vp37,
+        "otros_gastos_funcion":   r38, "otros_gastos_funcion_p":   p38, "otros_gastos_funcion_v":   v38, "otros_gastos_funcion_vp":   vp38,
+        "diferencia_cambio":      r39, "diferencia_cambio_p":      p39, "diferencia_cambio_v":      v39, "diferencia_cambio_vp":      vp39,
+        "resultado_no_operacional":r40,"resultado_no_operacional_p":p40,"resultado_no_operacional_v":v40,"resultado_no_operacional_vp":vp40,
         # Resultado final
-        "resultado_antes_imp":          arr(42, n), "resultado_antes_imp_p":     arrp(42, n),
-        "impuesto_renta":               arr(44, n), "impuesto_renta_p":          arrp(44, n),
-        "resultado_ejercicio":          arr(45, n), "resultado_ejercicio_p":     arrp(45, n),
+        "resultado_antes_imp":  r42, "resultado_antes_imp_p":  p42, "resultado_antes_imp_v":  v42, "resultado_antes_imp_vp":  vp42,
+        "impuesto_renta":       r44, "impuesto_renta_p":       p44, "impuesto_renta_v":       v44, "impuesto_renta_vp":       vp44,
+        "resultado_ejercicio":  r45, "resultado_ejercicio_p":  p45, "resultado_ejercicio_v":  v45, "resultado_ejercicio_vp":  vp45,
     }
 
 
