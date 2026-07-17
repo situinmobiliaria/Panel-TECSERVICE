@@ -156,30 +156,41 @@
   // ── RATIO ANALYSIS ────────────────────────────────────────────
   const absArr = arr => (arr||[]).slice(0,n).map(v=>Math.abs(v||0));
 
-  const cdvArr  = absArr(R2.costo_ventas);
-  const empArr  = absArr(R2.gastos_empleados);
-  const otrArr  = absArr(R2.otros_gastos);
-  const gavArr  = absArr(R2.gav_indirecto);
-  const gavTotArr  = Array.from({length:n},(_,i)=>empArr[i]+otrArr[i]+gavArr[i]);
-  const costoTotArr= Array.from({length:n},(_,i)=>cdvArr[i]+empArr[i]+otrArr[i]+gavArr[i]);
+  // Real
+  const cdvArr      = absArr(R2.costo_ventas);
+  const empArr      = absArr(R2.gastos_empleados);
+  const otrArr      = absArr(R2.otros_gastos);
+  const gavArr      = absArr(R2.gav_indirecto);
+  const gavTotArr   = Array.from({length:n},(_,i)=>empArr[i]+otrArr[i]+gavArr[i]);
+  const costoTotArr = Array.from({length:n},(_,i)=>cdvArr[i]+empArr[i]+otrArr[i]+gavArr[i]);
+  const ingTotArr   = absArr(R2.ingresos_totales);
+  const ingConArr   = absArr(R2.ingresos_contratos);
+  const ingOtrArr   = absArr(R2.ingresos_otras);
 
-  const ingTotArr = (R2.ingresos_totales||[]).slice(0,n).map(v=>Math.abs(v||0));
-  const ingConArr = (R2.ingresos_contratos||[]).slice(0,n).map(v=>Math.abs(v||0));
-  const ingOtrArr = (R2.ingresos_otras||[]).slice(0,n).map(v=>Math.abs(v||0));
+  // Presupuesto
+  const cdvArrP      = absArr(R2.costo_ventas_p);
+  const empArrP      = absArr(R2.gastos_empleados_p);
+  const otrArrP      = absArr(R2.otros_gastos_p);
+  const gavArrP      = absArr(R2.gav_indirecto_p);
+  const gavTotArrP   = Array.from({length:n},(_,i)=>empArrP[i]+otrArrP[i]+gavArrP[i]);
+  const costoTotArrP = Array.from({length:n},(_,i)=>cdvArrP[i]+empArrP[i]+otrArrP[i]+gavArrP[i]);
+  const ingTotArrP   = absArr(R2.ingresos_totales_p);
+  const ingConArrP   = absArr(R2.ingresos_contratos_p);
+  const ingOtrArrP   = absArr(R2.ingresos_otras_p);
 
   const COSTO_OPTS = [
-    {key:'costo_total', label:'Costo Total',                      arr:costoTotArr, color:'#8B0000'},
-    {key:'costo_venta', label:'Costo de Venta',                   arr:cdvArr,      color:'#C00000'},
-    {key:'empleados',   label:'Gasto x Beneficios Empleados',     arr:empArr,      color:'#7A1FAA'},
-    {key:'otros',       label:'Otros Gastos por Naturaleza',      arr:otrArr,      color:'#E87722'},
-    {key:'gav_ind',     label:'GAV Indirecto',                    arr:gavArr,      color:'#C05000'},
-    {key:'gav_tot',     label:'GAV Totales',                      arr:gavTotArr,   color:'#6B3A2A'},
+    {key:'costo_total', label:'Costo Total',                   arr:costoTotArr, arrP:costoTotArrP, color:'#8B0000'},
+    {key:'costo_venta', label:'Costo de Venta',                arr:cdvArr,      arrP:cdvArrP,      color:'#C00000'},
+    {key:'empleados',   label:'Gasto x Beneficios Empleados',  arr:empArr,      arrP:empArrP,      color:'#7A1FAA'},
+    {key:'otros',       label:'Otros Gastos por Naturaleza',   arr:otrArr,      arrP:otrArrP,      color:'#E87722'},
+    {key:'gav_ind',     label:'GAV Indirecto',                 arr:gavArr,      arrP:gavArrP,      color:'#C05000'},
+    {key:'gav_tot',     label:'GAV Totales',                   arr:gavTotArr,   arrP:gavTotArrP,   color:'#6B3A2A'},
   ];
 
   const ING_OPTS = [
-    {key:'totales',   label:'Ingresos Totales',         arr:ingTotArr, color:'#002D73'},
-    {key:'contratos', label:'Ingresos Contratos',       arr:ingConArr, color:'#0A5C8C'},
-    {key:'otras',     label:'Ing. Otras Facturaciones', arr:ingOtrArr, color:'#D46000'},
+    {key:'totales',   label:'Ingresos Totales',         arr:ingTotArr, arrP:ingTotArrP, color:'#002D73'},
+    {key:'contratos', label:'Ingresos Contratos',       arr:ingConArr, arrP:ingConArrP, color:'#0A5C8C'},
+    {key:'otras',     label:'Ing. Otras Facturaciones', arr:ingOtrArr, arrP:ingOtrArrP, color:'#D46000'},
   ];
 
   let _costoKey = 'costo_total';
@@ -222,33 +233,46 @@
   function _renderRatioTable(){
     const el = document.getElementById('eerr-ratio-table');
     if(!el) return;
-    const colHdr = 'background:var(--az3);color:rgba(255,255,255,.85);font-size:.6rem;font-weight:700;text-align:center;padding:.35rem .4rem';
-    const thMeses = meses.map(m=>`<th style="${colHdr}">${m.slice(0,3)}</th>`).join('');
-    const thTot   = `<th style="${colHdr};background:#1a3a6b">Total</th>`;
-    const ingOpt  = getIngOpt();
+    const colHdr    = 'background:var(--az3);color:rgba(255,255,255,.85);font-size:.6rem;font-weight:700;text-align:center;padding:.35rem .4rem';
+    const colHdrSub = 'background:#1e4080;color:rgba(255,255,255,.7);font-size:.55rem;font-weight:600;text-align:center;padding:.2rem .3rem';
+    const ingOpt    = getIngOpt();
+    const totalColsR = n * 2 + 2;
+    const thMeses1  = meses.map(m=>`<th colspan="2" style="${colHdr}">${m.slice(0,3)}</th>`).join('');
+    const thMeses2  = meses.map(()=>`<th style="${colHdrSub}">REAL</th><th style="${colHdrSub}">PTTO</th>`).join('');
+    const thTot     = `<th style="${colHdr};background:#1a3a6b">Total R</th>`;
+
+    const fpR = v => `${((v||0)*100).toFixed(1).replace('.',',')}%`;
 
     const rows = COSTO_OPTS.map(cOpt=>{
-      const ratios = computeRatio(cOpt.arr, ingOpt.arr);
-      const tot    = computeRatioTotal(cOpt.arr, ingOpt.arr);
-      const active = cOpt.key === _costoKey;
-      const tds = ratios.map(v=>{
-        const x = v===null ? 0 : v;
-        return `<td class="num"${active?' style="color:var(--or);font-weight:700"':''}>${(x*100).toFixed(1).replace('.',',')}%</td>`;
-      }).join('');
-      return `<tr style="${active?'background:rgba(255,140,0,.07)':''}">
-        <td style="font-size:.62rem;white-space:nowrap;padding:.35rem .6rem;font-weight:${active?'700':'400'}">${cOpt.label}<span style="color:var(--mut);font-weight:400"> / ${ingOpt.label}</span></td>
+      const ratiosR = computeRatio(cOpt.arr,  ingOpt.arr);
+      const ratiosP = computeRatio(cOpt.arrP, ingOpt.arrP);
+      const totR    = computeRatioTotal(cOpt.arr, ingOpt.arr);
+      const active  = cOpt.key === _costoKey;
+      const bg      = active ? 'background:rgba(255,140,0,.07)' : '';
+      const fw      = active ? 'font-weight:700' : 'font-weight:400';
+      const clrR    = active ? 'color:var(--or);font-weight:700' : 'color:#111';
+      const clrP    = 'color:var(--mut)';
+      const tds = Array.from({length:n},(_,i)=>`
+        <td class="num" style="${clrR}">${fpR(ratiosR[i])}</td>
+        <td class="num" style="${clrP}">${fpR(ratiosP[i])}</td>`).join('');
+      return `<tr style="${bg}">
+        <td style="font-size:.62rem;white-space:nowrap;padding:.35rem .6rem;${fw}">${cOpt.label}<span style="color:var(--mut);font-weight:400"> / ${ingOpt.label}</span></td>
         ${tds}
-        <td class="num" style="font-weight:700${active?';color:var(--or)':''}">${(tot*100).toFixed(1).replace('.',',')}%</td>
+        <td class="num" style="font-weight:700${active?';color:var(--or)':''}">${fpR(totR)}</td>
       </tr>`;
     }).join('');
 
     el.innerHTML = `
       <div style="overflow-x:auto">
         <table class="tbl" style="font-size:.63rem;width:100%;min-width:500px">
-          <thead><tr>
-            <th style="${colHdr};text-align:left;min-width:220px">Indicador</th>
-            ${thMeses}${thTot}
-          </tr></thead>
+          <thead>
+            <tr>
+              <th style="${colHdr};text-align:left;min-width:220px" rowspan="2">Indicador</th>
+              ${thMeses1}
+              <th style="${colHdr};background:#1a3a6b" rowspan="2">Total R</th>
+            </tr>
+            <tr>${thMeses2}</tr>
+          </thead>
           <tbody>${rows}</tbody>
         </table>
       </div>`;
@@ -258,20 +282,22 @@
     const ctx = document.getElementById('cEerr');
     if(!ctx) return;
     if(_chart){ _chart.destroy(); _chart=null; }
-    const cOpt   = getCostoOpt();
-    const iOpt   = getIngOpt();
-    const ratios = computeRatio(cOpt.arr, iOpt.arr);
+    const cOpt    = getCostoOpt();
+    const iOpt    = getIngOpt();
+    const ratiosR = computeRatio(cOpt.arr,  iOpt.arr);
+    const ratiosP = computeRatio(cOpt.arrP, iOpt.arrP);
 
     _chart = new Chart(ctx.getContext('2d'),{
       type:'bar',
       data:{
         labels: meses,
         datasets:[
-          {label:iOpt.label, data:iOpt.arr, backgroundColor:iOpt.color+'BB', borderColor:iOpt.color, borderWidth:2, borderRadius:4, yAxisID:'y', order:2},
-          {label:cOpt.label, data:cOpt.arr, backgroundColor:cOpt.color+'BB', borderColor:cOpt.color, borderWidth:2, borderRadius:4, yAxisID:'y', order:3},
-          {label:'Ratio '+cOpt.label+' / '+iOpt.label, data:ratios, type:'line',
-           borderColor:'#FFC000', backgroundColor:'#FFC00033', borderWidth:2, tension:0.4,
-           pointRadius:5, pointBackgroundColor:'#FFC000', fill:false, yAxisID:'yRatio', order:1}
+          {label:iOpt.label+' Real',  data:iOpt.arr,  backgroundColor:iOpt.color+'BB', borderColor:iOpt.color, borderWidth:2, borderRadius:4, yAxisID:'y',      order:4},
+          {label:iOpt.label+' PTTO',  data:iOpt.arrP, backgroundColor:iOpt.color+'44', borderColor:iOpt.color, borderWidth:1, borderRadius:4, yAxisID:'y',      order:5, borderDash:[4,3]},
+          {label:cOpt.label+' Real',  data:cOpt.arr,  backgroundColor:cOpt.color+'BB', borderColor:cOpt.color, borderWidth:2, borderRadius:4, yAxisID:'y',      order:6},
+          {label:cOpt.label+' PTTO',  data:cOpt.arrP, backgroundColor:cOpt.color+'44', borderColor:cOpt.color, borderWidth:1, borderRadius:4, yAxisID:'y',      order:7, borderDash:[4,3]},
+          {label:'Ratio Real',  data:ratiosR, type:'line', borderColor:'#FFC000', backgroundColor:'transparent', borderWidth:2.5, tension:0.4, pointRadius:5, pointBackgroundColor:'#FFC000', fill:false, yAxisID:'yRatio', order:1},
+          {label:'Ratio PTTO',  data:ratiosP, type:'line', borderColor:'#FFC000', backgroundColor:'transparent', borderWidth:1.5, tension:0.4, pointRadius:4, pointBackgroundColor:'#fff', pointBorderColor:'#FFC000', fill:false, yAxisID:'yRatio', order:2, borderDash:[5,4]}
         ]
       },
       options:{
@@ -280,13 +306,10 @@
         plugins:{
           legend:{position:'bottom',labels:{boxWidth:12,font:{size:9},padding:10}},
           tooltip:{
-            filter:item=>item.dataset.yAxisID!=='yRatio',
             callbacks:{
-              label:c=>` ${c.dataset.label}: MM$${fN1(c.raw||0)}`,
-              footer:items=>{
-                if(!items.length) return '';
-                const r=ratios[items[0].dataIndex];
-                return r!==null?`Ratio: ${(r*100).toFixed(1).replace('.',',')}%`:'';
+              label:c=>{
+                if(c.dataset.yAxisID==='yRatio') return ` ${c.dataset.label}: ${((c.raw||0)*100).toFixed(1).replace('.',',')}%`;
+                return ` ${c.dataset.label}: MM$${fN1(c.raw||0)}`;
               }
             }
           }
@@ -297,7 +320,7 @@
              ticks:{font:{size:9},callback:v=>'MM$'+(v||0).toLocaleString('es-CL',{maximumFractionDigits:0})},
              title:{display:true,text:'MM$',font:{size:8},color:'var(--mut)'}},
           yRatio:{position:'right',beginAtZero:true,grid:{display:false},
-                  ticks:{font:{size:9},callback:v=>(v*100).toFixed(1).replace('.',',')+'%'},
+                  ticks:{font:{size:9},callback:v=>((v||0)*100).toFixed(1).replace('.',',')+'%'},
                   title:{display:true,text:'% Costo / Ingreso',font:{size:8},color:'#B8860B'}}
         }
       }
