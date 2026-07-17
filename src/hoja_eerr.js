@@ -16,6 +16,17 @@
   const meses = R2.meses;
   const n = meses.length;
 
+  // Evita que hover del .tbl borre el fondo en filas azules (texto blanco)
+  if(!document.getElementById('eerr-azul-style')){
+    const s = document.createElement('style');
+    s.id = 'eerr-azul-style';
+    s.textContent = `
+      #eerr-table tr.eerr-azul:hover { background: var(--az3) !important; }
+      #eerr-table tr.eerr-azul:hover td { background-color: transparent; }
+    `;
+    document.head.appendChild(s);
+  }
+
   // Mes etiqueta header
   const mesLbl = document.getElementById('eerr-mes-lbl');
   if(mesLbl) mesLbl.textContent = meses[n-1] + ' ' + ANO_ACTUAL;
@@ -114,7 +125,7 @@
     const rowPct     = (lbl,ar,ap,av,avp,numR,numP,denR,denP) =>
       `<tr>${LBL(lbl,'.6rem')}${cells4pct(ar,ap,av,avp)}${tot4pct(numR||ar,numP||ap,denR||R2.ingresos_totales,denP||R2.ingresos_totales_p)}</tr>`;
     const rowCeleste = (lbl,ar,ap,av,avp) => `<tr style="background:rgba(0,160,220,.13)">${LBLb(lbl,undefined,BG_CEL)}${cells4mm(ar,ap,av,avp,'bold')}${tot4mm(ar,ap,'bold')}</tr>`;
-    const rowAzul    = (lbl,ar,ap,av,avp) => `<tr style="background:var(--az3)">${LBLb(lbl,'#fff','var(--az3)')}${cells4mm(ar,ap,av,avp,'white')}${tot4mm(ar,ap,'white')}</tr>`;
+    const rowAzul    = (lbl,ar,ap,av,avp) => `<tr class="eerr-azul" style="background:var(--az3)">${LBLb(lbl,'#fff','var(--az3)')}${cells4mm(ar,ap,av,avp,'white')}${tot4mm(ar,ap,'white')}</tr>`;
 
     eerrEl.innerHTML = `
       <div style="overflow-x:auto;overflow-y:auto;max-height:68vh">
