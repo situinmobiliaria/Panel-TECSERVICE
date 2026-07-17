@@ -34,7 +34,7 @@
     // 2 columnas por mes (R = Real, P = Presupuesto) + 1 total
     const totalCols = n * 2 + 2; // label + n*2 + total
     const thMeses1  = meses.map(m=>`<th colspan="2" style="${colHdr}">${m.slice(0,3)}</th>`).join('');
-    const thMeses2  = meses.map(()=>`<th style="${colHdrSub}">R</th><th style="${colHdrSub}">P</th>`).join('');
+    const thMeses2  = meses.map(()=>`<th style="${colHdrSub}">REAL</th><th style="${colHdrSub}">PTTO</th>`).join('');
     const thTot     = `<th style="${colHdr};background:#1a3a6b">Total R</th>`;
 
     const tdR  = v => `<td class="num" style="color:#111">MM$${fmm(v)}</td>`;
