@@ -8749,7 +8749,7 @@ function renderAlertas(){
     const cN  = (v,fw) => cx(v,fw,'#111','');
     const cP  = (v,fw) => cx(v,fw,'var(--mut)','');
     const cVmm= v => cx(v,false,'#555','');
-    const cVpct=v => cx(v,false,'#555','%');
+    const cVpct=v => `<td class="num" style="color:#555">${fpct(v)}</td>`;
     const cNW = (v,fw) => cx(v,fw,'#fff','');
     const cPW = (v,fw) => cx(v,fw,'rgba(255,255,255,.6)','');
     const cVW = v => `<td class="num" style="color:rgba(255,255,255,.5)">MM$${fmm(v)}</td>`;
