@@ -103,13 +103,17 @@
 
     const LBL  = (txt,indent,bg) => `<td style="${SLC(bg||'var(--bg,#fff)')};font-size:.62rem;white-space:nowrap;padding:.3rem .6rem .3rem ${indent||'.6rem'}">${txt}</td>`;
     const LBLb = (txt,clr,bg)   => `<td style="${SLC(bg||'var(--bg,#fff)')};font-size:.62rem;white-space:nowrap;padding:.35rem .6rem;font-weight:700;color:${clr||'inherit'}">${txt}</td>`;
-    const sepRow = lbl => `<tr style="background:rgba(0,45,115,.07)"><td colspan="${totalCols}" style="${SLC('rgba(0,45,115,.07)')};font-size:.58rem;font-weight:700;color:var(--mut);padding:.22rem .6rem;letter-spacing:.05em">${lbl.toUpperCase()}</td></tr>`;
+    // Fondos opacos para celdas sticky (evitar transparencia al scrollear)
+    const BG_CEL = '#def3fa'; // equivalente opaco de rgba(0,160,220,.13) sobre blanco
+    const BG_SEP = '#edf0f5'; // equivalente opaco de rgba(0,45,115,.07) sobre blanco
+
+    const sepRow = lbl => `<tr style="background:rgba(0,45,115,.07)"><td colspan="${totalCols}" style="${SLC(BG_SEP)};font-size:.58rem;font-weight:700;color:var(--mut);padding:.22rem .6rem;letter-spacing:.05em">${lbl.toUpperCase()}</td></tr>`;
 
     const rowBase    = (lbl,ar,ap,av,avp) => `<tr>${LBL(lbl,'.6rem')}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
     const rowSub     = (lbl,ar,ap,av,avp) => `<tr>${LBL('↳ '+lbl,'1.4rem')}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
     const rowPct     = (lbl,ar,ap,av,avp,numR,numP,denR,denP) =>
       `<tr>${LBL(lbl,'.6rem')}${cells4pct(ar,ap,av,avp)}${tot4pct(numR||ar,numP||ap,denR||R2.ingresos_totales,denP||R2.ingresos_totales_p)}</tr>`;
-    const rowCeleste = (lbl,ar,ap,av,avp) => `<tr style="background:rgba(0,160,220,.13)">${LBLb(lbl,undefined,'rgba(0,160,220,.13)')}${cells4mm(ar,ap,av,avp,'bold')}${tot4mm(ar,ap,'bold')}</tr>`;
+    const rowCeleste = (lbl,ar,ap,av,avp) => `<tr style="background:rgba(0,160,220,.13)">${LBLb(lbl,undefined,BG_CEL)}${cells4mm(ar,ap,av,avp,'bold')}${tot4mm(ar,ap,'bold')}</tr>`;
     const rowAzul    = (lbl,ar,ap,av,avp) => `<tr style="background:var(--az3)">${LBLb(lbl,'#fff','var(--az3)')}${cells4mm(ar,ap,av,avp,'white')}${tot4mm(ar,ap,'white')}</tr>`;
 
     eerrEl.innerHTML = `
