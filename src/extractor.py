@@ -1217,148 +1217,102 @@ def read_casos(wb):
     return {"casos": casos, "equipos": equipos}
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HOJA: RATIOS COSTOS
-# ══════════════════════════════════════════════════════════════════════════════
-def read_ratios_costos(wb):
+def read_ratios2(wb):
     ws = None
     for name in wb.sheetnames:
-        if "ratio" in name.lower() and "costo" in name.lower():
+        if "ratio" in name.lower() and "2" in name:
             ws = wb[name]
             break
     if ws is None:
         return {}
 
-    rows = list(ws.iter_rows(min_row=1, max_row=43, values_only=True))
+    # Estructura: col B = etiqueta, Real de mes i = col (2 + i*4), 0-indexed
+    # Fila 7=Ingresos, 8=Contratos, 9=Otras, 10=CdV, 11=Margen, 12=Margen%,
+    # 14=Empleados, 15=Otros, 17=EBITDA Directo, 20=GAV Indirecto, 30=EBITDA Empresa
+    MAX_MONTHS = 12
+    MAX_COL    = 2 + MAX_MONTHS * 4 + 1
 
-    MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
+    rows = list(ws.iter_rows(min_row=1, max_row=50, max_col=MAX_COL, values_only=True))
 
-    # Detectar fila de encabezados buscando "Enero" en alguna columna
-    hdr_col = None  # columna donde empiezan los meses
-    for row in rows:
-        for ci, cell in enumerate(row):
-            if safe_str(cell).strip().lower() == "enero":
-                hdr_col = ci
-                break
-        if hdr_col is not None:
-            break
-    if hdr_col is None:
-        return {}
+    MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
+             "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
 
-    def get_mes_vals(row_idx):
+    def get_val(row_idx, col_idx):
         row = rows[row_idx] if row_idx < len(rows) else []
-        return [to_float(row[hdr_col + i]) if len(row) > hdr_col + i and row[hdr_col + i] is not None else 0.0 for i in range(12)]
+        if col_idx < len(row) and row[col_idx] is not None:
+            try: return float(row[col_idx])
+            except: return 0.0
+        return 0.0
 
-    def get_total_col(row_idx):
-        row = rows[row_idx] if row_idx < len(rows) else []
-        total_ci = hdr_col + 12
-        v = row[total_ci] if len(row) > total_ci and row[total_ci] is not None else None
-        return to_float(v) if v is not None else 0.0
+    def get_real(row_idx, month_i):
+        return get_val(row_idx, 2 + month_i * 4)
 
-    # Buscar filas por etiqueta (col B = hdr_col - 1)
-    label_col = hdr_col - 1
-    label_idx = {}  # label_key → row_idx
-    for i, row in enumerate(rows):
-        lbl = safe_str(row[label_col]).strip().lower() if len(row) > label_col and row[label_col] else ""
-        if lbl:
-            label_idx[lbl] = i
+    def get_ptto(row_idx, month_i):
+        return get_val(row_idx, 3 + month_i * 4)
 
-    def find_row(keywords):
-        """Devuelve el primer row_idx cuya etiqueta contiene todas las keywords."""
-        for lbl, idx in label_idx.items():
-            if all(k in lbl for k in keywords):
-                return idx
-        return None
+    def arr(row_idx, n):
+        return [round(get_real(row_idx, i), 3) for i in range(n)]
 
-    # Filas de datos base
-    idx_ing_tot   = find_row(["ingresos totales"])
-    idx_ing_con   = find_row(["ingresos por contrato"])
-    idx_ing_otras = find_row(["otras facturaciones"])
-    idx_costo_v   = find_row(["costo de ventas"])
-    idx_gasto_emp = find_row(["beneficios a los empleados"])
-    idx_otros_g   = find_row(["otros gastos por naturaleza"])
-    idx_gav       = find_row(["gav total"])
-    idx_margen_mm = find_row(["margen del producto"])
-    idx_margen_pct= find_row(["margen %"])
-    idx_ebitda    = find_row(["ebitda"])
+    def arrp(row_idx, n):
+        return [round(get_ptto(row_idx, i), 3) for i in range(n)]
 
-    if idx_ing_tot is None or idx_costo_v is None:
-        return {}
-
-    # Detectar último mes completo: último mes donde Costo de Ventas ≠ 0
-    costo_vals = get_mes_vals(idx_costo_v)
+    # Detectar mes_cierre: meses consecutivos con Ingresos != 0 (row 7 → idx 6)
+    # Paramos en el primer cero para no capturar columna Total al final
     mes_cierre = 0
-    for i, v in enumerate(costo_vals):
-        if abs(v) > 0.001:
+    for i in range(MAX_MONTHS):
+        if abs(get_real(6, i)) > 0.001:
             mes_cierre = i + 1
+        else:
+            break
     if mes_cierre == 0:
         return {}
 
-    def row_slice(idx):
-        if idx is None: return [0.0] * mes_cierre
-        return [round(v, 3) for v in get_mes_vals(idx)[:mes_cierre]]
-
-    def ratio_slice(idx):
-        if idx is None: return [None] * mes_cierre
-        vals = get_mes_vals(idx)
-        return [round(v, 4) if abs(v) > 0.0001 else None for v in vals[:mes_cierre]]
-
-    def period_sum(idx):
-        if idx is None: return 0.0
-        return round(sum(get_mes_vals(idx)[:mes_cierre]), 2)
-
-    total_ing  = period_sum(idx_ing_tot)
-    total_marg = period_sum(idx_margen_mm)
-    margen_pct_periodo = round(total_marg / total_ing, 4) if total_ing else 0
-
-    # Ratios: buscar tríos (totales, contratos, margen) por etiqueta
-    ratio_defs = [
-        (["ingresos totales","costo de venta"],  ["contrato","costo de venta"],          ["margen","costo de venta"],  "Costo de Venta"),
-        (["ingresos totales","beneficio"],        ["contrato","beneficio"],               ["margen","beneficio"],        "Gasto por Beneficio a los Empleados Directos"),
-        (["ingresos totales","otros gastos"],     ["recurrentes","otros gastos"],         ["margen","otros gastos"],     "Otros Gastos por Naturaleza Directos"),
-        (["ingresos totales","gav"],              ["contrato","gav"],                     ["margen","gav"],              "GAV Total (Beneficio Empleados + Otros Gastos)"),
-        (["ingreso total","costo total"],         ["ingreso por contrato","costo total"], ["margen","costo total"],      "Costo Total"),
-    ]
-    ratios = []
-    for kw_tot, kw_con, kw_mar, nombre in ratio_defs:
-        idx_t = find_row(kw_tot)
-        idx_c = find_row(kw_con)
-        idx_m = find_row(kw_mar)
-        ratios.append({
-            "nombre":          nombre,
-            "totales":         ratio_slice(idx_t),
-            "contratos":       ratio_slice(idx_c),
-            "margen":          ratio_slice(idx_m),
-            "total_totales":   round(get_total_col(idx_t), 4) if idx_t is not None else 0,
-            "total_contratos": round(get_total_col(idx_c), 4) if idx_c is not None else 0,
-            "total_margen":    round(get_total_col(idx_m), 4) if idx_m is not None else 0,
-        })
-
+    n = mes_cierre
+    pct  = lambda idx: [round(get_real(idx, i), 4) for i in range(n)]
+    pctp = lambda idx: [round(get_ptto(idx, i), 4) for i in range(n)]
     return {
-        "mes_cierre":               mes_cierre,
-        "mes_cierre_nombre":        MESES[mes_cierre - 1],
-        "meses":                    MESES[:mes_cierre],
-        "ingresos_totales":         row_slice(idx_ing_tot),
-        "ingresos_contratos":       row_slice(idx_ing_con),
-        "ingresos_otras":           row_slice(idx_ing_otras),
-        "costo_ventas":             row_slice(idx_costo_v),
-        "gastos_empleados":         row_slice(idx_gasto_emp),
-        "otros_gastos":             row_slice(idx_otros_g),
-        "gav_total":                row_slice(idx_gav),
-        "margen_mm":                row_slice(idx_margen_mm),
-        "margen_pct":               [round(v, 4) for v in get_mes_vals(idx_margen_pct)[:mes_cierre]] if idx_margen_pct else [0]*mes_cierre,
-        "ebitda":                   row_slice(idx_ebitda),
-        "total_ingresos_totales":   total_ing,
-        "total_ingresos_contratos": period_sum(idx_ing_con),
-        "total_ingresos_otras":     period_sum(idx_ing_otras),
-        "total_costo_ventas":       period_sum(idx_costo_v),
-        "total_gastos_empleados":   period_sum(idx_gasto_emp),
-        "total_otros_gastos":       period_sum(idx_otros_g),
-        "total_gav":                period_sum(idx_gav),
-        "total_margen_mm":          total_marg,
-        "total_margen_pct":         margen_pct_periodo,
-        "total_ebitda":             period_sum(idx_ebitda),
-        "ratios":                   ratios,
+        "mes_cierre":                   mes_cierre,
+        "meses":                        MESES[:n],
+        # Ingresos
+        "ingresos_totales":             arr(6,  n), "ingresos_totales_p":        arrp(6,  n),
+        "ingresos_contratos":           arr(7,  n), "ingresos_contratos_p":      arrp(7,  n),
+        "ingresos_otras":               arr(8,  n), "ingresos_otras_p":          arrp(8,  n),
+        # Costo y margen
+        "costo_ventas":                 arr(9,  n), "costo_ventas_p":            arrp(9,  n),
+        "margen_mm":                    arr(10, n), "margen_mm_p":               arrp(10, n),
+        "margen_pct":                   pct(11),    "margen_pct_p":              pctp(11),
+        # Gastos directos
+        "gastos_empleados":             arr(13, n), "gastos_empleados_p":        arrp(13, n),
+        "otros_gastos":                 arr(14, n), "otros_gastos_p":            arrp(14, n),
+        # EBITDA Directo
+        "ebitda_directo":               arr(16, n), "ebitda_directo_p":          arrp(16, n),
+        "ebitda_directo_pct":           pct(17),    "ebitda_directo_pct_p":      pctp(17),
+        # GAV Indirecto
+        "gav_indirecto":                arr(19, n), "gav_indirecto_p":           arrp(19, n),
+        "ebitda_indirecto":             arr(20, n), "ebitda_indirecto_p":        arrp(20, n),
+        # Gastos adicionales
+        "finiquitos":                   arr(21, n), "finiquitos_p":              arrp(21, n),
+        "multas":                       arr(22, n), "multas_p":                  arrp(22, n),
+        "prov_obsolescencias":          arr(23, n), "prov_obsolescencias_p":     arrp(23, n),
+        "prov_incobrables":             arr(24, n), "prov_incobrables_p":        arrp(24, n),
+        "prov_habilitacion":            arr(25, n), "prov_habilitacion_p":       arrp(25, n),
+        "total_gastos_adicionales":     arr(27, n), "total_gastos_adicionales_p":arrp(27, n),
+        # EBITDA Empresa
+        "ebitda_empresa":               arr(29, n), "ebitda_empresa_p":          arrp(29, n),
+        # Depreciación y resultado operacional
+        "depreciacion":                 arr(32, n), "depreciacion_p":            arrp(32, n),
+        "resultado_operacional":        arr(33, n), "resultado_operacional_p":   arrp(33, n),
+        # Resultado no operacional
+        "otros_ingresos_funcion":       arr(35, n), "otros_ingresos_funcion_p":  arrp(35, n),
+        "ingreso_financiero":           arr(36, n), "ingreso_financiero_p":      arrp(36, n),
+        "costo_financiero":             arr(37, n), "costo_financiero_p":        arrp(37, n),
+        "otros_gastos_funcion":         arr(38, n), "otros_gastos_funcion_p":    arrp(38, n),
+        "diferencia_cambio":            arr(39, n), "diferencia_cambio_p":       arrp(39, n),
+        "resultado_no_operacional":     arr(40, n), "resultado_no_operacional_p":arrp(40, n),
+        # Resultado final
+        "resultado_antes_imp":          arr(42, n), "resultado_antes_imp_p":     arrp(42, n),
+        "impuesto_renta":               arr(44, n), "impuesto_renta_p":          arrp(44, n),
+        "resultado_ejercicio":          arr(45, n), "resultado_ejercicio_p":     arrp(45, n),
     }
 
 
@@ -1541,7 +1495,6 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         "visitas":              visitas,
         "analisis_fac":         analisis_fac or {},
         "base_instalada":       base_instalada or {"total":0,"por_linea":{},"por_tipo":[],"por_estado":{},"clientes":[]},
-        "ratios_costos":        {},
     }
 
 
@@ -1822,7 +1775,7 @@ def main():
     base_instalada = read_base_instalada(wb2)
     mapa_data  = read_mapa(wb2)
     casos_data = read_casos(wb2)
-    ratios_costos = read_ratios_costos(wb2)
+    ratios2 = read_ratios2(wb2)
     resumen_programas = read_resumen_tipos_programas(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
@@ -1836,7 +1789,7 @@ def main():
     # ── Construir estructuras de datos ───────────────────────────────────────
     print("[6/6] Construyendo estructuras de datos...")
     app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada)
-    app_data["ratios_costos"] = ratios_costos
+    app_data["ratios2"] = ratios2
     app_data["resumen_programas"] = resumen_programas
     data, nc_data, perdidos = build_data_arrays(contratos, panel_raw)
     total_com_val = sum(d["val"] for d in data if d["tipo"] == "Comercial")

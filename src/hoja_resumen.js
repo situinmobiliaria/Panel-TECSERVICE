@@ -560,10 +560,9 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
   _renderLineaChart();
 })();
 
-// ─── RATIOS DE COSTOS ─────────────────────────────────────────
+// (sección Indicadores Financieros eliminada — tabla y gráficos de ratios removidos)
 (function(){
-  const RC = (APP_DATA && APP_DATA.ratios_costos) || {};
-  if(!RC.ratios || !RC.ratios.length) return;
+  return;
 
   const mesEl = document.getElementById('rs-ratios-mes');
   if(mesEl) mesEl.textContent = (RC.mes_cierre_nombre||'') + ' 2026';
