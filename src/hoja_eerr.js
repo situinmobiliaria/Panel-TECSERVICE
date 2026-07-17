@@ -31,11 +31,10 @@
   if(eerrEl){
     const colHdr    = 'background:var(--az3);color:rgba(255,255,255,.85);font-size:.6rem;font-weight:700;text-align:center;padding:.35rem .4rem';
     const colHdrSub = 'background:#1e4080;color:rgba(255,255,255,.7);font-size:.55rem;font-weight:600;text-align:center;padding:.2rem .3rem';
-    // 2 columnas por mes (R = Real, P = Presupuesto) + 1 total
-    const totalCols = n * 2 + 2; // label + n*2 + total
+    // 2 columnas por mes (REAL + PTTO) + 2 totales (Total R + Total P)
+    const totalCols = n * 2 + 3; // label + n*2 + totalR + totalP
     const thMeses1  = meses.map(m=>`<th colspan="2" style="${colHdr}">${m.slice(0,3)}</th>`).join('');
     const thMeses2  = meses.map(()=>`<th style="${colHdrSub}">REAL</th><th style="${colHdrSub}">PTTO</th>`).join('');
-    const thTot     = `<th style="${colHdr};background:#1a3a6b">Total R</th>`;
 
     const tdR  = v => `<td class="num" style="color:#111">MM$${fmm(v)}</td>`;
     const tdP  = v => `<td class="num" style="color:var(--mut)">MM$${fmm(v)}</td>`;
@@ -60,23 +59,28 @@
 
     const rowBase = (label, ar, ap) => `<tr>
       ${LBL(label)}${pairCells(ar,ap,'')}
-      <td class="num" style="font-weight:700;color:#111">MM$${fmm(sumArr(ar))}</td></tr>`;
+      <td class="num" style="font-weight:700;color:#111">MM$${fmm(sumArr(ar))}</td>
+      <td class="num" style="font-weight:700;color:var(--mut)">MM$${fmm(sumArr(ap))}</td></tr>`;
 
     const rowSub = (label, ar, ap) => `<tr>
       ${LBL('↳ '+label,'1.4rem')}${pairCells(ar,ap,'')}
-      <td class="num" style="font-weight:700;color:#555">MM$${fmm(sumArr(ar))}</td></tr>`;
+      <td class="num" style="font-weight:700;color:#555">MM$${fmm(sumArr(ar))}</td>
+      <td class="num" style="font-weight:700;color:var(--mut)">MM$${fmm(sumArr(ap))}</td></tr>`;
 
-    const rowPct = (label, ar, ap, totR) => `<tr>
+    const rowPct = (label, ar, ap, totR, totP) => `<tr>
       ${LBL(label)}${pairPctCells(ar,ap,'')}
-      <td class="num" style="font-weight:700;color:#111">${fpct(totR)}</td></tr>`;
+      <td class="num" style="font-weight:700;color:#111">${fpct(totR)}</td>
+      <td class="num" style="font-weight:700;color:var(--mut)">${fpct(totP)}</td></tr>`;
 
     const rowResultCeleste = (label, ar, ap) => `<tr style="background:rgba(0,160,220,.13)">
       ${LBLb(label)}${pairCells(ar,ap,'bold')}
-      <td class="num" style="font-weight:700;color:#111">MM$${fmm(sumArr(ar))}</td></tr>`;
+      <td class="num" style="font-weight:700;color:#111">MM$${fmm(sumArr(ar))}</td>
+      <td class="num" style="font-weight:700;color:var(--mut)">MM$${fmm(sumArr(ap))}</td></tr>`;
 
     const rowResultAzul = (label, ar, ap) => `<tr style="background:var(--az3)">
       ${LBLb(label,'#fff')}${pairCells(ar,ap,'white')}
-      <td class="num" style="font-weight:700;color:#fff">MM$${fmm(sumArr(ar))}</td></tr>`;
+      <td class="num" style="font-weight:700;color:#fff">MM$${fmm(sumArr(ar))}</td>
+      <td class="num" style="font-weight:700;color:rgba(255,255,255,.65)">MM$${fmm(sumArr(ap))}</td></tr>`;
 
     const sepRow = label =>
       `<tr style="background:rgba(0,45,115,.07)"><td colspan="${totalCols}" style="font-size:.58rem;font-weight:700;color:var(--mut);padding:.22rem .6rem;letter-spacing:.05em">${label.toUpperCase()}</td></tr>`;
@@ -105,6 +109,7 @@
               <th style="${colHdr};text-align:left;min-width:220px" rowspan="2">Concepto</th>
               ${thMeses1}
               <th style="${colHdr};background:#1a3a6b" rowspan="2">Total R</th>
+              <th style="${colHdr};background:#233060" rowspan="2" style="color:rgba(255,255,255,.7)">Total P</th>
             </tr>
             <tr>${thMeses2}</tr>
           </thead>
@@ -115,12 +120,12 @@
             ${rowSub('Ingresos por otras actividades (MM$)', R2.ingresos_otras, R2.ingresos_otras_p)}
             ${rowBase('(−) Costo de ventas (MM$)', R2.costo_ventas, R2.costo_ventas_p)}
             ${rowResultCeleste('= Margen del Producto (MM$)', R2.margen_mm, R2.margen_mm_p)}
-            ${rowPct('Margen %', R2.margen_pct, R2.margen_pct_p, totMargenPct)}
+            ${rowPct('Margen %', R2.margen_pct, R2.margen_pct_p, totMargenPct, sumArr(R2.margen_mm_p)/(Math.abs(sumArr(R2.ingresos_totales_p))||1))}
             ${sepRow('Gastos Operacionales Directos')}
             ${rowBase('(−) Gasto beneficios empleados Directos (MM$)', R2.gastos_empleados, R2.gastos_empleados_p)}
             ${rowBase('(−) Otros gastos por naturaleza Directos (MM$)', R2.otros_gastos, R2.otros_gastos_p)}
             ${rowResultCeleste('= EBITDA Directo (MM$)', R2.ebitda_directo, R2.ebitda_directo_p)}
-            ${rowPct('%  EBITDA Directo', R2.ebitda_directo_pct, R2.ebitda_directo_pct_p, totEbitDPct)}
+            ${rowPct('%  EBITDA Directo', R2.ebitda_directo_pct, R2.ebitda_directo_pct_p, totEbitDPct, sumArr(R2.ebitda_directo_p)/(Math.abs(sumArr(R2.ingresos_totales_p))||1))}
             ${sepRow('GAV Indirecto')}
             ${rowBase('(−) GAV Indirecto (MM$)', R2.gav_indirecto, R2.gav_indirecto_p)}
             ${rowResultCeleste('= EBITDA Indirecto (MM$)', R2.ebitda_indirecto, R2.ebitda_indirecto_p)}
@@ -132,7 +137,7 @@
             ${hasGaAd ? rowBase('Prov. Habilitación Oficinas (MM$)', R2.prov_habilitacion, R2.prov_habilitacion_p) : ''}
             ${hasGaAd ? rowBase('Total Gastos Adicionales (MM$)', R2.total_gastos_adicionales, R2.total_gastos_adicionales_p) : ''}
             ${rowResultAzul('= EBITDA Empresa (MM$)', R2.ebitda_empresa, R2.ebitda_empresa_p)}
-            ${rowPct('%  EBITDA Empresa', ebitEmpPctArr, ebitEmpPctArrP, totEbitEPct)}
+            ${rowPct('%  EBITDA Empresa', ebitEmpPctArr, ebitEmpPctArrP, totEbitEPct, sumArr(R2.ebitda_empresa_p)/(Math.abs(sumArr(R2.ingresos_totales_p))||1))}
             ${sepRow('Resultado Operacional')}
             ${rowBase('(−) Depreciación y amortización (MM$)', R2.depreciacion, R2.depreciacion_p)}
             ${rowResultCeleste('= Resultado Operacional (MM$)', R2.resultado_operacional, R2.resultado_operacional_p)}
@@ -147,7 +152,7 @@
             ${rowResultCeleste('= Resultado antes de impuestos (MM$)', R2.resultado_antes_imp, R2.resultado_antes_imp_p)}
             ${rowBase('(−) Impuesto a la renta (MM$)', R2.impuesto_renta, R2.impuesto_renta_p)}
             ${rowResultAzul('= Resultado del ejercicio Empresa (MM$)', R2.resultado_ejercicio, R2.resultado_ejercicio_p)}
-            ${rowPct('%  Resultado / Ingresos', rejPctArr, rejPctArrP, totRejPct)}
+            ${rowPct('%  Resultado / Ingresos', rejPctArr, rejPctArrP, totRejPct, sumArr(R2.resultado_ejercicio_p)/(Math.abs(sumArr(R2.ingresos_totales_p))||1))}
           </tbody>
         </table>
       </div>`;
@@ -292,12 +297,10 @@
       data:{
         labels: meses,
         datasets:[
-          {label:iOpt.label+' Real',  data:iOpt.arr,  backgroundColor:iOpt.color+'BB', borderColor:iOpt.color, borderWidth:2, borderRadius:4, yAxisID:'y',      order:4},
-          {label:iOpt.label+' PTTO',  data:iOpt.arrP, backgroundColor:iOpt.color+'44', borderColor:iOpt.color, borderWidth:1, borderRadius:4, yAxisID:'y',      order:5, borderDash:[4,3]},
-          {label:cOpt.label+' Real',  data:cOpt.arr,  backgroundColor:cOpt.color+'BB', borderColor:cOpt.color, borderWidth:2, borderRadius:4, yAxisID:'y',      order:6},
-          {label:cOpt.label+' PTTO',  data:cOpt.arrP, backgroundColor:cOpt.color+'44', borderColor:cOpt.color, borderWidth:1, borderRadius:4, yAxisID:'y',      order:7, borderDash:[4,3]},
-          {label:'Ratio Real',  data:ratiosR, type:'line', borderColor:'#FFC000', backgroundColor:'transparent', borderWidth:2.5, tension:0.4, pointRadius:5, pointBackgroundColor:'#FFC000', fill:false, yAxisID:'yRatio', order:1},
-          {label:'Ratio PTTO',  data:ratiosP, type:'line', borderColor:'#FFC000', backgroundColor:'transparent', borderWidth:1.5, tension:0.4, pointRadius:4, pointBackgroundColor:'#fff', pointBorderColor:'#FFC000', fill:false, yAxisID:'yRatio', order:2, borderDash:[5,4]}
+          {label:iOpt.label,       data:iOpt.arr,  backgroundColor:iOpt.color+'BB', borderColor:iOpt.color, borderWidth:2, borderRadius:4, yAxisID:'y', order:3},
+          {label:cOpt.label,       data:cOpt.arr,  backgroundColor:cOpt.color+'BB', borderColor:cOpt.color, borderWidth:2, borderRadius:4, yAxisID:'y', order:4},
+          {label:'Ratio Real',     data:ratiosR, type:'line', borderColor:'#FFC000', backgroundColor:'transparent', borderWidth:2.5, tension:0.4, pointRadius:5, pointBackgroundColor:'#FFC000', fill:false, yAxisID:'yRatio', order:1},
+          {label:'Ratio PTTO',     data:ratiosP, type:'line', borderColor:'#FFC000', backgroundColor:'transparent', borderWidth:1.5, tension:0.4, pointRadius:4, pointBackgroundColor:'#fff', pointBorderColor:'#FFC000', fill:false, yAxisID:'yRatio', order:2, borderDash:[5,4]}
         ]
       },
       options:{
