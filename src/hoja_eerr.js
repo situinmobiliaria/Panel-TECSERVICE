@@ -50,19 +50,25 @@
     const g = (arr,i) => (arr||[])[i]||0;
     const sumSel = arr => sm.reduce((s,i)=>s+g(arr,i),0);
 
-    const thMes1 = sm.map(i=>`<th colspan="4" style="${colHdr}">${meses[i].slice(0,3)}</th>`).join('');
-    const thMes2 = sm.map(()=>`<th style="${colHdrSub}">REAL</th><th style="${colHdrSub}">PTTO</th><th style="${colHdrVar}">VAR</th><th style="${colHdrVar}">VAR%</th>`).join('');
+    const ST1 = 'position:sticky;top:0;z-index:2';       // sticky fila 1 header
+    const ST2 = 'position:sticky;top:26px;z-index:2';   // sticky fila 2 header
+    const SL  = 'position:sticky;left:0;z-index:3';      // sticky columna + header (esquina)
+    const SLC = (bg) => `position:sticky;left:0;z-index:1;background:${bg};border-right:1px solid rgba(0,0,0,.08)`;
 
-    // célula helpers
-    const cx = (v,fw,cl,pre) => `<td class="num" style="${fw?'font-weight:700;':''}color:${cl}">${pre||'MM$'}${pre?fpct(v):fmm(v)}</td>`;
+    const thMes1 = sm.map(i=>`<th colspan="4" style="${ST1};${colHdr}">${meses[i].slice(0,3)}</th>`).join('');
+    const thMes2 = sm.map(()=>`<th style="${ST2};${colHdrSub}">REAL</th><th style="${ST2};${colHdrSub}">PTTO</th><th style="${ST2};${colHdrVar}">VAR</th><th style="${ST2};${colHdrVar}">VAR%</th>`).join('');
+
+    // célula helpers — white-space:nowrap en todas para evitar salto de línea
+    const NW = 'white-space:nowrap';
+    const cx = (v,fw,cl,pre) => `<td class="num" style="${NW};${fw?'font-weight:700;':''}color:${cl}">${pre||'MM$'}${pre?fpct(v):fmm(v)}</td>`;
     const cN  = (v,fw) => cx(v,fw,'#111','');
     const cP  = (v,fw) => cx(v,fw,'var(--mut)','');
     const cVmm= v => cx(v,false,'#555','');
-    const cVpct=v => `<td class="num" style="color:#555">${fpct(v)}</td>`;
+    const cVpct=v => `<td class="num" style="${NW};color:#555">${fpct(v)}</td>`;
     const cNW = (v,fw) => cx(v,fw,'#fff','');
     const cPW = (v,fw) => cx(v,fw,'rgba(255,255,255,.6)','');
-    const cVW = v => `<td class="num" style="color:rgba(255,255,255,.5)">MM$${fmm(v)}</td>`;
-    const cVpW= v => `<td class="num" style="color:rgba(255,255,255,.5)">${fpct(v)}</td>`;
+    const cVW = v => `<td class="num" style="${NW};color:rgba(255,255,255,.5)">MM$${fmm(v)}</td>`;
+    const cVpW= v => `<td class="num" style="${NW};color:rgba(255,255,255,.5)">${fpct(v)}</td>`;
 
     // 4 celdas por mes para filas MM$
     const cells4mm = (ar,ap,av,avp, style) => sm.map(i=>{
@@ -95,27 +101,27 @@
               <td class="num" style="color:#888">${fpct(vVp)}</td>`;
     };
 
-    const LBL  = (txt,indent) => `<td style="font-size:.62rem;white-space:nowrap;padding:.3rem .6rem .3rem ${indent||'.6rem'}">${txt}</td>`;
-    const LBLb = (txt,clr)    => `<td style="font-size:.62rem;white-space:nowrap;padding:.35rem .6rem;font-weight:700;color:${clr||'inherit'}">${txt}</td>`;
-    const sepRow = lbl => `<tr style="background:rgba(0,45,115,.07)"><td colspan="${totalCols}" style="font-size:.58rem;font-weight:700;color:var(--mut);padding:.22rem .6rem;letter-spacing:.05em">${lbl.toUpperCase()}</td></tr>`;
+    const LBL  = (txt,indent,bg) => `<td style="${SLC(bg||'var(--bg,#fff)')};font-size:.62rem;white-space:nowrap;padding:.3rem .6rem .3rem ${indent||'.6rem'}">${txt}</td>`;
+    const LBLb = (txt,clr,bg)   => `<td style="${SLC(bg||'var(--bg,#fff)')};font-size:.62rem;white-space:nowrap;padding:.35rem .6rem;font-weight:700;color:${clr||'inherit'}">${txt}</td>`;
+    const sepRow = lbl => `<tr style="background:rgba(0,45,115,.07)"><td colspan="${totalCols}" style="${SLC('rgba(0,45,115,.07)')};font-size:.58rem;font-weight:700;color:var(--mut);padding:.22rem .6rem;letter-spacing:.05em">${lbl.toUpperCase()}</td></tr>`;
 
-    const rowBase = (lbl,ar,ap,av,avp) => `<tr>${LBL(lbl)}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
-    const rowSub  = (lbl,ar,ap,av,avp) => `<tr>${LBL('↳ '+lbl,'1.4rem')}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
-    const rowPct  = (lbl,ar,ap,av,avp,numR,numP,denR,denP) =>
-      `<tr>${LBL(lbl)}${cells4pct(ar,ap,av,avp)}${tot4pct(numR||ar,numP||ap,denR||R2.ingresos_totales,denP||R2.ingresos_totales_p)}</tr>`;
-    const rowCeleste = (lbl,ar,ap,av,avp) => `<tr style="background:rgba(0,160,220,.13)">${LBLb(lbl)}${cells4mm(ar,ap,av,avp,'bold')}${tot4mm(ar,ap,'bold')}</tr>`;
-    const rowAzul    = (lbl,ar,ap,av,avp) => `<tr style="background:var(--az3)">${LBLb(lbl,'#fff')}${cells4mm(ar,ap,av,avp,'white')}${tot4mm(ar,ap,'white')}</tr>`;
+    const rowBase    = (lbl,ar,ap,av,avp) => `<tr>${LBL(lbl,'.6rem')}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
+    const rowSub     = (lbl,ar,ap,av,avp) => `<tr>${LBL('↳ '+lbl,'1.4rem')}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
+    const rowPct     = (lbl,ar,ap,av,avp,numR,numP,denR,denP) =>
+      `<tr>${LBL(lbl,'.6rem')}${cells4pct(ar,ap,av,avp)}${tot4pct(numR||ar,numP||ap,denR||R2.ingresos_totales,denP||R2.ingresos_totales_p)}</tr>`;
+    const rowCeleste = (lbl,ar,ap,av,avp) => `<tr style="background:rgba(0,160,220,.13)">${LBLb(lbl,undefined,'rgba(0,160,220,.13)')}${cells4mm(ar,ap,av,avp,'bold')}${tot4mm(ar,ap,'bold')}</tr>`;
+    const rowAzul    = (lbl,ar,ap,av,avp) => `<tr style="background:var(--az3)">${LBLb(lbl,'#fff','var(--az3)')}${cells4mm(ar,ap,av,avp,'white')}${tot4mm(ar,ap,'white')}</tr>`;
 
     eerrEl.innerHTML = `
-      <div style="overflow-x:auto">
-        <table class="tbl" style="font-size:.62rem;width:100%;min-width:600px">
+      <div style="overflow-x:auto;overflow-y:auto;max-height:68vh">
+        <table class="tbl" style="font-size:.62rem;width:100%;min-width:600px;border-collapse:separate;border-spacing:0">
           <thead>
             <tr>
-              <th style="${colHdr};text-align:left;min-width:200px" rowspan="2">Concepto</th>
+              <th style="${SL};${ST1};${colHdr};text-align:left;min-width:200px" rowspan="2">Concepto</th>
               ${thMes1}
-              <th colspan="4" style="${colHdrTot}">TOTAL</th>
+              <th colspan="4" style="${ST1};${colHdrTot}">TOTAL</th>
             </tr>
-            <tr>${thMes2}<th style="${colHdrSub}">REAL</th><th style="${colHdrSub}">PTTO</th><th style="${colHdrVar}">VAR</th><th style="${colHdrVar}">VAR%</th></tr>
+            <tr>${thMes2}<th style="${ST2};${colHdrSub}">REAL</th><th style="${ST2};${colHdrSub}">PTTO</th><th style="${ST2};${colHdrVar}">VAR</th><th style="${ST2};${colHdrVar}">VAR%</th></tr>
           </thead>
           <tbody>
             ${sepRow('Ingresos')}
