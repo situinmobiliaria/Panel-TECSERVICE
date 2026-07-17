@@ -118,7 +118,10 @@
     const BG_CEL = '#def3fa'; // equivalente opaco de rgba(0,160,220,.13) sobre blanco
     const BG_SEP = '#edf0f5'; // equivalente opaco de rgba(0,45,115,.07) sobre blanco
 
-    const sepRow = lbl => `<tr style="background:rgba(0,45,115,.07)"><td colspan="${totalCols}" style="${SLC(BG_SEP)};font-size:.58rem;font-weight:700;color:var(--mut);padding:.22rem .6rem;letter-spacing:.05em">${lbl.toUpperCase()}</td></tr>`;
+    const sepRow = lbl => `<tr style="background:rgba(0,45,115,.07)">
+      <td style="${SLC(BG_SEP)};font-size:.58rem;font-weight:700;color:var(--mut);padding:.22rem .6rem;letter-spacing:.05em">${lbl.toUpperCase()}</td>
+      <td colspan="${totalCols-1}" style="background:rgba(0,45,115,.07)"></td>
+    </tr>`;
 
     const rowBase    = (lbl,ar,ap,av,avp) => `<tr>${LBL(lbl,'.6rem')}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
     const rowSub     = (lbl,ar,ap,av,avp) => `<tr>${LBL('↳ '+lbl,'1.4rem')}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
