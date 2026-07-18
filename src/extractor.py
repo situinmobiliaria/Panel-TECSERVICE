@@ -612,12 +612,15 @@ def read_satisfaccion(wb):
         bi       = bi_sum if bi_sum > 0 else None
         # Columna AC (row[28]) = facturación real 2026 del cliente
         fac_2026_sat = round(to_float(row[28] if len(row) > 28 else 0))
+        # Columna E (row[4]) = Fecha y hora de finalización de la encuesta
+        fecha_resp = row[4] if len(row) > 4 and isinstance(row[4], datetime) else None
 
         respuestas.append({
             "institucion":    nombre_analisis,
             "nombre_bi":      nombre_bi,
             "dominio":        dominio,
             "categoria":      _dom_cat(dominio),
+            "fecha":          fecha_resp,
             "calidad":        calidad,
             "tiempo":         tiempo,
             "recom":          recom,
@@ -638,6 +641,8 @@ def read_satisfaccion(wb):
             "nps":           {"det": 0, "pas": 0, "pro": 0, "nps": 0},
             "dominio":       [],
             "categoria":     [],
+            "trimestral":            [],
+            "detractor_categorias":  [],
             "instituciones": [],
             "bi_resumen":    {"n_inst": 0, "n_con_bi": 0, "total_bi": 0},
             "comentarios":   [],
@@ -702,6 +707,58 @@ def read_satisfaccion(wb):
         {"categoria": cat, "n": d["n"],
          "calidad": w_avg(d["cal"]), "tiempo": w_avg(d["tie"]), "recom": w_avg(d["rec"])}
         for cat, d in sorted(cat_data.items(), key=lambda x: -x[1]["n"])
+    ]
+
+    # Evolutivo trimestral: N° de encuestas y satisfacción promedio por trimestre
+    trim_data: dict = {}
+    for r in respuestas:
+        f = r.get("fecha")
+        if f is None:
+            continue
+        q = (f.month - 1) // 3 + 1
+        key = (f.year, q)
+        if key not in trim_data:
+            trim_data[key] = {"cal": [], "tie": [], "rec": [], "pro": 0, "pas": 0, "det": 0}
+        t = trim_data[key]
+        t["cal"].append(r["calidad"])
+        t["tie"].append(r["tiempo"])
+        t["rec"].append(r["recom"])
+        if r["recom"] >= 9: t["pro"] += 1
+        elif r["recom"] >= 7: t["pas"] += 1
+        else: t["det"] += 1
+
+    trimestral_list = [
+        {
+            "trimestre": f"Q{q} {year}",
+            "n":         len(t["cal"]),
+            "calidad":   round(sum(t["cal"]) / len(t["cal"]), 2),
+            "tiempo":    round(sum(t["tie"]) / len(t["tie"]), 2),
+            "recom":     round(sum(t["rec"]) / len(t["rec"]), 2),
+            "promotores":  t["pro"],
+            "pasivos":     t["pas"],
+            "detractores": t["det"],
+            "nps": round((t["pro"] - t["det"]) / len(t["cal"]) * 100) if t["cal"] else 0,
+        }
+        for (year, q), t in sorted(trim_data.items())
+    ]
+
+    # Desglose por categoría detractor (columna "Categoría" del Excel, se llena
+    # manualmente sólo para respuestas con problemas). Sólo categorías con valor.
+    det_cat_data: dict = {}
+    n_con_categoria = 0
+    for r in respuestas:
+        c = (r.get("cat_detractor") or "").strip()
+        if not c:
+            continue
+        n_con_categoria += 1
+        if c not in det_cat_data:
+            det_cat_data[c] = {"n": 0, "rec": []}
+        det_cat_data[c]["n"] += 1
+        det_cat_data[c]["rec"].append(r["recom"])
+
+    detractor_categorias = [
+        {"categoria": c, "n": d["n"], "recom_avg": round(sum(d["rec"]) / d["n"], 2)}
+        for c, d in sorted(det_cat_data.items(), key=lambda x: -x[1]["n"])
     ]
 
     # Por institución (TODAS las respuestas, no solo las que tienen mejora)
@@ -792,6 +849,8 @@ def read_satisfaccion(wb):
         "nps":           {"det": det, "pas": pas, "pro": pro, "nps": nps},
         "dominio":       dominio_list,
         "categoria":     categoria_list,
+        "trimestral":            trimestral_list,
+        "detractor_categorias":  detractor_categorias,
         "instituciones": instituciones,
         "bi_resumen":    bi_resumen,
         "comentarios":   comentarios,
@@ -1541,6 +1600,42 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
         else:
             marca_month["Otras Marcas"][m] = remainder
 
+    # Reclasificación de "Otros Ingresos" por tipo de reparación:
+    # - Trazabilidad se fusiona con la marca ICTGroup (equipos de trazabilidad).
+    # - Steelco (autoclaves) → 100% Reparación Esterilización.
+    # - Pentax Medical (endoscopios) → 100% Reparación Endoscopía.
+    # - El resto de marcas sin línea propia (TECSERVICE, Nacional, Otras Marcas)
+    #   se prorratea usando las mismas proporciones mensuales de Ingreso por
+    #   Contratos (Esterilización/Endoscopía/Dental); si un mes no tiene ingreso
+    #   por contratos (ej. mes en curso sin datos aún), se usa la proporción
+    #   promedio del período.
+    total_linea_periodo = {L: sum(linea_month[L]) for L in LINEAS}
+    total_linea_periodo_sum = sum(total_linea_periodo.values())
+    fallback_prop = {
+        L: (total_linea_periodo[L] / total_linea_periodo_sum if total_linea_periodo_sum > 0 else 1.0 / len(LINEAS))
+        for L in LINEAS
+    }
+
+    remainder_pool_month = [
+        marca_month["TECSERVICE"][m] + marca_month["NACIONAL"][m] + marca_month["Otras Marcas"][m]
+        for m in range(n)
+    ]
+    reparacion_month = {L: [0.0] * n for L in LINEAS}
+    for m in range(n):
+        mes_total = sum(linea_month[L][m] for L in LINEAS)
+        for L in LINEAS:
+            prop = (linea_month[L][m] / mes_total) if mes_total > 1e-6 else fallback_prop[L]
+            reparacion_month[L][m] = remainder_pool_month[m] * prop
+    reparacion_month["Esterilización"] = [
+        reparacion_month["Esterilización"][m] + marca_month["STEELCO"][m] for m in range(n)
+    ]
+    reparacion_month["Endoscopía"] = [
+        reparacion_month["Endoscopía"][m] + marca_month["PENTAX MEDICAL"][m] for m in range(n)
+    ]
+    trazabilidad_month = [
+        (traz_mensual[m] if m < len(traz_mensual) else 0.0) + marca_month["ICTGROUP"][m] for m in range(n)
+    ]
+
     MM = 1_000_000.0
     def to_mm(arr):
         return [round(v / MM, 3) for v in arr]
@@ -1557,20 +1652,12 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
     ]
     contratos_total = with_total(to_mm([contr_real_monthly[m] if m < len(contr_real_monthly) else 0.0 for m in range(n)]))
 
-    marca_labels = {
-        "TECSERVICE": "TECSERVICE", "NACIONAL": "Nacional", "ICTGROUP": "ICTGroup",
-        "STEELCO": "Steelco", "PENTAX MEDICAL": "Pentax Medical", "Otras Marcas": "Otras Marcas",
-    }
     otros_categorias = [
-        {"key": "trazabilidad", "label": "Trazabilidad", "valores": with_total(to_mm(traz_mensual[:n]))},
-        {"key": "reas",         "label": "REAS",          "valores": with_total(to_mm(reas_mensual[:n]))},
-    ] + [
-        {
-            "key": "marca_" + mk.lower().replace(" ", "_"),
-            "label": marca_labels.get(mk, mk),
-            "valores": with_total(to_mm(marca_month[mk])),
-        }
-        for mk in TOP_MARCAS_DESGLOSE + ["Otras Marcas"]
+        {"key": "trazabilidad",              "label": "Trazabilidad",              "valores": with_total(to_mm(trazabilidad_month))},
+        {"key": "reas",                       "label": "REAS",                      "valores": with_total(to_mm(reas_mensual[:n]))},
+        {"key": "reparacion_esterilizacion", "label": "Reparación Esterilización", "valores": with_total(to_mm(reparacion_month["Esterilización"]))},
+        {"key": "reparacion_endoscopia",      "label": "Reparación Endoscopía",     "valores": with_total(to_mm(reparacion_month["Endoscopía"]))},
+        {"key": "reparacion_dental",          "label": "Reparación Dental",         "valores": with_total(to_mm(reparacion_month["Dental"]))},
     ]
     otros_total = with_total(to_mm(otros_total_month))
 
@@ -1775,6 +1862,7 @@ def build_data_arrays(contratos, panel_raw):
             "_es_perdido_fac": True,
             "fin_contrato":   last_c.get("fin", ""),
             "tipo_cli":       p.get("tipo_cli", "Privado"),
+            "linea_negocio":  last_c.get("linea_negocio", "Esterilización"),
         })
 
     return data, nc_data, perdidos

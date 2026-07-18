@@ -4,6 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 let _chSatRes=null,_chSatNps=null,_chSatBITramos=null,_chSatBITipos=null,_chSatBIScatter=null;
+let _chSatEvo=null,_chSatCatDet=null;
 let _satDomUnif=[]; // dominio data unificado (promedio si hay duplicados)
 let _satComUnif=[]; // comentarios unificados por institución
 let _satTipoFilt='todos',_satComFiltDet=false,_satBIFiltTramo='todos';
@@ -472,6 +473,74 @@ function _showBIScatterDet(p){
     ${barrasHTML||'<div style="font-size:.6rem;color:var(--mut);font-style:italic">Sin detalle de composición</div>'}`;
 }
 
+// ─── Evolutivo trimestral: N° encuestas + satisfacción ───────────
+function _renderSatEvolutivo(){
+  const trim=(APP_DATA.satisf&&APP_DATA.satisf.trimestral)||[];
+  const ctx=document.getElementById('cSatEvolutivo');
+  if(!ctx||!trim.length)return;
+  if(_chSatEvo){_chSatEvo.destroy();}
+  _chSatEvo=safeChart(ctx.getContext('2d'),{
+    type:'bar',
+    data:{
+      labels:trim.map(t=>t.trimestre),
+      datasets:[
+        {label:'N° Encuestas',data:trim.map(t=>t.n),backgroundColor:C.az2+'BB',borderColor:C.az2,borderWidth:2,borderRadius:4,yAxisID:'y',order:2},
+        {label:'Recomendación Promedio',data:trim.map(t=>t.recom),type:'line',borderColor:C.am,backgroundColor:'transparent',borderWidth:2.5,tension:0.4,pointRadius:5,pointBackgroundColor:C.am,fill:false,yAxisID:'yRec',order:1}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{position:'bottom',labels:{boxWidth:12,font:{size:9},padding:10}},
+        tooltip:{callbacks:{label:c=>c.dataset.yAxisID==='yRec'?` Recomendación promedio: ${(c.raw||0).toFixed(2)}`:` ${c.dataset.label}: ${c.raw}`}}
+      },
+      scales:{
+        x:{grid:{display:false},ticks:{font:{size:9}}},
+        y:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{font:{size:9},precision:0},title:{display:true,text:'N° Encuestas',font:{size:8},color:'var(--mut)'}},
+        yRec:{position:'right',min:0,max:10,grid:{display:false},ticks:{font:{size:9}},title:{display:true,text:'Recomendación (0-10)',font:{size:8},color:'#B8860B'}}
+      }
+    }
+  });
+}
+
+// ─── Motivos de insatisfacción (categoría detractor) ─────────────
+function _renderSatCatDet(){
+  const cats=(APP_DATA.satisf&&APP_DATA.satisf.detractor_categorias)||[];
+  const countEl=document.getElementById('sat-cat-det-count');
+  const nTotal=cats.reduce((s,c)=>s+c.n,0);
+  if(countEl)countEl.textContent=nTotal?`${nTotal} respuestas categorizadas`:'';
+
+  const ctx=document.getElementById('cSatCatDet');
+  if(ctx&&cats.length){
+    if(_chSatCatDet){_chSatCatDet.destroy();}
+    const cols=['#7A1FAA','#0A5C8C','#C05000','#007A72','#8B3A00','#1a6b2a'];
+    _chSatCatDet=safeChart(ctx.getContext('2d'),{
+      type:'bar',
+      data:{labels:cats.map(c=>c.categoria),datasets:[{label:'N° respuestas',data:cats.map(c=>c.n),backgroundColor:cats.map((c,i)=>cols[i%cols.length]),borderRadius:5}]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.raw} respuestas`}}},scales:{x:{beginAtZero:true,grid:{color:'#E2E6F0'},ticks:{precision:0}},y:{grid:{display:false},ticks:{font:{size:9}}}}}
+    });
+  }
+
+  const tb=document.getElementById('tb-sat-cat-det');
+  if(tb){
+    tb.innerHTML=cats.length?(`
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="border-bottom:1px solid var(--brd)">
+          <th style="text-align:left;padding:.3rem .2rem;color:var(--mut);font-size:.58rem">Categoría</th>
+          <th style="text-align:right;padding:.3rem .2rem;color:var(--mut);font-size:.58rem">N°</th>
+          <th style="text-align:right;padding:.3rem .2rem;color:var(--mut);font-size:.58rem">Recom.</th>
+        </tr></thead>
+        <tbody>${cats.map(c=>`<tr>
+          <td style="padding:.28rem .2rem">${_catBadge(c.categoria)}</td>
+          <td class="num" style="text-align:right;font-weight:700">${c.n}</td>
+          <td class="num" style="text-align:right;color:${c.recom_avg>=7?'var(--gn)':c.recom_avg>=4?'var(--am)':'var(--rd)'}">${c.recom_avg.toFixed(1).replace('.',',')}</td>
+        </tr>`).join('')}</tbody>
+      </table>`)
+      :'<div style="padding:1rem;text-align:center;color:var(--mut);font-style:italic">Sin categorías registradas</div>';
+  }
+}
+
 function initSatisfaccion(){
   const s=APP_DATA.satisf;
   const g=s.global;
@@ -582,6 +651,10 @@ function initSatisfaccion(){
 
   // ── Detractores · Base Instalada ─────────────────────────────────────────
   _renderSatDetBI();
+
+  // ── Evolutivo trimestral y motivos de insatisfacción ─────────────────────
+  _renderSatEvolutivo();
+  _renderSatCatDet();
 }
 
 function _normBI(s){

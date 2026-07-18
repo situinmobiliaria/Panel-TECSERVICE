@@ -67,6 +67,7 @@ function renderVG(){
       <td style="font-size:.62rem;color:var(--mut)">${shortC(x.coord)}</td>
       <td>${esPerdidoFac?'<span style="font-size:.6rem;color:var(--mut)">Expirado</span>':tipoBadge(x.tipo)}</td>
       <td style="text-align:center">${esPerdidoFac?'—':_progBadge(x.programa||'')}</td>
+      <td style="text-align:center">${_lineaBadge(x.linea_negocio)}</td>
       <td style="text-align:center;font-family:'Roboto Mono',monospace;font-size:.63rem;font-weight:700;color:${(()=>{const k=_progKey(x.programa);return k?_PROG_FEATURES[k].color:'var(--mut)';})()}">${(()=>{const p=PROG_MARGIN[_progKey(x.programa)];return p?Math.round(p*100)+'%':'—';})()}</td>
       <td style="text-align:right;font-size:.63rem;font-weight:700;color:var(--teal)">${(()=>{const p=PROG_MARGIN[_progKey(x.programa)];if(!p||!x.val||esPerdidoFac)return'—';const fa=x.long_dias>0?x.val/(x.long_dias/365):x.val;return mm(fa*p);})()}</td>
       <td><span style="background:${relCol};color:#fff;padding:.14rem .35rem;border-radius:3px;font-size:.55rem;font-weight:700;white-space:nowrap" title="${rel}">${relIco} ${rel}</span></td>
@@ -80,7 +81,7 @@ function renderVG(){
       <td style="min-width:75px">${esPerdidoFac?'<div class="prf" style="height:6px;background:#FF6B6B;border-radius:3px;width:100%"></div>':pbarHTML(x.pct_consumido,urgC(x.dias_vence))}<span style="font-size:.6rem;color:var(--mut)">${pctBar}%</span></td>
       <td>${diasVenceLabel}</td>
     </tr>`;
-  }).join('')||`<tr><td colspan="17" style="text-align:center;padding:2rem;color:var(--mut)">Sin resultados</td></tr>`;
+  }).join('')||`<tr><td colspan="18" style="text-align:center;padding:2rem;color:var(--mut)">Sin resultados</td></tr>`;
 
   // ── Resumen por programa (clientes, facturación, margen) ────
   const progKeys=['BASIC','ADVANCED','PROFESIONAL','INTEGRAL',''];
@@ -137,6 +138,60 @@ function renderVG(){
       <td style="text-align:right;color:var(--mut)">${totalCli?mm(totalMg/totalCli):'—'}</td>
     </tr>`);
     progSummaryBody.innerHTML=rows.join('');
+  }
+
+  // ── Resumen por línea de negocio (Esterilización/Endoscopía/Dental) ────
+  const lineaKeys=['Esterilización','Endoscopía','Dental'];
+  const lineaByKey={};
+  lineaKeys.forEach(k=>lineaByKey[k]={clientes:new Set(),n:0,val:0,com:0,gar:0,diasSum:0});
+  const dActivosLinea=d.filter(x=>!x._es_perdido_fac);
+  dActivosLinea.forEach(x=>{
+    const k=lineaKeys.includes(x.linea_negocio)?x.linea_negocio:'Esterilización';
+    const g=lineaByKey[k];
+    g.clientes.add(x.cliente);
+    g.n++;
+    g.val+=x.val;
+    if(x.tipo==='Comercial')g.com++; else g.gar++;
+    g.diasSum+=x.long_dias||0;
+  });
+  const lineaSummaryBody=document.getElementById('tb-vg-linea-summary');
+  if(lineaSummaryBody){
+    const totalValAll=lineaKeys.reduce((s,k)=>s+lineaByKey[k].val,0);
+    const rows2=lineaKeys.map(k=>{
+      const g=lineaByKey[k];
+      const nCli=g.clientes.size;
+      const ticketProm=g.n>0?g.val/g.n:0;
+      const durProm=g.n>0?g.diasSum/g.n:0;
+      const pctShare=totalValAll>0?(g.val/totalValAll*100):0;
+      return `<tr>
+        <td>${_lineaBadge(k)}</td>
+        <td class="num" style="font-weight:700">${g.n}</td>
+        <td class="num">${nCli}</td>
+        <td class="num" style="color:var(--mut)">${g.com}</td>
+        <td class="num" style="color:var(--mut)">${g.gar}</td>
+        <td class="num" style="font-weight:700;color:var(--az2)">${mm(g.val)}</td>
+        <td class="num" style="color:var(--mut)">${pctShare.toFixed(1)}%</td>
+        <td class="num">${g.n>0?mm(ticketProm):'—'}</td>
+        <td class="num">${g.n>0?Math.round(durProm)+' días':'—'}</td>
+      </tr>`;
+    });
+    const totalCliSet=new Set(dActivosLinea.map(x=>x.cliente));
+    const totalN=dActivosLinea.length;
+    const totalCom=dActivosLinea.filter(x=>x.tipo==='Comercial').length;
+    const totalGar=totalN-totalCom;
+    const totalDiasSum=dActivosLinea.reduce((s,x)=>s+(x.long_dias||0),0);
+    rows2.push(`<tr style="background:rgba(30,90,200,.07);font-weight:800">
+      <td>TOTAL</td>
+      <td class="num">${totalN}</td>
+      <td class="num">${totalCliSet.size}</td>
+      <td class="num">${totalCom}</td>
+      <td class="num">${totalGar}</td>
+      <td class="num" style="color:var(--az2)">${mm(totalValAll)}</td>
+      <td class="num">100%</td>
+      <td class="num">${totalN>0?mm(totalValAll/totalN):'—'}</td>
+      <td class="num">${totalN>0?Math.round(totalDiasSum/totalN)+' días':'—'}</td>
+    </tr>`);
+    lineaSummaryBody.innerHTML=rows2.join('');
   }
 
   const esFiltPerdido=vgRelF==='Perdido';

@@ -112,8 +112,7 @@
     const PALETTE = {
       'Esterilización':'#002D73', 'Endoscopía':'#28D2C3', 'Dental':'#FFC000',
       'Trazabilidad':'#7A1FAA', 'REAS':'#E87722',
-      'TECSERVICE':'#0A5C8C', 'Nacional':'#6B3A2A', 'ICTGroup':'#C05000',
-      'Steelco':'#00832F', 'Pentax Medical':'#D46000', 'Otras Marcas':'#B8C1D8',
+      'Reparación Esterilización':'#0A5C8C', 'Reparación Endoscopía':'#00832F', 'Reparación Dental':'#D46000',
     };
     const datasets = [
       ...D.contratos.lineas.map(l=>({label:l.label, data:l.valores.slice(0,n), backgroundColor:PALETTE[l.label]||'#999', stack:'s1'})),
