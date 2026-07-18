@@ -12,7 +12,8 @@ $jsFiles = @(
   'utils.js','datos.js','hoja_resumen.js','hoja_tipos.js','hoja_nuevos.js',
   'hoja_vencimientos.js','hoja_vision.js','hoja_presupuesto.js',
   'hoja_facturacion.js','hoja_panelfact.js','hoja_base_instalada.js','hoja_satisfaccion.js',
-  'hoja_visitas.js','hoja_mapa.js','hoja_matriz.js','hoja_casos.js','hoja_alerta.js','hoja_pdf.js','hoja_eerr.js'
+  'hoja_visitas.js','hoja_mapa.js','hoja_matriz.js','hoja_casos.js','hoja_alerta.js','hoja_pdf.js','hoja_eerr.js',
+  'hoja_desglose.js'
 )
 
 $writer = [System.IO.StreamWriter]::new($tmp, $false, [System.Text.Encoding]::UTF8)

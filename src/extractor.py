@@ -43,6 +43,33 @@ ANO   = date.today().year
 TODAY = date.today()
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Clasificación de contratos por línea de negocio (Esterilización = base/default).
+# Fuente Dental: Excel "CONTRATOS DENTAL" (col Línea de Negocio = DENTAL) al 2026-07-17.
+# Fuente Endoscopía: listado "Contratos Vigentes ENDO" al 2026-07-15.
+# Si se agregan nuevos contratos Dental/Endoscopía, sumar aquí su número de contrato.
+# ══════════════════════════════════════════════════════════════════════════════
+DENTAL_CONTRATOS_NUMS = {
+    163, 194, 192, 193, 213, 221, 222, 139, 160, 165, 164, 206,
+    188, 232, 251, 170, 181, 183, 199, 238, 146, 187,
+}
+ENDOSCOPIA_CONTRATOS_NUMS = {200, 198, 142, 237}
+
+# Marcas con facturación propia relevante dentro del catálogo "Servicio Técnico"
+# no ligado a contrato; el resto se agrupa en "Otras Marcas".
+TOP_MARCAS_DESGLOSE = ["TECSERVICE", "NACIONAL", "ICTGROUP", "STEELCO", "PENTAX MEDICAL"]
+
+def linea_negocio_contrato(num_str):
+    try:
+        n = int(num_str)
+    except (TypeError, ValueError):
+        return "Esterilización"
+    if n in DENTAL_CONTRATOS_NUMS:
+        return "Dental"
+    if n in ENDOSCOPIA_CONTRATOS_NUMS:
+        return "Endoscopía"
+    return "Esterilización"
+
+# ══════════════════════════════════════════════════════════════════════════════
 # HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 def to_float(val, default=0.0):
@@ -182,6 +209,7 @@ def read_contratos(wb):
             "n_mant_actual":  n_mant_actual,
             "estado":         estado,
             "programa":       programa,
+            "linea_negocio":  linea_negocio_contrato(num_str),
             "bajo_contrato":  bajo_contrato,
             "dias_inicio_cli": tpo_activo,
         })
@@ -341,6 +369,29 @@ def read_bbdd(xlsx_path):
     ].copy()
     mensual_facturado = monthly_dict(df_facturado)
 
+    # Desglose "Otros Ingresos" del año actual: Trazabilidad / REAS / Marca (dentro de Servicio Técnico)
+    # Usado por la sección "Desglose de Ingresos" (ver compute_desglose_ingresos)
+    c_marca = cols[11]  # L: Marca
+    df_fac_ano = df_facturado[df_facturado[c_ano] == ANO]
+
+    def monthly_arr_12(sub):
+        arr = [0.0] * 12
+        for mes, grp in sub.groupby(c_mes):
+            if 1 <= mes <= 12:
+                arr[mes - 1] = float(grp[c_monto].sum())
+        return arr
+
+    traz_mensual = monthly_arr_12(df_fac_ano[df_fac_ano[c_catalogo] == "Trazabilidad"])
+    reas_mensual = monthly_arr_12(df_fac_ano[df_fac_ano[c_catalogo] == "REAS"])
+
+    df_st_ano = df_fac_ano[df_fac_ano[c_catalogo] == "Servicio Técnico"].copy()
+    df_st_ano[c_marca] = df_st_ano[c_marca].astype(str).str.strip()
+    marca_mensual = {
+        marca: monthly_arr_12(grp)
+        for marca, grp in df_st_ano.groupby(c_marca)
+    }
+    st_total_mensual = monthly_arr_12(df_st_ano)
+
     # Facturación mensual por ejecutivo (columna AY)
     # Usa df_facturado (ya filtrado) restringido al año actual
     mensual_por_ejecutivo = {}
@@ -386,6 +437,10 @@ def read_bbdd(xlsx_path):
     return {
         "mensual_total":         mensual_total,
         "mensual_facturado":     mensual_facturado,
+        "traz_mensual":          traz_mensual,
+        "reas_mensual":          reas_mensual,
+        "marca_mensual":         marca_mensual,
+        "st_total_mensual":      st_total_mensual,
         "mensual_priv":          mensual_priv,
         "mensual_pub":           mensual_pub,
         "mensual_contr":         mensual_contr,
@@ -1404,6 +1459,132 @@ def enrich_mapa_data(mapa_data, contratos, satisf):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 6b. DESGLOSE DE INGRESOS — Ingreso por Contratos (por línea de negocio) +
+#     Otros Ingresos (Trazabilidad / REAS / Marca). Reconciliado 1:1 con la
+#     facturación real mensual (fac_arr) y con contr_real_monthly.
+# ══════════════════════════════════════════════════════════════════════════════
+def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fac_arr, mes_corte):
+    n = mes_corte
+    if n <= 0:
+        return {}
+
+    contratos_by_cli = defaultdict(list)
+    for c in contratos:
+        contratos_by_cli[c["cliente"]].append(c)
+
+    LINEAS = ["Esterilización", "Endoscopía", "Dental"]
+    linea_month = {L: [0.0] * n for L in LINEAS}
+
+    # Reparte la facturación real de contratos de cada cliente/mes entre sus
+    # líneas de negocio, ponderando por el valor mensual de los contratos que
+    # facturan ese mes (fallback: valor anual si ese mes no tiene flags activos).
+    for p in panel_raw:
+        real_arr = p.get("contr_meses_2026") or [0.0] * 12
+        cons = contratos_by_cli.get(p["cliente"], [])
+        for m in range(n):
+            real_m = real_arr[m] if m < len(real_arr) else 0.0
+            if abs(real_m) < 1:
+                continue
+            weights = defaultdict(float)
+            for c in cons:
+                if c["fact_flags"][m]:
+                    weights[c["linea_negocio"]] += c["val_mes"]
+            wsum = sum(weights.values())
+            if wsum <= 0:
+                weights = defaultdict(float)
+                for c in cons:
+                    weights[c["linea_negocio"]] += c["val"]
+                wsum = sum(weights.values())
+            if wsum <= 0:
+                weights = {"Esterilización": 1.0}
+                wsum = 1.0
+            for L, w in weights.items():
+                linea_month[L][m] += real_m * (w / wsum)
+
+    # Escala cada mes para calzar exacto con contr_real_monthly (misma fuente que
+    # "Ingresos por contratos" en EERR): corrige el pequeño drift de redondeo.
+    for m in range(n):
+        actual = sum(linea_month[L][m] for L in LINEAS)
+        target = contr_real_monthly[m] if m < len(contr_real_monthly) else 0.0
+        if abs(actual) > 1e-6:
+            scale = target / actual
+            for L in LINEAS:
+                linea_month[L][m] *= scale
+
+    # Otros ingresos = facturación real − ingreso por contratos, desglosado en
+    # Trazabilidad + REAS (catálogos propios) y el resto de "Servicio Técnico"
+    # (correctiva, repuestos sueltos, etc.) prorrateado por Marca.
+    traz_mensual     = bbdd.get("traz_mensual", [0.0] * 12)
+    reas_mensual     = bbdd.get("reas_mensual", [0.0] * 12)
+    marca_mensual    = bbdd.get("marca_mensual", {})
+    st_total_mensual = bbdd.get("st_total_mensual", [0.0] * 12)
+
+    otros_total_month = [
+        (fac_arr[m] if m < len(fac_arr) else 0.0) - (contr_real_monthly[m] if m < len(contr_real_monthly) else 0.0)
+        for m in range(n)
+    ]
+
+    marca_month = {mk: [0.0] * n for mk in TOP_MARCAS_DESGLOSE + ["Otras Marcas"]}
+    for m in range(n):
+        tz = traz_mensual[m] if m < len(traz_mensual) else 0.0
+        rs = reas_mensual[m] if m < len(reas_mensual) else 0.0
+        remainder = otros_total_month[m] - tz - rs
+        st_tot = st_total_mensual[m] if m < len(st_total_mensual) else 0.0
+        if abs(st_tot) > 1e-6:
+            used = 0.0
+            for mk in TOP_MARCAS_DESGLOSE:
+                serie = marca_mensual.get(mk, [0.0] * 12)
+                amt = serie[m] if m < len(serie) else 0.0
+                marca_month[mk][m] = remainder * (amt / st_tot)
+                used += amt
+            marca_month["Otras Marcas"][m] = remainder * ((st_tot - used) / st_tot)
+        else:
+            marca_month["Otras Marcas"][m] = remainder
+
+    MM = 1_000_000.0
+    def to_mm(arr):
+        return [round(v / MM, 3) for v in arr]
+    def with_total(arr):
+        return arr + [round(sum(arr), 3)]
+
+    meses_lbl = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio",
+                 "Agosto","Septiembre","Octubre","Noviembre","Diciembre"][:n]
+
+    contratos_lineas = [
+        {"key": "esterilizacion", "label": "Esterilización", "valores": with_total(to_mm(linea_month["Esterilización"]))},
+        {"key": "endoscopia",     "label": "Endoscopía",     "valores": with_total(to_mm(linea_month["Endoscopía"]))},
+        {"key": "dental",         "label": "Dental",         "valores": with_total(to_mm(linea_month["Dental"]))},
+    ]
+    contratos_total = with_total(to_mm([contr_real_monthly[m] if m < len(contr_real_monthly) else 0.0 for m in range(n)]))
+
+    marca_labels = {
+        "TECSERVICE": "TECSERVICE", "NACIONAL": "Nacional", "ICTGROUP": "ICTGroup",
+        "STEELCO": "Steelco", "PENTAX MEDICAL": "Pentax Medical", "Otras Marcas": "Otras Marcas",
+    }
+    otros_categorias = [
+        {"key": "trazabilidad", "label": "Trazabilidad", "valores": with_total(to_mm(traz_mensual[:n]))},
+        {"key": "reas",         "label": "REAS",          "valores": with_total(to_mm(reas_mensual[:n]))},
+    ] + [
+        {
+            "key": "marca_" + mk.lower().replace(" ", "_"),
+            "label": marca_labels.get(mk, mk),
+            "valores": with_total(to_mm(marca_month[mk])),
+        }
+        for mk in TOP_MARCAS_DESGLOSE + ["Otras Marcas"]
+    ]
+    otros_total = with_total(to_mm(otros_total_month))
+
+    total_general = with_total(to_mm([fac_arr[m] if m < len(fac_arr) else 0.0 for m in range(n)]))
+
+    return {
+        "meses": meses_lbl,
+        "contratos": {"lineas": contratos_lineas, "total": contratos_total},
+        "otros":     {"categorias": otros_categorias, "total": otros_total},
+        "total_general": total_general,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 7. ENSAMBLAR APP_DATA
 # ══════════════════════════════════════════════════════════════════════════════
 def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac=None, base_instalada=None):
@@ -1498,6 +1679,8 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
     _fac_arr = to_arr(bbdd["mensual_facturado"], ANO)
     nocontr_real_monthly = [max(0, _fac_arr[m] - contr_real_monthly[m]) for m in range(12)]
 
+    desglose_ingresos = compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, _fac_arr, mes_corte)
+
     _MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
               "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
 
@@ -1531,6 +1714,7 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         "visitas":              visitas,
         "analisis_fac":         analisis_fac or {},
         "base_instalada":       base_instalada or {"total":0,"por_linea":{},"por_tipo":[],"por_estado":{},"clientes":[]},
+        "desglose_ingresos":    desglose_ingresos,
     }
 
 
