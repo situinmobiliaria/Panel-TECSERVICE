@@ -54,6 +54,12 @@ DENTAL_CONTRATOS_NUMS = {
 }
 ENDOSCOPIA_CONTRATOS_NUMS = {200, 198, 142, 237}
 
+# Contratos cuyo Estado en CONTRATOS TODOS dice "Expirado" pero cuya fecha de
+# término es futura y el cliente los confirmó como vigentes (listado "Contratos
+# Vigentes ENDO" al 2026-07-15): #198 HUAP (fin 31/10/2026), #200 Intermedical
+# (fin 31/07/2027). Se fuerzan a Activado hasta que se corrija en el Excel.
+ESTADO_OVERRIDE_ACTIVADO = {198, 200}
+
 # Marcas con facturación propia relevante dentro del catálogo "Servicio Técnico"
 # no ligado a contrato; el resto se agrupa en "Otras Marcas".
 TOP_MARCAS_DESGLOSE = ["TECSERVICE", "NACIONAL", "ICTGROUP", "STEELCO", "PENTAX MEDICAL"]
@@ -155,6 +161,11 @@ def read_contratos(wb):
         fecha_inicio = parse_date(row[6])
         fecha_fin    = parse_date(row[8])
         estado       = safe_str(row[10])   # "Activado" / "Expirado"
+        try:
+            if int(num_str) in ESTADO_OVERRIDE_ACTIVADO:
+                estado = "Activado"
+        except ValueError:
+            pass
 
         if not fecha_inicio or not fecha_fin:
             continue
