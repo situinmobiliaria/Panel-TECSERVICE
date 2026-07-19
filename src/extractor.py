@@ -2205,7 +2205,12 @@ def main():
     app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada)
     app_data["ratios2"] = ratios2
     app_data["resumen_programas"] = resumen_programas
-    _ahora = datetime.now()
+    # Hora fija 02:50 am (el proceso real de actualización se considera
+    # completo a esa hora todos los días; el aviso por correo sale 10 min
+    # después, a las 03:00 am). La FECHA sí es la real de esta corrida — sólo
+    # la hora queda fija para que coincida siempre con ese horario informado,
+    # sin importar la hora real en que se generó el panel.
+    _ahora = datetime.now().replace(hour=2, minute=50, second=0, microsecond=0)
     app_data["actualizado_label"] = formato_actualizacion(_ahora)
     app_data["actualizado_iso"] = _ahora.isoformat()
     print(f"       {app_data['actualizado_label']}")

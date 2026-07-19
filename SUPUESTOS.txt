@@ -248,9 +248,24 @@ hora y no una anterior). Se automatizó:
     (lazy render vía un hook sobre sv()); con 0ms el badge se perdía en esas
     3 vistas porque su .sh todavía no existía.
 
-Ya no hay que tocar nada a mano: cada vez que se corre "python3 extractor.py"
-y se reconstruye index.html, la hora mostrada en todo el panel es la hora
-real de esa corrida.
+AJUSTE (2026-07-19, mismo día): Cristián aclaró el motivo — hay un correo
+programado todos los días a las 03:00 am que avisa que el panel se
+actualizó, y necesita que el panel diga siempre "02:50 am" (10 min antes del
+correo), sin importar la hora real en que se generan los datos, para que no
+se note que en la práctica la actualización puede correr en otro momento.
+
+Se ajustó formato_actualizacion(): la FECHA sigue siendo la real del día en
+que se corre extractor.py (datetime.now()), pero la HORA queda fija en
+02:50:00 (.replace(hour=2, minute=50, second=0, microsecond=0)). Así, cada
+corrida diaria muestra correctamente "<día real> · 02:50 am" en las 17
+secciones y en el footer — nunca la hora real en que se ejecutó el script.
+
+LÍMITE IMPORTANTE (no se puede ocultar con código): esto sólo controla lo
+que el panel MUESTRA en pantalla. El historial de commits de git en GitHub
+sí queda con la hora real en que se hizo el push (visible para cualquiera
+con acceso al repo vía "git log" o la pestaña de commits), así que la hora
+real NO es indetectable a ese nivel — sólo lo es dentro de la interfaz del
+panel mismo.
 
 
 ───────────────────────────────────────────────────────────────────────────
