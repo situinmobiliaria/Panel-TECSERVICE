@@ -32,18 +32,29 @@ Excel. Si se firman contratos nuevos de Dental o Endoscopía, hay que sumar
 su número de contrato a mano en extractor.py.
 
 
-2) CONTRATOS #198 (HUAP) Y #200 (INTERMEDICAL) FORZADOS A "ACTIVADO"
+2) CONTRATOS #198 (HUAP) Y #200 (INTERMEDICAL) — CORREGIDO (revertido)
 ───────────────────────────────────────────────────────────────────
-En CONTRATOS TODOS, columna Estado, estos dos contratos de Endoscopía
-figuran "Expirado" pese a tener fecha de término futura (HUAP: 31/10/2026,
-Intermedical: 31/07/2027). Cristián confirmó que ambos están vigentes
-(mismo listado "Contratos Vigentes ENDO" del punto 1).
+Primer intento (2026-07-18): se forzó su Estado a "Activado" asumiendo que
+su fecha de término coincidía con el listado "Contratos Vigentes ENDO"
+(HUAP 31/10/2026, Intermedical 31/07/2027).
 
-SUPUESTO: se corrige su Estado a "Activado" en extractor.py
-(ESTADO_OVERRIDE_ACTIVADO = {198, 200}), lo que los suma a la cartera activa,
-presupuesto, alertas de vencimiento y al resumen de Endoscopía (ahora 4
-contratos, no 2). Si en algún momento se corrige el Estado directamente en
-el Excel, este override deja de tener efecto solo (no hace daño dejarlo).
+CORRECCIÓN (2026-07-19): al cruzar directo contra CONTRATOS TODOS, esas
+fechas NO coinciden con el Excel:
+  - #198 HUAP en el Excel: inicio 01/05/2025, fin 30/04/2026 (ya vencido).
+  - #200 Intermedical en el Excel: inicio 01/06/2025, fin 31/05/2026 (ya
+    vencido), y no tiene ningún otro contrato registrado en CONTRATOS TODOS.
+Es decir, el listado "Contratos Vigentes ENDO" describe fechas distintas a
+las que tiene el Excel para esos mismos números de contrato — probablemente
+corresponden a una renovación que todavía no se cargó al sistema, o el N° de
+contrato cambió. Se REVIRTIÓ el override: ambos vuelven a su Estado real del
+Excel (Expirado), y Endoscopía vuelve a 2 contratos activos (#142 Hospital
+Metropolitano, #237 Hospital San Pablo de Coquimbo).
+
+PENDIENTE: si el equipo confirma que HUAP e Intermedical realmente renovaron
+endoscopía, hay que cargar ese contrato nuevo en CONTRATOS TODOS (con su
+propio N° de contrato y las fechas correctas) — no alcanza con corregir la
+fecha del contrato viejo, porque ese contrato específico (#198/#200) sí
+venció en la fecha que dice el Excel.
 
 
 3) DESGLOSE DE INGRESOS — METODOLOGÍA
@@ -135,29 +146,46 @@ equipo a mano) y la realidad de CONTRATOS TODOS:
 
   a) Contrato ACTIVO pero con estado_relacion = "Perdido": ocurre cuando el
      cliente fue marcado "no continuó" en algún momento pero luego SÍ
-     renovó (ej. Clínica Intermedical, tras la corrección del punto 2).
-     CORRECCIÓN: un contrato activo nunca puede mostrarse como "Perdido";
-     se reclasifica automáticamente a "Renovado". Afectó a 6 clientes en la
-     corrida actual: Hospital Militar de Santiago, Corp Municipal de
-     Educación y Servicios Ramón Freire, Hospital Clínico San Borja-
-     Arriarán, I. Municipalidad de Constitución, Clínica Intermedical,
-     Ejército de Chile Central Odontológica.
+     renovó con OTRO contrato que sigue activo. CORRECCIÓN: un contrato
+     activo nunca puede mostrarse como "Perdido"; se reclasifica
+     automáticamente a "Renovado". Afectó a 5 clientes en la corrida
+     actual: Hospital Militar de Santiago, Corp Municipal de Educación y
+     Servicios Ramón Freire, Hospital Clínico San Borja-Arriarán,
+     I. Municipalidad de Constitución, Ejército de Chile Central
+     Odontológica.
 
   b) Cliente en la lista de "Perdidos" (PERDIDOS_VG, la que se usa en el
      filtro "📉 Perdidos" de Visión General) cuyo contrato más reciente
      expiró, pero existe OTRO contrato (de cualquier estado) que empieza
      dentro de una ventana de ±30 días respecto a esa fecha de término. En
      ese caso no se considera realmente perdido: probablemente renovó y el
-     Excel todavía no refleja el estado correcto (mismo patrón que el punto
-     2). Función: _tiene_sucesor_reciente() en extractor.py.
+     Excel todavía no refleja el estado correcto. Función:
+     _tiene_sucesor_reciente() en extractor.py.
 
-SUPUESTO: la ventana de 30 días es una elección razonable (no viene
-indicada por Cristián con un número exacto) para cubrir el desfase típico
-entre el vencimiento de un contrato y la firma/registro del siguiente. Con
-los datos actuales esta regla no sacó a nadie adicional de la lista de
-Perdidos (los 19 que quedan son, hasta donde se pudo verificar, casos
-genuinos), pero queda como resguardo permanente para futuras cargas de
-datos.
+  c) Contrato "Activado" cuya fecha de término YA PASÓ pero que tiene un
+     sucesor claro del mismo cliente (otro contrato, de cualquier estado,
+     que empieza dentro de ±30 días de esa fecha de término y termina
+     después): el contrato viejo pasa a Estado="Expirado" (histórico) y el
+     sucesor es "el que vale" — no se cuentan ambos como si fueran cartera
+     activa por separado. Función: bloque al final de read_contratos() en
+     extractor.py (variable "superados"). Con los datos actuales sólo
+     aplicó a un caso: contrato #249 (Corporación de Ayuda al Niño
+     Quemado, fin 04/06/2026) quedó como histórico porque el contrato #172
+     del mismo cliente arranca 3 días después y termina en 2028.
+
+SUPUESTO: la ventana de 30 días (misma en b y c) es una elección razonable
+(no viene indicada por Cristián con un número exacto) para cubrir el
+desfase típico entre el vencimiento de un contrato y la firma/registro del
+siguiente. Es deliberadamente conservadora: varios contratos vencidos con
+"sucesores" a 60, 277, 580 o 720 días de distancia NO se tratan como
+renovación automática (esos gaps son demasiado grandes para asumir
+continuidad limpia; probablemente son contratos concurrentes de otra línea
+o alcance, no una renovación secuencial del mismo servicio) y quedan tal
+cual están en el Excel. Contratos vencidos sin ningún sucesor (ej. Hospital
+Clínico San Borja-Arriarán, Ejército de Chile) también quedan tal cual:
+siguen "Activado" (Excel) aunque su fecha ya haya pasado, porque no hay
+ninguna evidencia de renovación que justifique moverlos a histórico — es
+una alerta legítima de vencimiento, no un caso a corregir por software.
 
 ALCANCE: esta corrección se aplicó a estado_relacion (Perdido→Renovado en
 contratos activos) y a PERDIDOS_VG. NO se tocó la pestaña "Vencimientos",

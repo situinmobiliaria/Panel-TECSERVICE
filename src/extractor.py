@@ -54,11 +54,17 @@ DENTAL_CONTRATOS_NUMS = {
 }
 ENDOSCOPIA_CONTRATOS_NUMS = {200, 198, 142, 237}
 
-# Contratos cuyo Estado en CONTRATOS TODOS dice "Expirado" pero cuya fecha de
-# término es futura y el cliente los confirmó como vigentes (listado "Contratos
-# Vigentes ENDO" al 2026-07-15): #198 HUAP (fin 31/10/2026), #200 Intermedical
-# (fin 31/07/2027). Se fuerzan a Activado hasta que se corrija en el Excel.
-ESTADO_OVERRIDE_ACTIVADO = {198, 200}
+# NOTA (corregido 2026-07-19): #198 (HUAP) y #200 (Intermedical) se habían
+# forzado antes a "Activado" asumiendo que su fecha de término coincidía con
+# el listado "Contratos Vigentes ENDO" (31/10/2026 y 31/07/2027). Se verificó
+# cruzando directo contra CONTRATOS TODOS y NO coincide: el Excel tiene #198
+# con fin real 30/04/2026 y #200 con fin real 31/05/2026 (ambos ya vencidos, y
+# distintos en fecha de inicio también) — es decir, el listado y el Excel
+# describen fechas distintas para el mismo N° de contrato. Se revirtió el
+# override; la fecha/estado de estos dos contratos queda tal como está en el
+# Excel hasta que el equipo confirme cuál de las dos fuentes es la correcta
+# (ver SUPUESTOS.txt, punto 2).
+ESTADO_OVERRIDE_ACTIVADO = set()
 
 # Marcas con facturación propia relevante dentro del catálogo "Servicio Técnico"
 # no ligado a contrato; el resto se agrupa en "Otras Marcas".
@@ -250,6 +256,35 @@ def read_contratos(wb):
             primer_inicio_cliente[cli] = c["inicio"]
     for c in contratos_final:
         c["es_nuevo"] = c["tpo_activo"] <= 90 and c["inicio"] == primer_inicio_cliente[c["cliente"]]
+
+    # Un contrato "Activado" cuya fecha de término ya pasó, pero que tiene un
+    # sucesor claro del mismo cliente (otro contrato que empieza dentro de una
+    # ventana de 30 días desde ese término y termina más tarde), se considera
+    # superado: el sucesor es "el que vale" y éste pasa a histórico (Estado ->
+    # Expirado) para no contarlo en cartera activa, presupuesto ni Vencimientos.
+    contratos_por_cliente_tmp = defaultdict(list)
+    for c in contratos_final:
+        contratos_por_cliente_tmp[c["cliente"]].append(c)
+    superados = 0
+    for c in contratos_final:
+        if c["estado"] != "Activado":
+            continue
+        c_fin = date.fromisoformat(c["fin"])
+        if c_fin >= TODAY:
+            continue  # todavía no vence
+        for otro in contratos_por_cliente_tmp[c["cliente"]]:
+            if otro is c:
+                continue
+            o_fin = date.fromisoformat(otro["fin"])
+            if o_fin <= c_fin:
+                continue  # no extiende cobertura más allá de c
+            o_inicio = date.fromisoformat(otro["inicio"])
+            if abs((o_inicio - c_fin).days) <= 30:
+                c["estado"] = "Expirado"
+                superados += 1
+                break
+    if superados > 0:
+        print(f"       {superados} contrato(s) vencido(s) marcados como histórico (tenían sucesor claro)")
 
     return contratos_final
 
