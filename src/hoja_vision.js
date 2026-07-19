@@ -146,9 +146,19 @@ function renderVG(){
   const lineaKeyFn=x=>lineaKeys.includes(x.linea_negocio)?x.linea_negocio:'Esterilización';
   // Dueño de cuenta = Vendedor Técnico (Cristian Perez / Eglys Ramirez), no la coordinadora
   const duenoKeyFn=x=>x.vendedor||'Sin dueño de cuenta';
+  // Tipo de programa CARE (Basic/Advanced/Profesional/Integral/Sin programa)
+  const progGrupoKeys=['BASIC','ADVANCED','PROFESIONAL','INTEGRAL','Sin programa'];
+  const progGrupoLabels={BASIC:'Basic Care',ADVANCED:'Advanced Care',PROFESIONAL:'Profesional Care',INTEGRAL:'Integral Care'};
+  const progGrupoKeyFn=x=>_progKey(x.programa)||'Sin programa';
+  const progGrupoRenderLabel=k=>{
+    if(k==='Sin programa')return `<span style="font-size:.62rem;color:var(--mut)">Sin programa</span>`;
+    const feat=_PROG_FEATURES[k];
+    return `<span style="display:inline-block;padding:.15rem .45rem;border-radius:4px;font-weight:800;font-size:.62rem;font-family:'Roboto Condensed',sans-serif;background:${feat.solidBg};color:#111;white-space:nowrap">${progGrupoLabels[k]}</span>`;
+  };
 
   _renderGrupoResumen('tb-vg-linea-summary', dActivosLinea, lineaKeyFn, lineaKeys, k=>_lineaBadge(k));
   _renderGrupoResumen('tb-vg-coord-summary', dActivosLinea, duenoKeyFn, null, k=>`<strong style="font-size:.65rem">${k}</strong>`);
+  _renderGrupoResumen('tb-vg-programa-summary', dActivosLinea, progGrupoKeyFn, progGrupoKeys, progGrupoRenderLabel);
   _renderGrupoDetalle('vg-linea-detalle', dActivosLinea, lineaKeyFn, lineaKeys, 'Coordinadora', x=>shortC(x.coord));
   _renderGrupoDetalle('vg-coord-detalle', dActivosLinea, duenoKeyFn, null, 'Línea Negocio', x=>_lineaBadge(x.linea_negocio));
 
