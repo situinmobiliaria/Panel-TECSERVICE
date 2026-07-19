@@ -176,13 +176,14 @@ function _renderGrupoResumen(containerId,items,groupKeyFn,groupOrder,renderLabel
   const groups={};
   items.forEach(x=>{
     const k=groupKeyFn(x);
-    if(!groups[k])groups[k]={clientes:new Set(),n:0,val:0,com:0,gar:0,diasSum:0};
+    if(!groups[k])groups[k]={clientes:new Set(),n:0,val:0,com:0,gar:0,diasSum:0,restanteSum:0};
     const g=groups[k];
     g.clientes.add(x.cliente);
     g.n++;
     g.val+=x.val;
     if(x.tipo==='Comercial')g.com++; else g.gar++;
     g.diasSum+=x.long_dias||0;
+    g.restanteSum+=x.dias_vence||0;
   });
   const keys=groupOrder?groupOrder.filter(k=>groups[k]):Object.keys(groups).sort((a,b)=>groups[b].val-groups[a].val);
   const totalValAll=keys.reduce((s,k)=>s+groups[k].val,0);
@@ -191,6 +192,7 @@ function _renderGrupoResumen(containerId,items,groupKeyFn,groupOrder,renderLabel
     const nCli=g.clientes.size;
     const ticketProm=g.n>0?g.val/g.n:0;
     const durProm=g.n>0?g.diasSum/g.n:0;
+    const restanteProm=g.n>0?g.restanteSum/g.n:0;
     const pctShare=totalValAll>0?(g.val/totalValAll*100):0;
     return `<tr>
       <td>${renderLabelFn(k)}</td>
@@ -202,6 +204,7 @@ function _renderGrupoResumen(containerId,items,groupKeyFn,groupOrder,renderLabel
       <td class="num" style="color:var(--mut)">${pctShare.toFixed(1)}%</td>
       <td class="num">${g.n>0?mm(ticketProm):'—'}</td>
       <td class="num">${g.n>0?Math.round(durProm)+' días':'—'}</td>
+      <td class="num" style="color:${restanteProm<0?'var(--rd)':'var(--mut)'}">${g.n>0?Math.round(restanteProm)+' días':'—'}</td>
     </tr>`;
   });
   const totalN=items.length;
@@ -209,6 +212,7 @@ function _renderGrupoResumen(containerId,items,groupKeyFn,groupOrder,renderLabel
   const totalCom=items.filter(x=>x.tipo==='Comercial').length;
   const totalGar=totalN-totalCom;
   const totalDiasSum=items.reduce((s,x)=>s+(x.long_dias||0),0);
+  const totalRestanteSum=items.reduce((s,x)=>s+(x.dias_vence||0),0);
   rows.push(`<tr style="background:rgba(30,90,200,.07);font-weight:800">
     <td>TOTAL</td>
     <td class="num">${totalN}</td>
@@ -219,6 +223,7 @@ function _renderGrupoResumen(containerId,items,groupKeyFn,groupOrder,renderLabel
     <td class="num">100%</td>
     <td class="num">${totalN>0?mm(totalValAll/totalN):'—'}</td>
     <td class="num">${totalN>0?Math.round(totalDiasSum/totalN)+' días':'—'}</td>
+    <td class="num">${totalN>0?Math.round(totalRestanteSum/totalN)+' días':'—'}</td>
   </tr>`);
   el.innerHTML=rows.join('');
 }
