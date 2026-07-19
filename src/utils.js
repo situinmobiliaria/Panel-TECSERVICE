@@ -57,7 +57,10 @@ function sv(name,btn){
   if(name==='vision')renderVG();
   if(name==='nuevos')renderNC();
   if(name==='facturacion') setTimeout(renderFcGraficos, 100);
-  setTimeout(_injectUpdateBadges, 0);
+  // 150ms: mapa/matriz/casos interceptan sv() y pintan su contenido recién a
+  // los 80ms (lazy render), así que hay que esperar más que eso para
+  // encontrar su .sh y no perderse el badge en esas 3 vistas.
+  setTimeout(_injectUpdateBadges, 150);
 }
 
 // ─── TOOLTIP ──────────────────────────────────────────────────
@@ -128,7 +131,10 @@ const _obs=new MutationObserver((muts)=>{
   });
 });
 document.addEventListener('DOMContentLoaded',()=>{
-  const _h=new Date();
+  // Fecha real de generación de los datos (NO la fecha del navegador de quien
+  // mira el panel) — para que "Datos al" sea siempre la misma fecha que
+  // "Última actualización" en cada sección, sin importar cuándo se abra esto.
+  const _h=(window.APP_DATA&&APP_DATA.actualizado_iso)?new Date(APP_DATA.actualizado_iso):new Date();
   const _f=String(_h.getDate()).padStart(2,'0')+'/'+String(_h.getMonth()+1).padStart(2,'0')+'/'+_h.getFullYear();
   const elD=document.getElementById('hd-date');if(elD)elD.textContent='📅 '+_f;
   const elT=document.getElementById('rs-tag');if(elT)elT.textContent='Facturación real del área · Servicios de mantención preventiva y correctiva · Datos al '+_f;
@@ -167,7 +173,7 @@ setTimeout(()=>{document.querySelectorAll('.prf').forEach(el=>{const w=el.style.
 // usuario abre esa pestaña (lazy render vía sv()), así que además de correr
 // esto en DOMContentLoaded hay que reintentar cada vez que se cambia de vista.
 function _injectUpdateBadges(){
-  const LABEL='Última actualización: 19 de julio 2026 · 02:50 am';
+  const LABEL=(window.APP_DATA&&APP_DATA.actualizado_label)||'Última actualización: —';
   document.querySelectorAll('.view').forEach(view=>{
     const sh=view.querySelector('.sh');
     if(!sh||(sh.nextElementSibling&&sh.nextElementSibling.classList.contains('sh-updated')))return;

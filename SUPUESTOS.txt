@@ -223,19 +223,34 @@ parpadeo en conexiones rápidas. Se muestra ANTES de la pantalla de login,
 es decir, tanto si el usuario ya tiene sesión guardada como si no.
 
 
-10) "ÚLTIMA ACTUALIZACIÓN" EN CADA SECCIÓN
+10) "ÚLTIMA ACTUALIZACIÓN" EN CADA SECCIÓN — YA ES AUTOMÁTICO (2026-07-19)
 ───────────────────────────────────────────────────
-Se agregó el texto "Última actualización: 19 de julio 2026 · 02:50 am" al
-encabezado de las 17 secciones del panel (utils.js, función
-_injectUpdateBadges). Es un texto FIJO, no se recalcula automáticamente a
-partir de la fecha real de generación de datos.
+Primero se agregó como texto FIJO ("19 de julio 2026 · 02:50 am"), pero
+Cristián pidió que fuera consistente con la hora REAL de actualización (que
+si alguien investiga a qué hora se actualizó de verdad, el panel diga esa
+hora y no una anterior). Se automatizó:
 
-SUPUESTO / PENDIENTE: cada vez que se vuelva a correr extractor.py con
-datos nuevos del Excel, hay que actualizar manualmente la constante LABEL
-dentro de _injectUpdateBadges() en src/utils.js con la fecha/hora real de
-esa actualización, y volver a construir index.html. Si se quiere automatizar
-esto (ej. que extractor.py escriba la fecha/hora de la corrida), avisar y se
-implementa.
+  - extractor.py calcula datetime.now() en el momento exacto en que corre
+    (función formato_actualizacion()) y lo guarda en
+    APP_DATA.actualizado_label (texto ya formateado, ej. "Última
+    actualización: 18 de julio 2026 · 10:23 pm") y APP_DATA.actualizado_iso
+    (fecha ISO cruda, para cálculos).
+  - utils.js (_injectUpdateBadges) lee ese valor en vez de un texto fijo, así
+    que las 17 secciones siempre muestran la misma hora real de la última
+    vez que se corrió extractor.py.
+  - Se corrigió además el footer y "Datos al" (que antes usaban new Date()
+    del NAVEGADOR de quien mira el panel — es decir, mostraban la fecha de
+    HOY sin importar cuándo se generaron realmente los datos, lo cual podía
+    contradecir el badge de "Última actualización"). Ahora usan la misma
+    fuente (APP_DATA.actualizado_iso), así que todo el panel es consistente.
+  - Nota técnica: el badge se inyecta 150ms después de cambiar de pestaña
+    (no 0ms) porque Mapa/Matriz/Casos pintan su contenido recién a los 80ms
+    (lazy render vía un hook sobre sv()); con 0ms el badge se perdía en esas
+    3 vistas porque su .sh todavía no existía.
+
+Ya no hay que tocar nada a mano: cada vez que se corre "python3 extractor.py"
+y se reconstruye index.html, la hora mostrada en todo el panel es la hora
+real de esa corrida.
 
 
 ───────────────────────────────────────────────────────────────────────────

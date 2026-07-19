@@ -127,6 +127,16 @@ def parse_date(val):
                 pass
     return None
 
+_MESES_LARGO = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+                 "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+
+def formato_actualizacion(dt):
+    """'Última actualización: 19 de julio 2026 · 02:50 am' a partir de un datetime."""
+    mes = _MESES_LARGO[dt.month - 1]
+    hora12 = dt.hour % 12 or 12
+    ampm = "am" if dt.hour < 12 else "pm"
+    return f"Última actualización: {dt.day} de {mes} {dt.year} · {hora12:02d}:{dt.minute:02d} {ampm}"
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. HOJA: CONTRATOS TODOS
 #    Fila 1 = números de mes (cabecera auxiliar)
@@ -2195,6 +2205,10 @@ def main():
     app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada)
     app_data["ratios2"] = ratios2
     app_data["resumen_programas"] = resumen_programas
+    _ahora = datetime.now()
+    app_data["actualizado_label"] = formato_actualizacion(_ahora)
+    app_data["actualizado_iso"] = _ahora.isoformat()
+    print(f"       {app_data['actualizado_label']}")
     data, nc_data, perdidos = build_data_arrays(contratos, panel_raw)
     total_com_val = sum(d["val"] for d in data if d["tipo"] == "Comercial")
     total_gar_val = sum(d["val"] for d in data if d["tipo"] == "Garantia")
