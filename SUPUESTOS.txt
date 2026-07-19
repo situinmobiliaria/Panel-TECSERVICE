@@ -32,29 +32,37 @@ Excel. Si se firman contratos nuevos de Dental o Endoscopía, hay que sumar
 su número de contrato a mano en extractor.py.
 
 
-2) CONTRATOS #198 (HUAP) Y #200 (INTERMEDICAL) — CORREGIDO (revertido)
+2) CONTRATOS #198 (HUAP) Y #200 (INTERMEDICAL) — FECHAS E ESTADO CORREGIDOS
 ───────────────────────────────────────────────────────────────────
-Primer intento (2026-07-18): se forzó su Estado a "Activado" asumiendo que
-su fecha de término coincidía con el listado "Contratos Vigentes ENDO"
-(HUAP 31/10/2026, Intermedical 31/07/2027).
+Historial de este punto (para que quede el criterio claro):
 
-CORRECCIÓN (2026-07-19): al cruzar directo contra CONTRATOS TODOS, esas
-fechas NO coinciden con el Excel:
-  - #198 HUAP en el Excel: inicio 01/05/2025, fin 30/04/2026 (ya vencido).
-  - #200 Intermedical en el Excel: inicio 01/06/2025, fin 31/05/2026 (ya
-    vencido), y no tiene ningún otro contrato registrado en CONTRATOS TODOS.
-Es decir, el listado "Contratos Vigentes ENDO" describe fechas distintas a
-las que tiene el Excel para esos mismos números de contrato — probablemente
-corresponden a una renovación que todavía no se cargó al sistema, o el N° de
-contrato cambió. Se REVIRTIÓ el override: ambos vuelven a su Estado real del
-Excel (Expirado), y Endoscopía vuelve a 2 contratos activos (#142 Hospital
-Metropolitano, #237 Hospital San Pablo de Coquimbo).
+  - Intento 1 (2026-07-18): se forzó sólo el Estado a "Activado", sin
+    corregir las fechas, asumiendo (sin verificar) que el fin coincidía con
+    el listado "Contratos Vigentes ENDO".
+  - Corrección 1 (2026-07-19, mismo día): al cruzar contra CONTRATOS TODOS
+    se vio que el Excel tiene fechas distintas y YA VENCIDAS para esos
+    números de contrato (#198 fin 30/04/2026, #200 fin 31/05/2026) — se
+    revirtió el override completo.
+  - Corrección 2 (2026-07-19): Cristián confirmó explícitamente que las
+    fechas correctas son las del listado "Contratos Vigentes ENDO" (no las
+    del Excel). Se vuelve a aplicar el override, esta vez corrigiendo
+    también INICIO y FIN (no sólo el Estado), para que quede internamente
+    consistente (días para vencer, % consumido, presupuesto, etc. calculan
+    bien y no vuelven a marcarse como "vencido").
 
-PENDIENTE: si el equipo confirma que HUAP e Intermedical realmente renovaron
-endoscopía, hay que cargar ese contrato nuevo en CONTRATOS TODOS (con su
-propio N° de contrato y las fechas correctas) — no alcanza con corregir la
-fecha del contrato viejo, porque ese contrato específico (#198/#200) sí
-venció en la fecha que dice el Excel.
+Valores finales aplicados en extractor.py (CONTRATO_OVERRIDE):
+  - #198 HUAP:         inicio 31/10/2024 → fin 31/10/2026
+  - #200 Intermedical:  inicio 08/07/2026 → fin 31/07/2027
+
+Con esto, Endoscopía queda en 4 contratos activos: #198 HUAP, #200
+Intermedical, #142 Hospital Metropolitano, #237 Hospital San Pablo de
+Coquimbo.
+
+PENDIENTE: esto es un parche en el código, no una corrección en la fuente.
+Lo ideal es que el equipo actualice CONTRATOS TODOS directamente con estas
+fechas/Estado para #198 y #200 (o cargue el contrato como una fila nueva si
+corresponde a una renovación bajo otro N°), y en ese momento se puede borrar
+CONTRATO_OVERRIDE de extractor.py sin que cambie ningún número del panel.
 
 
 3) DESGLOSE DE INGRESOS — METODOLOGÍA

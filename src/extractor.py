@@ -54,17 +54,16 @@ DENTAL_CONTRATOS_NUMS = {
 }
 ENDOSCOPIA_CONTRATOS_NUMS = {200, 198, 142, 237}
 
-# NOTA (corregido 2026-07-19): #198 (HUAP) y #200 (Intermedical) se habían
-# forzado antes a "Activado" asumiendo que su fecha de término coincidía con
-# el listado "Contratos Vigentes ENDO" (31/10/2026 y 31/07/2027). Se verificó
-# cruzando directo contra CONTRATOS TODOS y NO coincide: el Excel tiene #198
-# con fin real 30/04/2026 y #200 con fin real 31/05/2026 (ambos ya vencidos, y
-# distintos en fecha de inicio también) — es decir, el listado y el Excel
-# describen fechas distintas para el mismo N° de contrato. Se revirtió el
-# override; la fecha/estado de estos dos contratos queda tal como está en el
-# Excel hasta que el equipo confirme cuál de las dos fuentes es la correcta
-# (ver SUPUESTOS.txt, punto 2).
-ESTADO_OVERRIDE_ACTIVADO = set()
+# NOTA (2026-07-19): #198 (HUAP) y #200 (Intermedical) tienen en CONTRATOS
+# TODOS fechas/Estado desactualizados (figuran Expirado, con fin 30/04/2026 y
+# 31/05/2026). Cristián confirmó explícitamente que las fechas correctas son
+# las del listado "Contratos Vigentes ENDO" (imagen, 2026-07-15), no las del
+# Excel. Se sobreescriben inicio/fin/estado con esos valores hasta que
+# CONTRATOS TODOS se actualice en la fuente (ver SUPUESTOS.txt, punto 2).
+CONTRATO_OVERRIDE = {
+    198: {"inicio": date(2024, 10, 31), "fin": date(2026, 10, 31), "estado": "Activado"},  # HUAP Endoscopía
+    200: {"inicio": date(2026, 7, 8),   "fin": date(2027, 7, 31),  "estado": "Activado"},  # Intermedical Endoscopía
+}
 
 # Marcas con facturación propia relevante dentro del catálogo "Servicio Técnico"
 # no ligado a contrato; el resto se agrupa en "Otras Marcas".
@@ -168,10 +167,13 @@ def read_contratos(wb):
         fecha_fin    = parse_date(row[8])
         estado       = safe_str(row[10])   # "Activado" / "Expirado"
         try:
-            if int(num_str) in ESTADO_OVERRIDE_ACTIVADO:
-                estado = "Activado"
+            override = CONTRATO_OVERRIDE.get(int(num_str))
         except ValueError:
-            pass
+            override = None
+        if override:
+            fecha_inicio = override["inicio"]
+            fecha_fin    = override["fin"]
+            estado       = override["estado"]
 
         if not fecha_inicio or not fecha_fin:
             continue
