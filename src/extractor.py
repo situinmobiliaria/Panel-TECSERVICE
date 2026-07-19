@@ -13,7 +13,7 @@ Configuración:
 """
 from __future__ import annotations
 import os, re, json, math
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from collections import defaultdict
 
 import openpyxl
@@ -2207,10 +2207,13 @@ def main():
     app_data["resumen_programas"] = resumen_programas
     # Hora fija 02:50 am (el proceso real de actualización se considera
     # completo a esa hora todos los días; el aviso por correo sale 10 min
-    # después, a las 03:00 am). La FECHA sí es la real de esta corrida — sólo
-    # la hora queda fija para que coincida siempre con ese horario informado,
-    # sin importar la hora real en que se generó el panel.
-    _ahora = datetime.now().replace(hour=2, minute=50, second=0, microsecond=0)
+    # después, a las 03:00 am). Si esta corrida pasa de las 02:50 am del día
+    # de hoy, la próxima ocurrencia real de "02:50 am" es MAÑANA, así que la
+    # fecha avanza un día — nunca queda una fecha/hora 02:50 am que ya pasó.
+    _ahora_real = datetime.now()
+    _ahora = _ahora_real.replace(hour=2, minute=50, second=0, microsecond=0)
+    if _ahora_real > _ahora:
+        _ahora += timedelta(days=1)
     app_data["actualizado_label"] = formato_actualizacion(_ahora)
     app_data["actualizado_iso"] = _ahora.isoformat()
     print(f"       {app_data['actualizado_label']}")
