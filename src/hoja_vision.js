@@ -140,59 +140,16 @@ function renderVG(){
     progSummaryBody.innerHTML=rows.join('');
   }
 
-  // ── Resumen por línea de negocio (Esterilización/Endoscopía/Dental) ────
+  // ── Resumen y detalle por Línea de Negocio y por Dueño de Cuenta ────────
   const lineaKeys=['Esterilización','Endoscopía','Dental'];
-  const lineaByKey={};
-  lineaKeys.forEach(k=>lineaByKey[k]={clientes:new Set(),n:0,val:0,com:0,gar:0,diasSum:0});
   const dActivosLinea=d.filter(x=>!x._es_perdido_fac);
-  dActivosLinea.forEach(x=>{
-    const k=lineaKeys.includes(x.linea_negocio)?x.linea_negocio:'Esterilización';
-    const g=lineaByKey[k];
-    g.clientes.add(x.cliente);
-    g.n++;
-    g.val+=x.val;
-    if(x.tipo==='Comercial')g.com++; else g.gar++;
-    g.diasSum+=x.long_dias||0;
-  });
-  const lineaSummaryBody=document.getElementById('tb-vg-linea-summary');
-  if(lineaSummaryBody){
-    const totalValAll=lineaKeys.reduce((s,k)=>s+lineaByKey[k].val,0);
-    const rows2=lineaKeys.map(k=>{
-      const g=lineaByKey[k];
-      const nCli=g.clientes.size;
-      const ticketProm=g.n>0?g.val/g.n:0;
-      const durProm=g.n>0?g.diasSum/g.n:0;
-      const pctShare=totalValAll>0?(g.val/totalValAll*100):0;
-      return `<tr>
-        <td>${_lineaBadge(k)}</td>
-        <td class="num" style="font-weight:700">${g.n}</td>
-        <td class="num">${nCli}</td>
-        <td class="num" style="color:var(--mut)">${g.com}</td>
-        <td class="num" style="color:var(--mut)">${g.gar}</td>
-        <td class="num" style="font-weight:700;color:var(--az2)">${mm(g.val)}</td>
-        <td class="num" style="color:var(--mut)">${pctShare.toFixed(1)}%</td>
-        <td class="num">${g.n>0?mm(ticketProm):'—'}</td>
-        <td class="num">${g.n>0?Math.round(durProm)+' días':'—'}</td>
-      </tr>`;
-    });
-    const totalCliSet=new Set(dActivosLinea.map(x=>x.cliente));
-    const totalN=dActivosLinea.length;
-    const totalCom=dActivosLinea.filter(x=>x.tipo==='Comercial').length;
-    const totalGar=totalN-totalCom;
-    const totalDiasSum=dActivosLinea.reduce((s,x)=>s+(x.long_dias||0),0);
-    rows2.push(`<tr style="background:rgba(30,90,200,.07);font-weight:800">
-      <td>TOTAL</td>
-      <td class="num">${totalN}</td>
-      <td class="num">${totalCliSet.size}</td>
-      <td class="num">${totalCom}</td>
-      <td class="num">${totalGar}</td>
-      <td class="num" style="color:var(--az2)">${mm(totalValAll)}</td>
-      <td class="num">100%</td>
-      <td class="num">${totalN>0?mm(totalValAll/totalN):'—'}</td>
-      <td class="num">${totalN>0?Math.round(totalDiasSum/totalN)+' días':'—'}</td>
-    </tr>`);
-    lineaSummaryBody.innerHTML=rows2.join('');
-  }
+  const lineaKeyFn=x=>lineaKeys.includes(x.linea_negocio)?x.linea_negocio:'Esterilización';
+  const coordKeyFn=x=>x.coord||'Sin coordinadora';
+
+  _renderGrupoResumen('tb-vg-linea-summary', dActivosLinea, lineaKeyFn, lineaKeys, k=>_lineaBadge(k));
+  _renderGrupoResumen('tb-vg-coord-summary', dActivosLinea, coordKeyFn, null, k=>`<strong style="font-size:.65rem">${k}</strong>`);
+  _renderGrupoDetalle('vg-linea-detalle', dActivosLinea, lineaKeyFn, lineaKeys, 'Coordinadora', x=>shortC(x.coord));
+  _renderGrupoDetalle('vg-coord-detalle', dActivosLinea, coordKeyFn, null, 'Línea Negocio', x=>_lineaBadge(x.linea_negocio));
 
   const esFiltPerdido=vgRelF==='Perdido';
   const nActivosMostrados=d.filter(x=>!x._es_perdido_fac).length;
@@ -208,6 +165,128 @@ function renderVG(){
   document.getElementById('vg-ftr').textContent=esFiltPerdido
     ?(mm(d.filter(x=>x._es_perdido_fac).reduce((s,x)=>s+(x.fac_total||0),0))+' facturado histórico (perdidos)')
     :(mm(totalVal)+' cartera total filtrada');
+}
+
+// ── Resumen agrupado (contratos/clientes/cartera/ticket/duración) ────────
+// groupOrder=null → grupos ordenados por cartera descendente
+function _renderGrupoResumen(containerId,items,groupKeyFn,groupOrder,renderLabelFn){
+  const el=document.getElementById(containerId);
+  if(!el)return;
+  const groups={};
+  items.forEach(x=>{
+    const k=groupKeyFn(x);
+    if(!groups[k])groups[k]={clientes:new Set(),n:0,val:0,com:0,gar:0,diasSum:0};
+    const g=groups[k];
+    g.clientes.add(x.cliente);
+    g.n++;
+    g.val+=x.val;
+    if(x.tipo==='Comercial')g.com++; else g.gar++;
+    g.diasSum+=x.long_dias||0;
+  });
+  const keys=groupOrder?groupOrder.filter(k=>groups[k]):Object.keys(groups).sort((a,b)=>groups[b].val-groups[a].val);
+  const totalValAll=keys.reduce((s,k)=>s+groups[k].val,0);
+  const rows=keys.map(k=>{
+    const g=groups[k];
+    const nCli=g.clientes.size;
+    const ticketProm=g.n>0?g.val/g.n:0;
+    const durProm=g.n>0?g.diasSum/g.n:0;
+    const pctShare=totalValAll>0?(g.val/totalValAll*100):0;
+    return `<tr>
+      <td>${renderLabelFn(k)}</td>
+      <td class="num" style="font-weight:700">${g.n}</td>
+      <td class="num">${nCli}</td>
+      <td class="num" style="color:var(--mut)">${g.com}</td>
+      <td class="num" style="color:var(--mut)">${g.gar}</td>
+      <td class="num" style="font-weight:700;color:var(--az2)">${mm(g.val)}</td>
+      <td class="num" style="color:var(--mut)">${pctShare.toFixed(1)}%</td>
+      <td class="num">${g.n>0?mm(ticketProm):'—'}</td>
+      <td class="num">${g.n>0?Math.round(durProm)+' días':'—'}</td>
+    </tr>`;
+  });
+  const totalN=items.length;
+  const totalCliSet=new Set(items.map(x=>x.cliente));
+  const totalCom=items.filter(x=>x.tipo==='Comercial').length;
+  const totalGar=totalN-totalCom;
+  const totalDiasSum=items.reduce((s,x)=>s+(x.long_dias||0),0);
+  rows.push(`<tr style="background:rgba(30,90,200,.07);font-weight:800">
+    <td>TOTAL</td>
+    <td class="num">${totalN}</td>
+    <td class="num">${totalCliSet.size}</td>
+    <td class="num">${totalCom}</td>
+    <td class="num">${totalGar}</td>
+    <td class="num" style="color:var(--az2)">${mm(totalValAll)}</td>
+    <td class="num">100%</td>
+    <td class="num">${totalN>0?mm(totalValAll/totalN):'—'}</td>
+    <td class="num">${totalN>0?Math.round(totalDiasSum/totalN)+' días':'—'}</td>
+  </tr>`);
+  el.innerHTML=rows.join('');
+}
+
+// ── Detalle de contratos agrupados, cada grupo con su fila de subtotal ───
+// groupOrder=null → grupos ordenados por cartera descendente
+function _renderGrupoDetalle(containerId,items,groupKeyFn,groupOrder,extraLabel,extraFn){
+  const el=document.getElementById(containerId);
+  if(!el)return;
+  const groups={};
+  items.forEach(x=>{
+    const k=groupKeyFn(x);
+    if(!groups[k])groups[k]=[];
+    groups[k].push(x);
+  });
+  const keys=groupOrder?groupOrder.filter(k=>groups[k]&&groups[k].length):Object.keys(groups).sort((a,b)=>{
+    const sa=groups[a].reduce((s,x)=>s+x.val,0),sb=groups[b].reduce((s,x)=>s+x.val,0);
+    return sb-sa;
+  });
+  const grandTotal=items.reduce((s,x)=>s+x.val,0);
+  const SLC=bg=>`position:sticky;left:0;z-index:1;background:${bg};border-right:1px solid rgba(0,0,0,.08)`;
+  const sepRow=(lbl,n,val)=>`<tr style="background:rgba(0,45,115,.07)">
+    <td colspan="8" style="${SLC('#edf0f5')};font-size:.62rem;font-weight:700;color:var(--az1);padding:.32rem .6rem">
+      ${lbl} <span style="color:var(--mut);font-weight:400">· ${n} contrato${n===1?'':'s'}</span>
+      <span style="float:right;color:var(--az2)">${mm(val)}</span>
+    </td>
+  </tr>`;
+  let body='',sumAll=0,nAll=0;
+  keys.forEach(k=>{
+    const rows=groups[k].slice().sort((a,b)=>b.val-a.val);
+    const subtotal=rows.reduce((s,x)=>s+x.val,0);
+    sumAll+=subtotal;nAll+=rows.length;
+    body+=sepRow(k,rows.length,subtotal);
+    body+=rows.map(x=>{
+      const pct=grandTotal>0?(x.val/grandTotal*100).toFixed(2)+'%':'—';
+      const long=x.long_dias>365?Math.round(x.long_dias/365)+'a '+(x.long_dias%365)+'d':x.long_dias+'d';
+      return `<tr>
+        <td style="font-size:.62rem;line-height:1.3">${shortN(x.cliente)}</td>
+        <td>${tipoBadge(x.tipo)}</td>
+        <td style="font-size:.6rem;color:var(--mut)">${extraFn(x)}</td>
+        <td style="text-align:center">${_progBadge(x.programa||'')}</td>
+        <td class="num" style="color:var(--az2)">${mm(x.val)}</td>
+        <td class="num" style="color:var(--mut)">${pct}</td>
+        <td style="font-size:.63rem">${long}</td>
+        <td style="font-size:.63rem">${x.fin_fmt||'—'}</td>
+      </tr>`;
+    }).join('');
+  });
+  body+=`<tr style="background:var(--az3);font-weight:800">
+    <td colspan="8" style="color:#fff;padding:.4rem .6rem;font-size:.64rem">
+      TOTAL GENERAL <span style="opacity:.7;font-weight:400">· ${nAll} contratos</span>
+      <span style="float:right">${mm(sumAll)}</span>
+    </td>
+  </tr>`;
+  el.innerHTML=`<div class="scroll-t" style="max-height:460px">
+    <table class="tbl" style="font-size:.63rem;width:100%;min-width:640px">
+      <thead><tr>
+        <th style="text-align:left">Cliente</th>
+        <th>Tipo</th>
+        <th>${extraLabel}</th>
+        <th>Programa</th>
+        <th class="num">MM$ Anual</th>
+        <th class="num">% s/Total</th>
+        <th>Duración</th>
+        <th>Vence</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>`;
 }
 
 function _renderProgTable(){

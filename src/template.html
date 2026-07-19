@@ -56,6 +56,9 @@ body{font-family:'Roboto',sans-serif;background:#E8EBF5;color:var(--txt);min-hei
 .sh-line{flex:1;height:1px;background:var(--brd)}
 .sh-tag{font-family:'Roboto Mono',monospace;font-size:.58rem;font-weight:500;
   color:var(--mut);white-space:nowrap;letter-spacing:.05em;text-transform:uppercase}
+.sh-updated{margin:-.35rem 0 .75rem;font-family:'Roboto Mono',monospace;font-size:.56rem;
+  color:var(--mut);display:flex;align-items:center;gap:.35rem}
+.sh-updated::before{content:'●';color:var(--gn);font-size:.5rem}
 
 /* ── GRIDS ── */
 .g5{display:grid;grid-template-columns:repeat(5,1fr);gap:.65rem;margin-bottom:.9rem}
@@ -347,6 +350,17 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
   .ctrl{gap:.55rem;padding:.5rem .75rem}
   .sl-w{min-width:120px}
   .sh h2{font-size:.82rem}
+  .sh{flex-wrap:wrap}
+  .sh-tag{white-space:normal;flex:1 1 100%}
+  /* Grillas con columnas fijas por style inline: colapsar a 1 columna igual que .g5/.g4/etc */
+  [style*="grid-template-columns:repeat(6,1fr)"],
+  [style*="grid-template-columns:repeat(5,1fr)"],
+  [style*="grid-template-columns:repeat(4,1fr)"],
+  [style*="grid-template-columns:repeat(3,1fr)"],
+  [style*="grid-template-columns:1fr 1fr 1fr"],
+  [style*="grid-template-columns:1fr 1fr"],
+  [style*="grid-template-columns:1fr 290px"],
+  [style*="grid-template-columns:1fr 260px"]{grid-template-columns:1fr!important}
 }
 @media(max-width:480px){
   .sem-grid{grid-template-columns:repeat(2,1fr)}
@@ -1241,6 +1255,45 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
         <tbody id="tb-vg-linea-summary"></tbody>
       </table>
     </div>
+  </div>
+
+  <!-- Detalle de Contratos por Línea de Negocio -->
+  <div class="card" style="margin-top:.75rem">
+    <div class="ch"><span class="ct">Detalle de Contratos por Línea de Negocio</span>
+      <span class="ct-sub" style="margin-left:.6rem;font-weight:400;color:var(--mut)">Cada línea con su subtotal · según filtros aplicados arriba</span>
+    </div>
+    <div class="cb" id="vg-linea-detalle" style="padding:0"></div>
+  </div>
+
+  <!-- Resumen por Dueño de Cuenta (Coordinadora) -->
+  <div class="card" style="margin-top:.75rem">
+    <div class="ch"><span class="ct">Resumen por Dueño de Cuenta</span>
+      <span class="ct-sub" style="margin-left:.6rem;font-weight:400;color:var(--mut)">Contratos, clientes, cartera y ticket promedio por coordinadora · según filtros aplicados arriba</span>
+    </div>
+    <div class="cb" style="overflow-x:auto;padding:.5rem 0">
+      <table class="tbl" style="font-size:.63rem;width:100%;min-width:680px">
+        <thead><tr>
+          <th style="text-align:left">Dueño de Cuenta</th>
+          <th class="num">Contratos</th>
+          <th class="num">Clientes</th>
+          <th class="num">Comercial</th>
+          <th class="num">Garantía</th>
+          <th class="num">Cartera MM$</th>
+          <th class="num">% Cartera</th>
+          <th class="num">Ticket Promedio MM$</th>
+          <th class="num">Duración Promedio</th>
+        </tr></thead>
+        <tbody id="tb-vg-coord-summary"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Detalle de Contratos por Dueño de Cuenta -->
+  <div class="card" style="margin-top:.75rem">
+    <div class="ch"><span class="ct">Detalle de Contratos por Dueño de Cuenta</span>
+      <span class="ct-sub" style="margin-left:.6rem;font-weight:400;color:var(--mut)">Cada coordinadora con su subtotal · según filtros aplicados arriba</span>
+    </div>
+    <div class="cb" id="vg-coord-detalle" style="padding:0"></div>
   </div>
 
   <!-- Tabla descriptiva de programas CARE -->

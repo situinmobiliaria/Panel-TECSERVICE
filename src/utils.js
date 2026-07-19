@@ -57,6 +57,7 @@ function sv(name,btn){
   if(name==='vision')renderVG();
   if(name==='nuevos')renderNC();
   if(name==='facturacion') setTimeout(renderFcGraficos, 100);
+  setTimeout(_injectUpdateBadges, 0);
 }
 
 // ─── TOOLTIP ──────────────────────────────────────────────────
@@ -140,6 +141,23 @@ document.addEventListener('DOMContentLoaded',()=>{
 
 // ─── PROGRESS BARS ANIMATE ────────────────────────────────────
 setTimeout(()=>{document.querySelectorAll('.prf').forEach(el=>{const w=el.style.width;el.style.width='0';setTimeout(()=>el.style.width=w,150);});},200);
+
+// ─── ÚLTIMA ACTUALIZACIÓN (anotación en cada sección) ─────────
+// Algunas vistas (Mapa/Matriz/Casos/Base) sólo pintan su contenido cuando el
+// usuario abre esa pestaña (lazy render vía sv()), así que además de correr
+// esto en DOMContentLoaded hay que reintentar cada vez que se cambia de vista.
+function _injectUpdateBadges(){
+  const LABEL='Última actualización: 19 de julio 2026 · 02:50 am';
+  document.querySelectorAll('.view').forEach(view=>{
+    const sh=view.querySelector('.sh');
+    if(!sh||(sh.nextElementSibling&&sh.nextElementSibling.classList.contains('sh-updated')))return;
+    const badge=document.createElement('div');
+    badge.className='sh-updated';
+    badge.textContent=LABEL;
+    sh.insertAdjacentElement('afterend',badge);
+  });
+}
+document.addEventListener('DOMContentLoaded',_injectUpdateBadges);
 
 // ─── PROGRAMAS CARE (usado en todas las hojas de contratos) ───────
 const _PROG_FEATURES={
