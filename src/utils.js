@@ -142,6 +142,26 @@ document.addEventListener('DOMContentLoaded',()=>{
 // ─── PROGRESS BARS ANIMATE ────────────────────────────────────
 setTimeout(()=>{document.querySelectorAll('.prf').forEach(el=>{const w=el.style.width;el.style.width='0';setTimeout(()=>el.style.width=w,150);});},200);
 
+// ─── PANTALLA DE CARGA ──────────────────────────────────────────
+// Se muestra desde que arranca el HTML (cubre el parseo de ~1.7MB de datos +
+// render inicial de gráficos) y se oculta cuando el documento está listo,
+// con un mínimo de 500ms para evitar un parpadeo si carga muy rápido.
+(function(){
+  const ls=document.getElementById('loading-screen');
+  if(!ls)return;
+  const MIN_MS=500;
+  const t0=performance.now();
+  const hide=()=>{
+    const wait=Math.max(0,MIN_MS-(performance.now()-t0));
+    setTimeout(()=>{
+      ls.classList.add('hidden');
+      setTimeout(()=>ls.remove(),450);
+    },wait);
+  };
+  if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',hide);}
+  else{hide();}
+})();
+
 // ─── ÚLTIMA ACTUALIZACIÓN (anotación en cada sección) ─────────
 // Algunas vistas (Mapa/Matriz/Casos/Base) sólo pintan su contenido cuando el
 // usuario abre esa pestaña (lazy render vía sv()), así que además de correr

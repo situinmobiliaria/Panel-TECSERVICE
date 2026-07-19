@@ -238,7 +238,20 @@ def read_contratos(wb):
     duplicados = len(contratos) - len(seen)
     if duplicados > 0:
         print(f"       ADVERTENCIA: {duplicados} contrato(s) duplicado(s) eliminado(s) de CONTRATOS TODOS")
-    return list(seen.values())
+    contratos_final = list(seen.values())
+
+    # "es_nuevo" no debe depender sólo de la fecha de inicio del contrato: si
+    # el cliente ya tenía OTRO contrato (cualquier estado) antes de éste, no es
+    # un cliente nuevo, es una renovación/continuación bajo otro N° de contrato.
+    primer_inicio_cliente = {}
+    for c in contratos_final:
+        cli = c["cliente"]
+        if cli not in primer_inicio_cliente or c["inicio"] < primer_inicio_cliente[cli]:
+            primer_inicio_cliente[cli] = c["inicio"]
+    for c in contratos_final:
+        c["es_nuevo"] = c["tpo_activo"] <= 90 and c["inicio"] == primer_inicio_cliente[c["cliente"]]
+
+    return contratos_final
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1819,11 +1832,38 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
 # ══════════════════════════════════════════════════════════════════════════════
 # 7. CONSTRUIR DATA, NC_DATA, PERDIDOS_VG
 # ══════════════════════════════════════════════════════════════════════════════
-_DATA_EXCLUDE = {"fact_flags", "vendedor", "estado", "real_ytd", "real_2025", "real_2024"}
+_DATA_EXCLUDE = {"fact_flags", "estado", "real_ytd", "real_2025", "real_2024"}
+
+def _tiene_sucesor_reciente(contratos_cliente, ventana_dias=30):
+    """True si, tras el contrato Expirado más reciente de un cliente, existe
+    OTRO contrato (cualquier estado) cuyo inicio cae dentro de +/- ventana_dias
+    respecto a esa fecha de término y que extiende la cobertura (termina
+    después). Sirve para no marcar como "perdido" a un cliente que renovó
+    pero cuyo contrato nuevo aún figura con Estado desactualizado en el Excel
+    (mismo patrón de desfase que #198/#200 de Endoscopía)."""
+    expirados = [c for c in contratos_cliente if c["estado"] != "Activado"]
+    if not expirados:
+        return False
+    ultimo = max(expirados, key=lambda c: c["fin"])
+    ultimo_fin = date.fromisoformat(ultimo["fin"])
+    for c in contratos_cliente:
+        if c is ultimo:
+            continue
+        c_fin = date.fromisoformat(c["fin"])
+        if c_fin <= ultimo_fin:
+            continue  # no extiende la cobertura del cliente
+        c_inicio = date.fromisoformat(c["inicio"])
+        if abs((c_inicio - ultimo_fin).days) <= ventana_dias:
+            return True
+    return False
+
 
 def build_data_arrays(contratos, panel_raw):
     # Lookup de estado_relacion por cliente desde FACTURACIÓN
     panel_rel_map = {p["cliente"]: p.get("estado_relacion", "Nuevo") for p in panel_raw}
+    contratos_by_cliente = defaultdict(list)
+    for c in contratos:
+        contratos_by_cliente[c["cliente"]].append(c)
 
     # DATA: only active contracts
     data = []
@@ -1831,7 +1871,12 @@ def build_data_arrays(contratos, panel_raw):
         if c["estado"] != "Activado":
             continue
         d = {k: v for k, v in c.items() if k not in _DATA_EXCLUDE}
-        d["estado_relacion"] = panel_rel_map.get(c["cliente"], "Nuevo")
+        rel = panel_rel_map.get(c["cliente"], "Nuevo")
+        # Un contrato ACTIVO no puede estar "Perdido": el flag "no continuó" de
+        # FACTURACIÓN quedó desactualizado porque el cliente sí renovó.
+        if rel == "Perdido":
+            rel = "Renovado"
+        d["estado_relacion"] = rel
         data.append(d)
 
     # NC_DATA: new active contracts (started ≤90 days ago), all types
@@ -1846,6 +1891,8 @@ def build_data_arrays(contratos, panel_raw):
         cli = p["cliente"]
         if cli in active_clientes:
             continue  # Cliente renovó con otro contrato
+        if _tiene_sucesor_reciente(contratos_by_cliente.get(cli, [])):
+            continue  # Renovó dentro de la ventana de 30 días; no está realmente perdido
 
         # Find the last expired contract for this client
         expired = [c for c in contratos if c["cliente"] == cli and c["estado"] != "Activado"]
@@ -1874,6 +1921,7 @@ def build_data_arrays(contratos, panel_raw):
             "fin_contrato":   last_c.get("fin", ""),
             "tipo_cli":       p.get("tipo_cli", "Privado"),
             "linea_negocio":  last_c.get("linea_negocio", "Esterilización"),
+            "vendedor":       last_c.get("vendedor", "Sin vendedor"),
         })
 
     return data, nc_data, perdidos

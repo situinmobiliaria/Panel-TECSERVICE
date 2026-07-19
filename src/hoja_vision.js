@@ -144,12 +144,13 @@ function renderVG(){
   const lineaKeys=['Esterilización','Endoscopía','Dental'];
   const dActivosLinea=d.filter(x=>!x._es_perdido_fac);
   const lineaKeyFn=x=>lineaKeys.includes(x.linea_negocio)?x.linea_negocio:'Esterilización';
-  const coordKeyFn=x=>x.coord||'Sin coordinadora';
+  // Dueño de cuenta = Vendedor Técnico (Cristian Perez / Eglys Ramirez), no la coordinadora
+  const duenoKeyFn=x=>x.vendedor||'Sin dueño de cuenta';
 
   _renderGrupoResumen('tb-vg-linea-summary', dActivosLinea, lineaKeyFn, lineaKeys, k=>_lineaBadge(k));
-  _renderGrupoResumen('tb-vg-coord-summary', dActivosLinea, coordKeyFn, null, k=>`<strong style="font-size:.65rem">${k}</strong>`);
+  _renderGrupoResumen('tb-vg-coord-summary', dActivosLinea, duenoKeyFn, null, k=>`<strong style="font-size:.65rem">${k}</strong>`);
   _renderGrupoDetalle('vg-linea-detalle', dActivosLinea, lineaKeyFn, lineaKeys, 'Coordinadora', x=>shortC(x.coord));
-  _renderGrupoDetalle('vg-coord-detalle', dActivosLinea, coordKeyFn, null, 'Línea Negocio', x=>_lineaBadge(x.linea_negocio));
+  _renderGrupoDetalle('vg-coord-detalle', dActivosLinea, duenoKeyFn, null, 'Línea Negocio', x=>_lineaBadge(x.linea_negocio));
 
   const esFiltPerdido=vgRelF==='Perdido';
   const nActivosMostrados=d.filter(x=>!x._es_perdido_fac).length;

@@ -1,0 +1,211 @@
+═══════════════════════════════════════════════════════════════════════════
+ PANEL DE CONTRATOS TECSERVICE 2026 — SUPUESTOS Y DECISIONES DE DISEÑO
+ Documento de referencia interna. NO forma parte del reporte / panel en sí.
+ Última edición de este documento: 19 de julio 2026
+═══════════════════════════════════════════════════════════════════════════
+
+Este archivo reúne todos los supuestos, criterios de clasificación y
+decisiones metodológicas que se tomaron al construir las secciones nuevas
+del panel, para que el equipo las tenga presentes al leer los números y al
+mantener el código (src/extractor.py y los hoja_*.js) hacia adelante.
+
+
+1) CLASIFICACIÓN DE CONTRATOS POR LÍNEA DE NEGOCIO
+───────────────────────────────────────────────────
+CONTRATOS TODOS no tiene una columna de "línea de negocio" (Esterilización /
+Endoscopía / Dental). Se construyó una clasificación manual en
+src/extractor.py (constantes DENTAL_CONTRATOS_NUMS y ENDOSCOPIA_CONTRATOS_NUMS)
+cruzando dos archivos que nos pasó Cristián:
+
+  - Dental (22 contratos): Excel "CONTRATOS DENTAL" (columna Línea de
+    Negocio = DENTAL), recibido 2026-07-17. Match 100% por N° de contrato
+    contra CONTRATOS TODOS.
+  - Endoscopía (4 contratos): listado "Contratos Vigentes ENDO" (imagen),
+    recibido 2026-07-15. Contratos #200 (Intermedical), #198 (HUAP), #142
+    (Hospital Metropolitano de Santiago), #237 (Hospital San Pablo de
+    Coquimbo). Match 100% por N° de contrato.
+  - Todo lo demás se clasifica como Esterilización (línea base/histórica
+    del área Servicio Técnico).
+
+SUPUESTO: esta lista es estática (hardcodeada), no se recalcula desde el
+Excel. Si se firman contratos nuevos de Dental o Endoscopía, hay que sumar
+su número de contrato a mano en extractor.py.
+
+
+2) CONTRATOS #198 (HUAP) Y #200 (INTERMEDICAL) FORZADOS A "ACTIVADO"
+───────────────────────────────────────────────────────────────────
+En CONTRATOS TODOS, columna Estado, estos dos contratos de Endoscopía
+figuran "Expirado" pese a tener fecha de término futura (HUAP: 31/10/2026,
+Intermedical: 31/07/2027). Cristián confirmó que ambos están vigentes
+(mismo listado "Contratos Vigentes ENDO" del punto 1).
+
+SUPUESTO: se corrige su Estado a "Activado" en extractor.py
+(ESTADO_OVERRIDE_ACTIVADO = {198, 200}), lo que los suma a la cartera activa,
+presupuesto, alertas de vencimiento y al resumen de Endoscopía (ahora 4
+contratos, no 2). Si en algún momento se corrige el Estado directamente en
+el Excel, este override deja de tener efecto solo (no hace daño dejarlo).
+
+
+3) DESGLOSE DE INGRESOS — METODOLOGÍA
+───────────────────────────────────────────────────
+El total de facturación real (MM$1.377,4 acumulado Ene-Jul 2026) se
+desglosa en dos bloques que sí calzan exacto mes a mes con la facturación
+real del panel (columna "facturado" de APP_DATA.mensual):
+
+  a) INGRESO POR CONTRATOS (Esterilización / Endoscopía / Dental)
+     Para cada cliente y mes, el monto real de contratos (columna AZ-BK de
+     la hoja FACTURACIÓN) se reparte entre las líneas de negocio del
+     cliente ponderando por el valor mensual (val_mes) de los contratos que
+     tienen bandera de facturación activa ese mes. Si ningún contrato tiene
+     bandera ese mes, se usa el valor anual como respaldo. Se escala cada
+     mes para calzar exacto con el total de "Ingresos por contratos".
+
+  b) OTROS INGRESOS (todo lo que no es contrato)
+     - Trazabilidad: catálogo "Trazabilidad" de la BBDD de Facturación +
+       marca ICTGroup del catálogo "Servicio Técnico" (se fusionaron por
+       pedido explícito, ya que ICTGroup son equipos de trazabilidad).
+     - REAS: catálogo "REAS" de la BBDD, directo.
+     - Reparación Esterilización: marca Steelco (100% esterilización) +
+       prorrateo de las marcas sin línea propia (ver abajo).
+     - Reparación Endoscopía: marca Pentax Medical (100% endoscopía) +
+       prorrateo de las marcas sin línea propia.
+     - Reparación Dental: sólo prorrateo (ninguna marca es 100% dental).
+
+     Las marcas "sin línea propia" (TECSERVICE, Nacional, Otras Marcas) no
+     tienen una línea de negocio evidente por sí solas, así que su monto se
+     reparte cada mes entre Esterilización/Endoscopía/Dental usando el MISMO
+     mix % que Ingreso por Contratos tuvo ese mes. Si un mes no tiene
+     ingreso por contratos (ej. julio 2026, aún sin datos de contrato
+     cargados), se usa el mix promedio del período completo como respaldo.
+
+SUPUESTO: esto es una reclasificación/prorrateo razonable, no una atribución
+contable exacta línea por línea (no existe esa trazabilidad en el Excel a
+nivel de factura individual). Los TOTALES sí son exactos; la composición
+interna de "Otros Ingresos" es una aproximación.
+
+
+4) SATISFACCIÓN DE CLIENTES
+───────────────────────────────────────────────────
+  - Evolutivo trimestral: agrupa las respuestas por trimestre calendario
+    usando la columna "Fecha y hora de finalización" de la encuesta.
+  - "Motivos de Insatisfacción": usa la columna "Categoría" del Excel
+    (internamente cat_detractor), que el equipo llena a mano SÓLO para
+    respuestas con problemas (36 de 52 respuestas no tienen categoría
+    porque no hubo problema que categorizar). El desglose sólo muestra las
+    16 respuestas que sí tienen una categoría asignada.
+
+SUPUESTO: "categoría" en este contexto es la columna de motivo/razón del
+Excel, no el sector Público/Privado/Correo personal (que ya tenía su propio
+desglose antes de este trabajo, en "Análisis por Tipo de Institución").
+
+
+5) VISIÓN GENERAL — LÍNEA DE NEGOCIO Y DUEÑO DE CUENTA
+───────────────────────────────────────────────────
+  - "Dueño de Cuenta" = columna Vendedor Técnico de CONTRATOS TODOS
+    (Cristian Perez / Eglys Ramirez), confirmado explícitamente por
+    Cristián. NO es la Coordinadora (Cynthia Alvarado, Maria de los Angeles
+    Colina, Patricia Guzman, Elizabeth Galvez, Matilde Carrillo), que es un
+    campo distinto y sigue apareciendo como columna propia en las tablas.
+  - Las tablas de "Resumen" y "Detalle" por Línea de Negocio y por Dueño de
+    Cuenta son reactivas a los filtros ya existentes en la tabla principal
+    de Visión General (tipo, relación, programa, búsqueda).
+
+
+6) CORRECCIÓN DE "CLIENTE NUEVO" (es_nuevo)
+───────────────────────────────────────────────────
+Antes: un contrato se marcaba "nuevo" (🆕) sólo si había empezado hace
+≤90 días, sin mirar si el cliente ya tenía historial previo. Esto hacía que,
+por ejemplo, Hospital de Alto Hospicio apareciera como cliente nuevo con su
+contrato #258 (inicio 01/07/2026) pese a tener contratos desde 2023 (#167,
+#168).
+
+SUPUESTO / CORRECCIÓN: ahora "nuevo" exige además que ese contrato sea el
+PRIMERO histórico del cliente (ningún otro contrato, de cualquier estado,
+con fecha de inicio anterior). Esto bajó el conteo de "Nuevos Clientes" de
+14 a 7 contratos en la data activa — los 7 restantes eran, en efecto,
+renovaciones/continuaciones bajo otro número de contrato, no clientes
+nuevos para TECSERVICE.
+
+
+7) CORRECCIÓN DE "PERDIDO" / "VENCIDO"
+───────────────────────────────────────────────────
+Se detectaron dos inconsistencias entre la marca manual de la hoja
+FACTURACIÓN (columnas Primera Vez / Renovó / No Continuó, que llena el
+equipo a mano) y la realidad de CONTRATOS TODOS:
+
+  a) Contrato ACTIVO pero con estado_relacion = "Perdido": ocurre cuando el
+     cliente fue marcado "no continuó" en algún momento pero luego SÍ
+     renovó (ej. Clínica Intermedical, tras la corrección del punto 2).
+     CORRECCIÓN: un contrato activo nunca puede mostrarse como "Perdido";
+     se reclasifica automáticamente a "Renovado". Afectó a 6 clientes en la
+     corrida actual: Hospital Militar de Santiago, Corp Municipal de
+     Educación y Servicios Ramón Freire, Hospital Clínico San Borja-
+     Arriarán, I. Municipalidad de Constitución, Clínica Intermedical,
+     Ejército de Chile Central Odontológica.
+
+  b) Cliente en la lista de "Perdidos" (PERDIDOS_VG, la que se usa en el
+     filtro "📉 Perdidos" de Visión General) cuyo contrato más reciente
+     expiró, pero existe OTRO contrato (de cualquier estado) que empieza
+     dentro de una ventana de ±30 días respecto a esa fecha de término. En
+     ese caso no se considera realmente perdido: probablemente renovó y el
+     Excel todavía no refleja el estado correcto (mismo patrón que el punto
+     2). Función: _tiene_sucesor_reciente() en extractor.py.
+
+SUPUESTO: la ventana de 30 días es una elección razonable (no viene
+indicada por Cristián con un número exacto) para cubrir el desfase típico
+entre el vencimiento de un contrato y la firma/registro del siguiente. Con
+los datos actuales esta regla no sacó a nadie adicional de la lista de
+Perdidos (los 19 que quedan son, hasta donde se pudo verificar, casos
+genuinos), pero queda como resguardo permanente para futuras cargas de
+datos.
+
+ALCANCE: esta corrección se aplicó a estado_relacion (Perdido→Renovado en
+contratos activos) y a PERDIDOS_VG. NO se tocó la pestaña "Vencimientos",
+que sigue mostrando cada contrato según su propia fecha de término
+individual — eso es información de seguimiento contractual (ese contrato sí
+venció en esa fecha), no de relación comercial con el cliente.
+
+
+8) PANEL MOBILE-FRIENDLY
+───────────────────────────────────────────────────
+Causa raíz del desborde horizontal en celular: el subtítulo de cada sección
+(.sh-tag) no envolvía línea (white-space:nowrap) y varias grillas de KPIs
+usaban grid-template-columns fijo por estilo inline (repeat(3..6,1fr),
+"1fr 290px", "1fr 260px") sin colapsar en el breakpoint móvil (≤767px).
+Se agregaron reglas CSS que colapsan todas esas grillas a una columna en
+mobile, igual que el resto del panel. Verificado sin desborde horizontal en
+las 17 secciones, en 390px (mobile) y 1440px (desktop).
+
+
+9) PANTALLA DE CARGA
+───────────────────────────────────────────────────
+Se agregó un splash screen con el logo de TECSERVICE, spinner y texto,
+visible desde que arranca el HTML (cubre el parseo de ~1.7MB de datos +
+render inicial de gráficos) hasta que el documento termina de cargar
+(evento DOMContentLoaded), con un mínimo de 500ms en pantalla para evitar
+parpadeo en conexiones rápidas. Se muestra ANTES de la pantalla de login,
+es decir, tanto si el usuario ya tiene sesión guardada como si no.
+
+
+10) "ÚLTIMA ACTUALIZACIÓN" EN CADA SECCIÓN
+───────────────────────────────────────────────────
+Se agregó el texto "Última actualización: 19 de julio 2026 · 02:50 am" al
+encabezado de las 17 secciones del panel (utils.js, función
+_injectUpdateBadges). Es un texto FIJO, no se recalcula automáticamente a
+partir de la fecha real de generación de datos.
+
+SUPUESTO / PENDIENTE: cada vez que se vuelva a correr extractor.py con
+datos nuevos del Excel, hay que actualizar manualmente la constante LABEL
+dentro de _injectUpdateBadges() en src/utils.js con la fecha/hora real de
+esa actualización, y volver a construir index.html. Si se quiere automatizar
+esto (ej. que extractor.py escriba la fecha/hora de la corrida), avisar y se
+implementa.
+
+
+───────────────────────────────────────────────────────────────────────────
+Cualquier duda sobre alguno de estos criterios, revisar el commit
+correspondiente en el historial de git (buscar por fecha 2026-07-18 /
+2026-07-19) o preguntar directamente — todos estos supuestos se tomaron
+por interpretación razonable de lo pedido, no están validados por el
+equipo de finanzas/comercial más allá de las confirmaciones explícitas que
+se citan arriba.
