@@ -351,64 +351,6 @@ function _renderProgTable(){
   if(tb)tb.innerHTML=rows.join('');
 }
 
-function _renderResumenProgTable(){
-  const data = (APP_DATA && APP_DATA.resumen_programas) || [];
-  if(!data.length) return;
-  const head = document.getElementById('tb-resumen-prog-head');
-  const body = document.getElementById('tb-resumen-prog');
-  if(!head || !body) return;
-
-  const _HDR = 'padding:.42rem .7rem;font-size:.6rem;font-weight:700;letter-spacing:.05em;background:var(--az3);color:rgba(255,255,255,.75)';
-
-  head.innerHTML = `<tr>
-    <th style="${_HDR};text-align:left;min-width:200px">Programa</th>
-    <th style="${_HDR}" class="num">Clientes</th>
-    <th style="${_HDR}" class="num">Contratos</th>
-    <th style="${_HDR}" class="num">Fac. Promedio</th>
-    <th style="${_HDR}" class="num">Fac. Esperada 2026</th>
-    <th style="${_HDR}" class="num">% Cartera</th>
-    <th style="${_HDR}" class="num">% Margen</th>
-    <th style="${_HDR}" class="num">Margen Total</th>
-    <th style="${_HDR}" class="num">Margen Promedio</th>
-    <th style="${_HDR}" class="num">Duración Prom.</th>
-    <th style="${_HDR}" class="num">Vigencia Prom.</th>
-  </tr>`;
-
-  body.innerHTML = data.map(r => {
-    const isTotal = r.programa === 'TOTAL';
-    const key  = _progKey(r.programa);
-    const feat = key ? _PROG_FEATURES[key] : null;
-    // Fondo: solidBg con opacidad baja para filas de datos, oscuro para TOTAL
-    const bg  = isTotal ? 'var(--az3)' : feat ? feat.solidBg + '44' : 'rgba(150,150,150,.06)';
-    // Borde izquierdo de color sólido igual que la descripción
-    const borderL = feat ? `border-left:4px solid ${feat.solidBg};` : '';
-    const tc  = isTotal ? 'rgba(255,255,255,.92)' : '#111';
-    const fw  = isTotal ? 'font-weight:700;' : '';
-    const pctM = r.pct_margen !== null && r.pct_margen !== undefined
-      ? fN1(r.pct_margen * 100) + '%' : '—';
-    const margCol = r.pct_margen >= 0.5 ? '#007A72' : r.pct_margen >= 0.3 ? 'var(--or)' : 'var(--rd)';
-    const facCol  = isTotal ? 'var(--teal)' : 'var(--az2)';
-    const pctC    = r.pct_cartera !== null && r.pct_cartera !== undefined
-      ? fN1(r.pct_cartera * 100) + '%' : '—';
-    // Nombre con pastilla de color igual que los badges de programa
-    const nameCell = feat
-      ? `<span style="display:inline-block;padding:.15rem .45rem;border-radius:4px;font-weight:800;font-size:.62rem;font-family:'Roboto Condensed',sans-serif;background:${feat.solidBg};color:#111;white-space:nowrap">${r.programa}</span>`
-      : `<span style="font-size:.62rem;color:var(--mut)">${r.programa}</span>`;
-    return `<tr class="${isTotal?'row-total':''}" style="background:${bg};color:${tc};${fw}${borderL}">
-      <td style="padding:.38rem .7rem">${nameCell}</td>
-      <td class="num">${r.clientes}</td>
-      <td class="num">${r.contratos}</td>
-      <td class="num">${mm(r.fac_promedio)}</td>
-      <td class="num" style="color:${facCol};${fw}">${mm(r.fac_esperada)}</td>
-      <td class="num">${pctC}</td>
-      <td class="num" style="color:${isTotal?'inherit':margCol}">${pctM}</td>
-      <td class="num" style="color:${isTotal?'var(--teal)':'#007A72'};${fw}">${mm(r.margen_total)}</td>
-      <td class="num">${mm(r.margen_promedio)}</td>
-      <td class="num">${fN1(r.dur_promedio)} días</td>
-      <td class="num">${fN1(r.vig_promedio)} días</td>
-    </tr>`;
-  }).join('');
-}
 
 function initVision(){
   document.querySelectorAll('#vg-sort .btn').forEach(b=>{b.addEventListener('click',()=>{vgSortF=b.dataset.vs;vgSortCF='';document.querySelectorAll('#vg-sort .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
@@ -418,5 +360,4 @@ function initVision(){
   document.getElementById('vg-srch').oninput=e=>{vgSrch=e.target.value.toLowerCase();renderVG();};
   renderVG();
   _renderProgTable();
-  _renderResumenProgTable();
 }

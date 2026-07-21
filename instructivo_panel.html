@@ -1,0 +1,1603 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Instructivo · Panel de Gestión TECSERVICE</title>
+<style>
+:root {
+  --navy:   #002D73;
+  --navy2:  #003B96;
+  --teal:   #1EC8B8;
+  --amber:  #F0AC00;
+  --bg:     #F1F4F9;
+  --bg2:    #FFFFFF;
+  --bg3:    #E8ECF4;
+  --border: #D4DAE8;
+  --txt:    #111827;
+  --txt2:   #374151;
+  --muted:  #6B7A99;
+  --chip-kpi-bg:#EDF2FF; --chip-kpi-fg:#003B96;
+  --chip-tbl-bg:#E6F7F5; --chip-tbl-fg:#0A7A72;
+  --chip-graf-bg:#FFF8E1;--chip-graf-fg:#7A5200;
+  --chip-fil-bg:#F3EEFF; --chip-fil-fg:#5B21B6;
+  --side-w:220px;
+  --top-h:52px;
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#0C1220;--bg2:#131C30;--bg3:#1A2440;--border:#253050;
+  --txt:#E8EDF7;--txt2:#B0BDD8;--muted:#6B7EA8;
+  --chip-kpi-bg:#1A2E5A;--chip-kpi-fg:#93B4FF;
+  --chip-tbl-bg:#0D2E2B;--chip-tbl-fg:#4ECFC5;
+  --chip-graf-bg:#2A2000;--chip-graf-fg:#FFCF4D;
+  --chip-fil-bg:#1E1040;--chip-fil-fg:#C4A6FF;
+}}
+:root[data-theme=light]{--bg:#F1F4F9;--bg2:#FFFFFF;--bg3:#E8ECF4;--border:#D4DAE8;--txt:#111827;--txt2:#374151;--muted:#6B7A99;--chip-kpi-bg:#EDF2FF;--chip-kpi-fg:#003B96;--chip-tbl-bg:#E6F7F5;--chip-tbl-fg:#0A7A72;--chip-graf-bg:#FFF8E1;--chip-graf-fg:#7A5200;--chip-fil-bg:#F3EEFF;--chip-fil-fg:#5B21B6;}
+:root[data-theme=dark]{--bg:#0C1220;--bg2:#131C30;--bg3:#1A2440;--border:#253050;--txt:#E8EDF7;--txt2:#B0BDD8;--muted:#6B7EA8;--chip-kpi-bg:#1A2E5A;--chip-kpi-fg:#93B4FF;--chip-tbl-bg:#0D2E2B;--chip-tbl-fg:#4ECFC5;--chip-graf-bg:#2A2000;--chip-graf-fg:#FFCF4D;--chip-fil-bg:#1E1040;--chip-fil-fg:#C4A6FF;}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:"Roboto","Segoe UI",system-ui,sans-serif;font-size:14px;line-height:1.6;color:var(--txt);background:var(--bg);min-height:100vh}
+
+.topbar{position:fixed;top:0;left:0;right:0;height:var(--top-h);background:var(--navy);display:flex;align-items:center;padding:0 1.25rem;gap:1rem;z-index:200;box-shadow:0 2px 12px rgba(0,0,0,.28)}
+.topbar-logo{background:var(--teal);color:var(--navy);font-weight:900;font-size:.78rem;letter-spacing:.06em;padding:.2rem .6rem;border-radius:3px;text-transform:uppercase;white-space:nowrap}
+.topbar-title{color:#fff;font-weight:700;font-size:.95rem;letter-spacing:.04em;text-transform:uppercase;flex:1}
+.topbar-sub{color:rgba(255,255,255,.45);font-size:.72rem;white-space:nowrap}
+.theme-btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.7);border-radius:20px;padding:.22rem .7rem;cursor:pointer;font-size:.7rem;transition:all .15s}
+.theme-btn:hover{background:rgba(255,255,255,.18)}
+
+.layout{display:grid;grid-template-columns:var(--side-w) 1fr;margin-top:var(--top-h);min-height:calc(100vh - var(--top-h))}
+
+.sidebar{position:sticky;top:var(--top-h);height:calc(100vh - var(--top-h));overflow-y:auto;overflow-x:hidden;background:var(--bg2);border-right:1px solid var(--border);padding:1rem 0 2rem;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+.sidebar::-webkit-scrollbar{width:4px}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.nav-group-label{font-size:.6rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:.75rem 1.1rem .3rem}
+.nav-link{display:flex;align-items:center;gap:.5rem;padding:.4rem 1.1rem;color:var(--txt2);text-decoration:none;font-size:.77rem;font-weight:500;border-left:3px solid transparent;transition:all .12s;line-height:1.25}
+.nav-link:hover{background:var(--bg3);color:var(--txt)}
+.nav-link.active{border-left-color:var(--teal);background:var(--bg3);color:var(--navy2);font-weight:700}
+:root[data-theme=dark] .nav-link.active{color:var(--teal)}
+@media(prefers-color-scheme:dark){.nav-link.active{color:var(--teal)}}
+.nav-num{background:var(--bg3);color:var(--muted);font-size:.6rem;font-weight:700;min-width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+
+.main{padding:1.75rem 2rem 4rem;max-width:920px}
+
+.intro{background:linear-gradient(135deg,var(--navy) 0%,#00469B 100%);border-radius:10px;padding:1.75rem 2rem;margin-bottom:1.75rem;color:#fff}
+.intro h1{font-size:1.3rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;margin-bottom:.35rem}
+.intro p{color:rgba(255,255,255,.65);font-size:.8rem;max-width:520px;line-height:1.55}
+.intro-chips{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.9rem}
+.intro-chip{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.85);border-radius:20px;padding:.22rem .65rem;font-size:.68rem;font-weight:600}
+.intro-chip span{color:var(--teal);font-weight:800}
+
+.how-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem}
+.how-title{font-size:.68rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:.6rem}
+.how-list{list-style:none;display:flex;flex-direction:column;gap:.3rem}
+.how-list li{font-size:.78rem;color:var(--txt2);display:flex;align-items:flex-start;gap:.45rem;line-height:1.4}
+.how-list li::before{content:"→";color:var(--teal);font-weight:900;flex-shrink:0;font-size:.7rem;margin-top:.18rem}
+
+/* ── ACCORDION SECTION ── */
+.section{margin-bottom:.9rem;scroll-margin-top:calc(var(--top-h) + 1rem)}
+.acc-head{display:flex;align-items:flex-start;gap:.85rem;padding:.85rem 1.1rem;background:var(--bg2);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:background .12s;user-select:none;width:100%}
+.section.open .acc-head{border-radius:8px 8px 0 0;border-bottom-color:transparent}
+.acc-head:hover{background:var(--bg3)}
+.section-num{background:var(--navy);color:#fff;font-weight:800;font-size:.65rem;min-width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:.05rem}
+.acc-meta{flex:1;min-width:0}
+.acc-name{font-size:.9rem;font-weight:800;letter-spacing:.02em;text-transform:uppercase;color:var(--txt);line-height:1.2}
+.acc-desc{font-size:.75rem;color:var(--muted);margin-top:.18rem;line-height:1.4}
+.acc-chips{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.45rem}
+.chip{display:inline-flex;align-items:center;gap:.25rem;font-size:.64rem;font-weight:700;padding:.15rem .48rem;border-radius:20px}
+.chip-kpi{background:var(--chip-kpi-bg);color:var(--chip-kpi-fg)}
+.chip-tbl{background:var(--chip-tbl-bg);color:var(--chip-tbl-fg)}
+.chip-graf{background:var(--chip-graf-bg);color:var(--chip-graf-fg)}
+.chip-fil{background:var(--chip-fil-bg);color:var(--chip-fil-fg)}
+.acc-arrow{color:var(--muted);font-size:1rem;flex-shrink:0;margin-top:.1rem;transition:transform .2s}
+.section.open .acc-arrow{transform:rotate(90deg)}
+
+.acc-body{display:none;border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;overflow:hidden}
+.section.open .acc-body{display:block}
+
+/* ── SEQUENTIAL LIST ── */
+.seq-list{display:flex;flex-direction:column}
+.seq-item{display:flex;gap:.75rem;padding:.7rem 1.1rem;border-bottom:1px solid var(--border);align-items:flex-start}
+.seq-item:last-child{border-bottom:none}
+.seq-idx{font-size:.6rem;font-weight:700;color:var(--muted);min-width:1.4rem;padding-top:.15rem;flex-shrink:0;text-align:right;line-height:1}
+.seq-badge{font-size:.57rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:.12rem .38rem;border-radius:3px;flex-shrink:0;min-width:44px;text-align:center;margin-top:.1rem;line-height:1.4}
+.seq-kpi{background:var(--chip-kpi-bg);color:var(--chip-kpi-fg)}
+.seq-tbl{background:var(--chip-tbl-bg);color:var(--chip-tbl-fg)}
+.seq-graf{background:var(--chip-graf-bg);color:var(--chip-graf-fg)}
+.seq-fil{background:var(--chip-fil-bg);color:var(--chip-fil-fg)}
+.seq-content{flex:1;min-width:0}
+.seq-name{font-size:.8rem;font-weight:700;color:var(--txt);line-height:1.3;margin-bottom:.2rem}
+.seq-desc{font-size:.73rem;color:var(--txt2);line-height:1.5}
+.seq-cols{font-size:.64rem;color:var(--muted);margin-top:.3rem;line-height:1.5}
+.seq-cols strong{color:var(--txt2);font-weight:600}
+
+.note{display:flex;gap:.45rem;align-items:flex-start;background:var(--bg3);border-left:3px solid var(--amber);border-radius:0 5px 5px 0;padding:.5rem .7rem;font-size:.72rem;color:var(--txt2);line-height:1.4;margin:.5rem 1.1rem}
+.note-icon{color:var(--amber);flex-shrink:0}
+
+@media(max-width:700px){
+  .layout{grid-template-columns:1fr}
+  .sidebar{display:none}
+  .main{padding:1rem 1rem 3rem}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-logo">TECSERVICE</div>
+  <div class="topbar-title">Panel de Gestión · Instructivo</div>
+  <div class="topbar-sub">GEMCO S.A. · 2026</div>
+  <button class="theme-btn" onclick="toggleTheme()">&#9680; Tema</button>
+</div>
+
+<div class="layout">
+<nav class="sidebar" id="sidebar">
+  <div style="padding:.7rem 1.1rem .1rem">
+    <div style="font-size:.73rem;font-weight:800;color:var(--txt)">Secciones del Panel</div>
+    <div style="font-size:.65rem;color:var(--muted);margin-top:.1rem">Clic para expandir cada hoja</div>
+  </div>
+  <div class="nav-group-label">Inicio</div>
+  <a class="nav-link" href="#s0"><span class="nav-num">0</span>Indicadores Clave</a>
+  <div class="nav-group-label">Contratos</div>
+  <a class="nav-link" href="#s1"><span class="nav-num">1</span>Tipos de Contratos</a>
+  <a class="nav-link" href="#s2"><span class="nav-num">2</span>Nuevos Clientes</a>
+  <a class="nav-link" href="#s3"><span class="nav-num">3</span>Vencimientos</a>
+  <a class="nav-link" href="#s4"><span class="nav-num">4</span>Visión General</a>
+  <a class="nav-link" href="#s5"><span class="nav-num">5</span>Cumplim. Presupuesto</a>
+  <div class="nav-group-label">Facturación</div>
+  <a class="nav-link" href="#s6"><span class="nav-num">6</span>Facturación a la Fecha</a>
+  <a class="nav-link" href="#s7"><span class="nav-num">7</span>Panel Fact. Cliente</a>
+  <div class="nav-group-label">Clientes</div>
+  <a class="nav-link" href="#s8"><span class="nav-num">8</span>Base Instalada</a>
+  <a class="nav-link" href="#s9"><span class="nav-num">9</span>Satisfacción Clientes</a>
+  <a class="nav-link" href="#s10"><span class="nav-num">10</span>Visitas Ejecutivos</a>
+  <a class="nav-link" href="#s11"><span class="nav-num">11</span>Mapa Clientes</a>
+  <a class="nav-link" href="#s12"><span class="nav-num">12</span>Matriz BI</a>
+  <div class="nav-group-label">Operación</div>
+  <a class="nav-link" href="#s13"><span class="nav-num">13</span>Casos Relevantes</a>
+  <a class="nav-link" href="#s14"><span class="nav-num">14</span>Bajo Contrato</a>
+  <div class="nav-group-label">Financiero</div>
+  <a class="nav-link" href="#s15"><span class="nav-num">15</span>EERR y Ratios</a>
+  <a class="nav-link" href="#s16"><span class="nav-num">16</span>Desglose de Ingresos</a>
+</nav>
+
+<main class="main">
+
+<div class="intro">
+  <h1>Manual de Usuario · Panel TECSERVICE</h1>
+  <p>Guía completa de las 17 vistas del panel. Los elementos de cada sección aparecen en el mismo orden en que se ven al desplazarse por la pantalla, de arriba hacia abajo.</p>
+  <div class="intro-chips">
+    <div class="intro-chip"><span>17</span> Secciones</div>
+    <div class="intro-chip"><span>Excel</span> Fuente de datos</div>
+    <div class="intro-chip">Cifras en MM$ (millones de pesos)</div>
+    <div class="intro-chip">Actualización mensual</div>
+  </div>
+</div>
+
+<div class="how-card">
+  <div class="how-title">Cómo usar el panel</div>
+  <ul class="how-list">
+    <li>Navega entre las 17 secciones usando los botones de la barra superior del panel.</li>
+    <li>Los datos se actualizan cargando el Excel de GEMCO y publicando en GitHub. La fecha de actualización aparece en la barra superior.</li>
+    <li>Los filtros de cada sección son independientes; cambiar uno no afecta las demás vistas.</li>
+    <li>Los colores de programas CARE son consistentes en todo el panel: Basic Care (verde), Advanced Care (amarillo), Profesional Care (naranja).</li>
+    <li>Todas las cifras monetarias están en <strong>MM$ (millones de pesos chilenos)</strong> salvo indicación contraria.</li>
+  </ul>
+</div>
+
+<!-- ═══ S0 ═══ -->
+<div class="section" id="s0">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">0</div>
+    <div class="acc-meta">
+      <div class="acc-name">Indicadores Clave · Resumen</div>
+      <div class="acc-desc">Vista de inicio con KPIs globales, análisis de facturación acumulada y semanal, gráficos de desempeño y alerta de clientes bajo contrato.</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● KPIs</span>
+        <span class="chip chip-tbl">▦ Tablas</span>
+        <span class="chip chip-graf">◈ Gráficos</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Fila de indicadores principales (6 tarjetas)</div>
+          <div class="seq-desc">
+            <strong>Facturación ST YTD:</strong> total acumulado del área en el año (MM$).<br>
+            <strong>Variación % vs AA:</strong> crecimiento de la facturación respecto al mismo período del año anterior — indica si el área está creciendo o cayendo en comparación directa.<br>
+            <strong>Tipo Garantía:</strong> cantidad de contratos de garantía activos en cartera.<br>
+            <strong>Por Vencer 90d:</strong> contratos y MM$ que vencen en los próximos 90 días — alerta de renovación.<br>
+            <strong>Ppto. Contratos Cubierto:</strong> cartera real vs. presupuesto asignado a contratos (%).<br>
+            <strong>% Fact. = Contratos:</strong> proporción de la facturación total que corresponde a contratos.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Fila de indicadores secundarios (5 tarjetas)</div>
+          <div class="seq-desc">
+            <strong>Nuevos Clientes últ. 90d:</strong> contratos comerciales incorporados en los últimos 90 días.<br>
+            <strong>Contratos Críticos ≤30d:</strong> contratos que vencen en menos de un mes y requieren acción urgente.<br>
+            <strong>Fact. mes en curso:</strong> facturación del último mes cerrado (MM$).<br>
+            <strong>NPS:</strong> Net Promoter Score de la encuesta de satisfacción (promotores% − detractores%).<br>
+            <strong>Visitas YTD:</strong> total de visitas comerciales realizadas en el año por ambos ejecutivos.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Análisis Facturación Acumulado</div>
+          <div class="seq-desc">Comparativo YTD de la facturación real por línea de negocio, frente al presupuesto acumulado y al año anterior. Permite detectar cuáles líneas están sobre o bajo meta.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> Línea · Fact. · Provisión · Total YTD · Ppto Acum. · Δ Ppto $ · Δ Ppto % · Fact. AA · Δ AA $ · Δ AA % · Ppto Anual</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">4</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Análisis Semanal del Mes</div>
+          <div class="seq-desc">Desglose de la facturación del mes en curso semana a semana, comparado con el presupuesto mensual y el mes anterior. Útil para seguimiento en tiempo real dentro del mes.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> Línea · Fact. YTD · S1 · S2 · S3 · S4 · S5 · Acum. Mes · Ppto Mes · Δ Ppto · Mes Ant. · Δ vs Ant.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">5</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Facturación Total Mensual 2026 (barras)</div>
+          <div class="seq-desc">Muestra el real mes a mes comparado con el presupuesto y el presupuesto exclusivo de contratos. Permite ver en qué meses se superó o quedó bajo la meta. Tiene segmentador: <strong>Total / Solo Contratos / Solo Otras.</strong></div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">6</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Composición Contratos vs Otras (dona)</div>
+          <div class="seq-desc">Proporción entre ingresos por contratos e ingresos por otras vías (correctiva, REAS, trazabilidad). Indica qué tan dependiente es la facturación de los contratos.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">7</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Facturación por Ejecutivo (barras)</div>
+          <div class="seq-desc">Evolución mensual de la facturación segmentada por ejecutivo (coordinadora de cuenta). Permite comparar el aporte individual de cada vendedor técnico al total.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">8</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Facturación por Línea de Negocio (barras)</div>
+          <div class="seq-desc">Evolución mensual segmentada por línea (Esterilización, Endoscopía, Dental, etc.). Muestra el peso relativo de cada área de negocio y su tendencia en el año.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">9</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Distribución por Tipo de Contrato (dona)</div>
+          <div class="seq-desc">Distribución de la cartera entre Comercial (contratos con valor económico) y Garantía (cobertura valorizada). Muestra el peso relativo de cada tipo sobre la cartera total.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">10</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Longevidad de Contratos (barras)</div>
+          <div class="seq-desc">Distribución de los contratos por antigüedad en meses. Permite ver si la cartera está compuesta por contratos recientes o de larga data, lo que indica estabilidad del portafolio.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">11</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Presupuesto Contratos 2026 (barra de avance)</div>
+          <div class="seq-desc">Muestra el avance de la cartera real vs. el presupuesto asignado a contratos para el año, con indicador del porcentaje de cobertura alcanzado.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">12</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Top 12 Clientes YTD (barras horizontales)</div>
+          <div class="seq-desc">Clientes con mayor facturación acumulada en el año. Permite identificar rápidamente quiénes concentran el ingreso del área y su importancia relativa.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">13</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Cartera COM por Coordinadora (barras horizontales)</div>
+          <div class="seq-desc">Distribución de la cartera de contratos comerciales por responsable de cuenta. Muestra el peso relativo de cada coordinadora y el valor que gestiona.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">14</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">NPS y Puntajes (barras)</div>
+          <div class="seq-desc">Distribución de encuestados en Promotores (puntaje ≥9), Pasivos (7–8) y Detractores (≤6). El NPS final es Promotores% − Detractores%. También muestra promedios de calidad y tiempo de respuesta.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">15</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Visitas Ejecutivos (barras apiladas)</div>
+          <div class="seq-desc">Visitas por mes apiladas por ejecutivo (Eglys y Cristián). Permite ver la cadencia de visitas y comparar la carga entre ejecutivos a lo largo del año.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">16</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Clientes Bajo Contrato (con filtro por coordinadora)</div>
+          <div class="seq-desc">Alerta temprana: clientes con contrato vigente cuya facturación real acumulada está por debajo de lo esperado según sus contratos. Se puede filtrar por coordinadora para gestionar la brecha.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> Coordinadora · Cliente · N° Contrato · Esperado YTD · Real YTD · Diferencia</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S1 ═══ -->
+<div class="section" id="s1">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">1</div>
+    <div class="acc-meta">
+      <div class="acc-name">Tipos de Contratos</div>
+      <div class="acc-desc">Detalle de la cartera clasificada por tipo (Comercial / Garantía) y análisis del estado de relación con el cliente (Nuevo, Renovado, Perdido).</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● KPIs</span>
+        <span class="chip chip-tbl">▦ Tablas</span>
+        <span class="chip chip-graf">◈ Gráficos</span>
+        <span class="chip chip-fil">▾ Filtros</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen de cartera (4 indicadores)</div>
+          <div class="seq-desc">
+            <strong>N° COM:</strong> cantidad de contratos comerciales activos.<br>
+            <strong>Fact. COM (YTD):</strong> facturación acumulada en el año proveniente de contratos comerciales (MM$).<br>
+            <strong>N° GAR:</strong> cantidad de contratos de garantía activos.<br>
+            <strong>Vigencia promedio GAR:</strong> promedio de días restantes de los contratos de garantía.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Listado de contratos con tabs Comercial / Garantía</div>
+          <div class="seq-desc">Tabla principal con todos los contratos activos. La pestaña <strong>Comercial</strong> muestra contratos con valor económico; la pestaña <strong>Garantía</strong> muestra cobertura valorizada post-venta. Se puede ordenar por cualquier columna.</div>
+          <div class="seq-cols"><strong>Tab Comercial:</strong> # · Cliente · Coordinadora · Inicio · Vence · MM$ Anual · % s/Total · % Consumido · Días rest. · Programa · ¿Nuevo?<br><strong>Tab Garantía:</strong> # · Cliente · Tipo equipo · Inicio · Vence · Días rest. · % Consumido</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Análisis de Cartera · Estado de Relación (4 indicadores)</div>
+          <div class="seq-desc">
+            <strong>Clientes Nuevos:</strong> clientes que nunca habían tenido contrato con TECSERVICE y que ingresaron este período.<br>
+            <strong>Renovados:</strong> clientes que tenían contrato anterior y lo renovaron.<br>
+            <strong>Perdidos:</strong> clientes que tuvieron contrato pero no renovaron.<br>
+            <strong>Tasa de Retención:</strong> porcentaje de clientes que renuevan respecto al total que debían renovar.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">4</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Distribución por estado de relación (dona)</div>
+          <div class="seq-desc">Proporción visual entre Nuevos, Renovados y Perdidos en la cartera actual. Permite ver de un vistazo cuál es la composición del portafolio y cuántos clientes se están reteniendo.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">5</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Estado de relación por coordinadora (barras horizontales)</div>
+          <div class="seq-desc">Muestra la distribución de Nuevos, Renovados y Perdidos por cada coordinadora de cuenta. Permite comparar el desempeño de retención y captación entre ejecutivos.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">6</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Detalle por estado de relación (con filtros)</div>
+          <div class="seq-desc">Tabla detallada de cada cliente según su estado (Nuevo/Renovado/Perdido). Incluye filtros por estado y por período para analizar segmentos específicos de la cartera.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> # · Cliente · Coordinadora · Estado · MM$ Total Fac. · MM$ 2026 · MM$ Cartera · Inicio · Fin</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">7</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Cartera COM por coordinadora (barras)</div>
+          <div class="seq-desc">Valor total de la cartera de contratos comerciales asignada a cada coordinadora (MM$ anualizados). Muestra cómo está distribuida la responsabilidad comercial del área.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">8</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Distribución tipo por coordinadora (barras apiladas)</div>
+          <div class="seq-desc">Para cada coordinadora, muestra la composición de su cartera entre contratos Comerciales y de Garantía. Permite ver si algún ejecutivo está concentrado en un tipo de contrato.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S2 ═══ -->
+<div class="section" id="s2">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">2</div>
+    <div class="acc-meta">
+      <div class="acc-name">Nuevos Clientes</div>
+      <div class="acc-desc">Contratos ingresados en un período definido por el usuario. Analiza el flujo de captación de nuevos negocios con filtros dinámicos de tiempo y tipo de contrato.</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● KPIs</span>
+        <span class="chip chip-tbl">▦ Tabla</span>
+        <span class="chip chip-fil">▾ Período · Tipo</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-fil">FILTRO</div>
+        <div class="seq-content">
+          <div class="seq-name">Período y Tipo de contrato</div>
+          <div class="seq-desc">
+            <strong>Período:</strong> botones rápidos 7d / 15d / 1 mes / 2 meses / 3 meses / 6 meses / 1 año / Todos, más un slider de ajuste fino hasta 3.650 días.<br>
+            <strong>Tipo:</strong> Todos / Comercial / Garantía — filtra la tabla y los KPIs para mostrar solo el segmento seleccionado.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen del período (5 indicadores)</div>
+          <div class="seq-desc">
+            <strong>Nuevos clientes:</strong> clientes únicos que entraron en el período seleccionado.<br>
+            <strong>Contratos:</strong> número total de contratos nuevos (un cliente puede traer más de uno).<br>
+            <strong>Tipo Garantía:</strong> cuántos de esos contratos son de garantía.<br>
+            <strong>MM$ anual:</strong> cartera total anualizada de los contratos nuevos.<br>
+            <strong>Rango fechas:</strong> fechas de inicio más antigua y más reciente dentro del filtro.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Detalle de contratos nuevos</div>
+          <div class="seq-desc">Lista completa de los contratos que iniciaron dentro del período elegido, con búsqueda por cliente o coordinadora. Se puede ordenar por cualquier columna para priorizar el análisis.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> # · Cliente · Coordinadora · Tipo · Programa · Inicio · Vence · MM$ Anual · % s/Total · Días rest. · Antigüedad (días desde inicio)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S3 ═══ -->
+<div class="section" id="s3">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">3</div>
+    <div class="acc-meta">
+      <div class="acc-name">Control de Vencimientos</div>
+      <div class="acc-desc">Horizonte dinámico de gestión de contratos por vencer. Permite ajustar el plazo de alerta y ver qué contratos requieren gestión de renovación en ese período.</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● KPIs</span>
+        <span class="chip chip-tbl">▦ Tabla + Semáforo</span>
+        <span class="chip chip-graf">◈ Gráfico</span>
+        <span class="chip chip-fil">▾ Horizonte · Tipo · Estado</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-fil">FILTRO</div>
+        <div class="seq-content">
+          <div class="seq-name">Horizonte de gestión (slider + presets)</div>
+          <div class="seq-desc">Slider continuo de 1 a 730 días con botones rápidos: 30d / 60d / 90d / 180d / 1 año / 2 años / Todos. Define cuántos días hacia adelante se quiere visualizar los vencimientos. Todos los KPIs y la tabla se actualizan al mover el slider.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen del horizonte seleccionado (5 indicadores)</div>
+          <div class="seq-desc">
+            <strong>Contratos:</strong> total de contratos que vencen dentro del horizonte elegido.<br>
+            <strong>Clientes:</strong> clientes únicos afectados.<br>
+            <strong>MM$ en riesgo:</strong> valor anualizado de la cartera que vence en ese plazo.<br>
+            <strong>Tipo Comercial:</strong> contratos COM dentro del horizonte.<br>
+            <strong>Tipo Garantía:</strong> contratos GAR dentro del horizonte.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Contratos en horizonte (con filtros y búsqueda)</div>
+          <div class="seq-desc">Lista de todos los contratos que vencen dentro del período seleccionado. Filtros adicionales por <strong>Tipo</strong> (COM/GAR) y <strong>Estado de Relación</strong> (Nuevo/Renovado/Perdido). Búsqueda por cliente o coordinadora.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> # · Cliente · Estado Relación · Coordinadora · Tipo · Programa · Vence · Días ↕ · MM$ Anual · % s/Total · % Consumido</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">4</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Distribución por mes de vencimiento (barras)</div>
+          <div class="seq-desc">Muestra en qué meses se concentran los vencimientos, agrupados por mes calendario. Permite planificar la carga de trabajo de renovación y anticipar períodos de mayor riesgo.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">5</div>
+        <div class="seq-badge seq-tbl">SEMÁFORO</div>
+        <div class="seq-content">
+          <div class="seq-name">Semáforo de Urgencia · Todos los Contratos Activos</div>
+          <div class="seq-desc">Clasifica <strong>todos</strong> los contratos activos (no solo el horizonte elegido) en 6 tramos de urgencia con código de color. Cada celda muestra el número de contratos y el valor MM$ en ese tramo.</div>
+          <div class="seq-cols">
+            <strong style="color:#c00">Vencido</strong> · <strong style="color:#c00">0–30 días</strong> · <strong style="color:#a06000">31–60 días</strong> · <strong style="color:#8B8200">61–90 días</strong> · <strong style="color:#003B96">91–180 días</strong> · <strong style="color:#007a40">+180 días</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S4 ═══ -->
+<div class="section" id="s4">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">4</div>
+    <div class="acc-meta">
+      <div class="acc-name">Visión General · Cartera Activa</div>
+      <div class="acc-desc">Vista completa de todos los contratos activos con análisis por línea de negocio, dueño de cuenta y programa CARE. Incluye filtros cruzados.</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● KPIs</span>
+        <span class="chip chip-tbl">▦ 6 tablas</span>
+        <span class="chip chip-fil">▾ Tipo · Relación · Programa · Búsqueda</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-fil">FILTRO</div>
+        <div class="seq-content">
+          <div class="seq-name">Panel de filtros superiores</div>
+          <div class="seq-desc">
+            <strong>Ordenar:</strong> Valor ↓ / % Consumido ↓ / Días rest. ↑ / Antigüedad ↓ — cambia el orden de la tabla principal.<br>
+            <strong>Tipo:</strong> Todos / Comercial / Garantía / Urgentes &lt;90d / Nuevos clientes.<br>
+            <strong>Relación:</strong> Todos / Nuevos / Renovados / Perdidos.<br>
+            <strong>Programa:</strong> Basic Care / Advanced Care / Profesional Care / Integral Care / Sin programa.<br>
+            <strong>Búsqueda:</strong> filtra por nombre de cliente o coordinadora en tiempo real.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen de cartera (5 indicadores)</div>
+          <div class="seq-desc">
+            <strong>Contratos activos:</strong> total de contratos vigentes según filtros aplicados.<br>
+            <strong>Cartera contratos:</strong> valor total anualizado de la cartera filtrada (MM$).<br>
+            <strong>Tipo Garantía:</strong> cuántos contratos son de garantía.<br>
+            <strong>% consumido prom.:</strong> avance temporal promedio — cuánto del contrato ya transcurrió.<br>
+            <strong>Urgentes &lt;90d:</strong> contratos que vencen en menos de 90 días.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Cartera completa de contratos activos</div>
+          <div class="seq-desc">Tabla principal con todos los contratos. Cada fila es un contrato. Se puede ordenar haciendo clic en cualquier encabezado. Los filtros de arriba se aplican a esta tabla en tiempo real.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> # · Cliente · Coordinadora · Tipo · Programa · Línea Negocio · % Margen · Margen MM$ · Relación · ¿Nuevo? · Inicio · Vence · MM$ Anual · % s/Total · % Ppto.Cont. · Duración · % Consumido · Días rest.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">4</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen por Línea de Negocio</div>
+          <div class="seq-desc">Agrupación de los contratos según la línea de negocio (Esterilización, Endoscopía, Dental, etc.). Muestra el total de contratos, clientes, cartera y ticket promedio por línea.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> Línea de Negocio · Contratos · Clientes · Comercial · Garantía · Cartera MM$ · % Cartera · Ticket Promedio MM$ · Duración Promedio · Vigencia Restante Prom.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">5</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Detalle de Contratos por Línea de Negocio</div>
+          <div class="seq-desc">Misma información que la tabla anterior, pero desglosada contrato a contrato, agrupados por línea con subtotales. Permite ver exactamente qué contratos componen cada línea.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">6</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Detalle de Contratos por Dueño de Cuenta</div>
+          <div class="seq-desc">Contratos agrupados por vendedor técnico / coordinadora, con subtotales por ejecutivo. Facilita la revisión individual de la cartera de cada responsable.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">7</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen por Dueño de Cuenta</div>
+          <div class="seq-desc">Aggregado por vendedor técnico con los mismos indicadores de la tabla de Línea de Negocio. Muestra el total gestionado, ticket promedio y antigüedad de cartera de cada ejecutivo.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> Dueño de Cuenta · Contratos · Clientes · Comercial · Garantía · Cartera MM$ · % Cartera · Ticket Promedio MM$ · Duración Promedio · Vigencia Restante Prom.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">8</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen por Programa CARE</div>
+          <div class="seq-desc">Cartera agrupada por programa CARE (Basic, Advanced, Profesional, Integral, Sin programa). Muestra el posicionamiento del portafolio en la escala de servicios.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> Programa · Contratos · Clientes · Comercial · Garantía · Cartera MM$ · % Cartera · Ticket Promedio MM$ · Duración Promedio · Vigencia Restante Prom.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">9</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Descripción de Programas CARE</div>
+          <div class="seq-desc">Tabla de referencia que describe qué servicios incluye cada nivel de programa (Basic Care, Advanced Care, Profesional Care, Integral Care). Útil para entender las diferencias entre niveles al clasificar o proponer contratos.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S5 ═══ -->
+<div class="section" id="s5">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">5</div>
+    <div class="acc-meta">
+      <div class="acc-name">Cumplimiento de Presupuesto · Contratos</div>
+      <div class="acc-desc">Seguimiento del presupuesto asignado a contratos (50% del presupuesto total del área). Muestra cobertura global, distribución por coordinadora y detalle por contrato.</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● KPIs + barras</span>
+        <span class="chip chip-tbl">▦ Tabla</span>
+        <span class="chip chip-fil">▾ Tipo · Estado · Búsqueda</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Strip global · Presupuesto 2026</div>
+          <div class="seq-desc">
+            <strong>Ppto. Área Total:</strong> presupuesto total del área de servicio técnico para el año.<br>
+            <strong>Ppto. Contratos (50%):</strong> porción asignada a contratos de mantención preventiva.<br>
+            <strong>Cartera Real (COM+GAR):</strong> valor actual de la cartera de contratos vigentes.<br>
+            <strong>Brecha Restante:</strong> diferencia entre la cartera real y el presupuesto de contratos.<br>
+            <strong>Barra de cobertura:</strong> indicador visual del % de presupuesto cubierto por la cartera actual.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Distribución por Coordinadora (tarjetas con semáforo)</div>
+          <div class="seq-desc">Una tarjeta por cada coordinadora mostrando su cartera real, el porcentaje que representa sobre el presupuesto de contratos y un semáforo de cumplimiento (rojo / amarillo / verde según el avance).</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-fil">FILTRO</div>
+        <div class="seq-content">
+          <div class="seq-name">Filtros de la tabla</div>
+          <div class="seq-desc">
+            <strong>Tipo:</strong> Todos / Comercial / Garantía.<br>
+            <strong>Estado:</strong> En Meta ✓ / Cerca (~10%) / Bajo Meta — filtra contratos según su cumplimiento individual.<br>
+            <strong>Búsqueda:</strong> por nombre de cliente.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">4</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Detalle por Contrato · Cumplimiento Presupuesto</div>
+          <div class="seq-desc">Cada fila es un contrato activo. Muestra si el valor del contrato está aportando adecuadamente al presupuesto según el tiempo transcurrido. Contratos marcados como "Bajo Meta" son candidatos a gestión de upgrade o renovación anticipada.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> # · Cliente · Coordinadora · Tipo · MM$ Anual · % s/ Ppto. Contratos · Ppto. Individual · % Consumido · Estado · Días Rest.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S6 ═══ -->
+<div class="section" id="s6">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">6</div>
+    <div class="acc-meta">
+      <div class="acc-name">Facturación a la Fecha · 2024–2026</div>
+      <div class="acc-desc">Análisis completo de la facturación real del área, incluyendo contratos y otras fuentes (correctiva, REAS, trazabilidad). Comparativo vs presupuesto, por cliente, coordinadora y tipo de cliente.</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● KPIs múltiples</span>
+        <span class="chip chip-graf">◈ Gráficos</span>
+        <span class="chip chip-fil">▾ Año · Estado · Búsqueda</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-fil">FILTRO</div>
+        <div class="seq-content">
+          <div class="seq-name">Segmentador de año</div>
+          <div class="seq-desc">Permite visualizar la facturación de <strong>Todos</strong> los años / solo <strong>2024</strong> / solo <strong>2025</strong> / solo <strong>2026</strong>. Afecta los KPIs, gráficos y tablas de toda la sección.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Strip global de facturación (6 indicadores + barra mix)</div>
+          <div class="seq-desc">
+            <strong>Facturación Total:</strong> suma total del período seleccionado (MM$).<br>
+            <strong>Año 2024 / 2025 / 2026:</strong> desglose por año.<br>
+            <strong>F. Contratos:</strong> porción que viene de contratos de mantención.<br>
+            <strong>Otras Facturaciones:</strong> correctiva, trazabilidad, REAS.<br>
+            <strong>Barra de distribución:</strong> proporción visual Contratos vs Otras Facturaciones.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Facturación vs Presupuesto (2 paneles comparativos)</div>
+          <div class="seq-desc">
+            <strong>Panel izquierdo — vs Ppto Total Área:</strong> facturado real vs presupuesto total, con % de cumplimiento y barra de avance vs meta a la fecha.<br>
+            <strong>Panel derecho — vs Ppto Contratos (50%):</strong> facturación de contratos vs el 50% del presupuesto asignado, con la misma estructura de barras.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">4</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Contratos · Mensual vs Ppto 2026 (barras)</div>
+          <div class="seq-desc">Barras de facturación real mensual de contratos vs línea del presupuesto mensual de contratos (50% del ppto anual). Permite ver en qué meses se cumplió la meta de contratos.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">5</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Otras Facturaciones · Mensual vs Ppto 2026 (barras)</div>
+          <div class="seq-desc">Mismo análisis para las otras fuentes de ingreso (correctiva, trazabilidad, REAS). Barras reales vs línea de meta mensual.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">6</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Evolución Facturación por Año (barras)</div>
+          <div class="seq-desc">Comparativo de la facturación total año a año (2024, 2025, 2026 proyectado). Permite ver la tendencia de crecimiento del área.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">7</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Composición Total: Contratos vs Correctiva (dona)</div>
+          <div class="seq-desc">Proporción de la facturación total entre ingresos por contratos y por facturación correctiva (incluyendo otras fuentes). Muestra la estructura del negocio.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">8</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Distribución por Coordinadora (tarjetas)</div>
+          <div class="seq-desc">Una tarjeta por cada coordinadora con su facturación total del período, composición Contratos/Correctiva y número de clientes facturados. Permite comparar el rendimiento individual.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">9</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Top 10 Clientes · Facturación Total (barras horizontales)</div>
+          <div class="seq-desc">Los 10 clientes con mayor facturación total acumulada en el período. Muestra quiénes concentran el ingreso del área.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">10</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Top 10 Clientes · Facturación Correctiva (barras horizontales)</div>
+          <div class="seq-desc">Los 10 clientes con mayor facturación correctiva. Clientes que aparecen aquí pero no tienen contrato son candidatos prioritarios para la venta de contratos preventivos.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">11</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Tendencia 2024–2026 · Cliente Individual (líneas)</div>
+          <div class="seq-desc">Selector de cliente individual para ver su evolución mensual durante los tres años. Incluye KPIs de facturación 2024, 2025, 2026 y variación porcentual 2025→2026.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">12</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Top 5 Clientes · Comparativo Anual (líneas)</div>
+          <div class="seq-desc">Los 5 clientes con mayor facturación total, mostrando su evolución mensual comparada entre años en un mismo gráfico. Permite ver cambios de patrón o temporalidad.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">13</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Distribución por Tipo de Cliente (3 gráficos: donas + barras)</div>
+          <div class="seq-desc">Comparativo Público vs Privado en tres dimensiones:<br>
+          — Cantidad de clientes (dona)<br>
+          — Facturación total (dona)<br>
+          — Composición Contratos vs Correctiva por sector (barras apiladas)</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">14</div>
+        <div class="seq-badge seq-tbl">ALERTA</div>
+        <div class="seq-content">
+          <div class="seq-name">⛔ Contrato Vigente · Sin Facturación 2026</div>
+          <div class="seq-desc">Clientes que tienen contrato vigente pero no registran ninguna facturación en el año en curso. Se excluyen automáticamente contratos iniciados hace menos de 60 días (hay un checkbox para incluirlos). Requiere seguimiento comercial urgente.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> # · Cliente · Tipo · Inicio · Fin · 2024 · 2025 · Riesgo</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">15</div>
+        <div class="seq-badge seq-tbl">ALERTA</div>
+        <div class="seq-content">
+          <div class="seq-name">📉 Caída Fuerte 2025 → 2026</div>
+          <div class="seq-desc">Clientes cuya facturación en 2026 (anualizada desde el real YTD) cae más de un 50% respecto a 2025. Indica riesgo de pérdida de cuenta o reducción significativa de alcance.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> # · Cliente · Tipo · 2025 · Proy 2026 · Var %</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">16</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Facturación por Año (barras agrupadas)</div>
+          <div class="seq-desc">Comparativo de la facturación total por año, incluyendo provisiones del mes en curso. Útil para ver la evolución del área con todos los ingresos considerados.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">17</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Facturación por Mes (barras apiladas)</div>
+          <div class="seq-desc">Evolución mensual de la facturación total con desglose por año (2024/2025/2026 apilados o agrupados). Incluye provisiones. Muestra estacionalidad y tendencia mensual.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S7 ═══ -->
+<div class="section" id="s7">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">7</div>
+    <div class="acc-meta">
+      <div class="acc-name">Panel Facturación · Real vs Presupuesto por Cliente</div>
+      <div class="acc-desc">Compara la facturación real acumulada a la fecha de cada cliente vs su presupuesto esperado de contratos. Permite detectar quiénes están bajo o sobre la meta individual.</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● KPIs</span>
+        <span class="chip chip-graf">◈ 2 gráficos</span>
+        <span class="chip chip-tbl">▦ Tabla</span>
+        <span class="chip chip-fil">▾ Tipo cliente · Contrato</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-fil">FILTRO</div>
+        <div class="seq-content">
+          <div class="seq-name">Tipo de cliente y estado de contrato</div>
+          <div class="seq-desc">
+            <strong>Tipo de cliente:</strong> Todos / Público / Privado — segmenta según el sector del cliente.<br>
+            <strong>Estado contrato:</strong> Todos / Con contrato / Sin contrato — permite analizar clientes con o sin contrato vigente por separado.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Strip resumen del panel (5 indicadores)</div>
+          <div class="seq-desc">
+            <strong>Clientes:</strong> total de clientes mostrados con los filtros actuales.<br>
+            <strong>Real a la fecha:</strong> facturación acumulada real de esos clientes en el año (MM$).<br>
+            <strong>Ppto. a la fecha:</strong> cuánto deberían haber facturado según su contrato hasta hoy (MM$).<br>
+            <strong>Cumplimiento:</strong> % de cumplimiento agregado (Real / Ppto.).<br>
+            <strong>Ppto. Anual:</strong> total del presupuesto anual de contratos para esos clientes.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Top 15 Clientes · Real vs Presupuesto (barras dobles)</div>
+          <div class="seq-desc">Los 15 clientes con mayor presupuesto de contratos. Para cada uno muestra en paralelo la barra del presupuesto acumulado esperado y la barra de la facturación real. Los que quedan cortos requieren atención.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">4</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Cumplimiento por Cliente · Distribución</div>
+          <div class="seq-desc">Histograma que muestra cuántos clientes caen en cada rango de cumplimiento (ej. 0–25%, 25–50%, 50–75%, 75–100%, +100%). Da una visión panorámica de qué tan alineado está el portafolio con las metas individuales.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">5</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Detalle Cumplimiento por Cliente</div>
+          <div class="seq-desc">Una fila por cliente. Compara la facturación real acumulada vs el presupuesto esperado a la fecha y el presupuesto anual total. Se puede ordenar por cualquier columna y buscar por nombre.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> # · Cliente · Coordinadora · Tipo · Contrato · Real a la fecha · Ppto a la fecha · Cumplim. · Ppto Anual · Programa</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S8 ═══ -->
+<div class="section" id="s8">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">8</div>
+    <div class="acc-meta">
+      <div class="acc-name">Base Instalada</div>
+      <div class="acc-desc">Catálogo del equipamiento médico presente en los clientes. Incluye marca, modelo, tipo de equipo, ubicación, potencial de servicio técnico y estado.</div>
+      <div class="acc-chips">
+        <span class="chip chip-tbl">▦ Tabla</span>
+        <span class="chip chip-fil">▾ Marca · Tipo · Potencial ST</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-fil">FILTRO</div>
+        <div class="seq-content">
+          <div class="seq-name">Filtros de búsqueda en la base instalada</div>
+          <div class="seq-desc">Permite filtrar el catálogo por <strong>marca</strong>, <strong>tipo de equipo</strong>, <strong>institución (cliente)</strong>, <strong>Potencial ST</strong> (Sí / No — indica si el equipo puede ser mantenido por TECSERVICE) y <strong>año de instalación</strong>.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen de la base instalada</div>
+          <div class="seq-desc">Total de equipos registrados, equipos con Potencial ST = Sí, marcas únicas presentes y clientes con equipamiento. Muestra el universo de oportunidades de servicio.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Catálogo de equipamiento por cliente</div>
+          <div class="seq-desc">Una fila por equipo instalado. Permite identificar qué equipos tiene cada cliente, si hay potencial de contrato de servicio técnico y el estado actual de cobertura.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> Cliente · Marca · Modelo · Tipo Equipo · Año instalación · Potencial ST · Contrato vigente</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S9 ═══ -->
+<div class="section" id="s9">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">9</div>
+    <div class="acc-meta">
+      <div class="acc-name">Satisfacción de Clientes</div>
+      <div class="acc-desc">Encuestas de satisfacción analizadas por calidad, tiempo de respuesta, NPS y resolución de problemas. Incluye cruce con la base instalada de los encuestados.</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● 5 KPIs</span>
+        <span class="chip chip-graf">◈ Gráficos</span>
+        <span class="chip chip-tbl">▦ Tabla</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Indicadores globales de satisfacción (5 tarjetas)</div>
+          <div class="seq-desc">
+            <strong>Total Encuestas:</strong> número de respuestas recibidas.<br>
+            <strong>Calidad Promedio:</strong> promedio de la pregunta de calidad del servicio (escala 0–7).<br>
+            <strong>Tiempo de Respuesta:</strong> promedio de satisfacción con el tiempo de atención (escala 0–7).<br>
+            <strong>Recomendación:</strong> promedio de probabilidad de recomendar TECSERVICE (escala 0–10).<br>
+            <strong>NPS:</strong> Net Promoter Score resultante (Promotores% − Detractores%).
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Evolución Trimestral (barras + línea)</div>
+          <div class="seq-desc">Muestra cómo han variado el número de encuestas y el nivel de satisfacción promedio en cada trimestre. Permite detectar si la satisfacción está mejorando o deteriorándose en el tiempo.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">¿El problema fue resuelto? (dona)</div>
+          <div class="seq-desc">Distribución de respuestas entre "Sí, totalmente", "Parcialmente" y "No, no fue resuelto". Indicador directo de efectividad operacional del servicio técnico.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">4</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Distribución NPS · Promotores / Pasivos / Detractores (barras)</div>
+          <div class="seq-desc">Desglosa el total de encuestados en las tres categorías NPS. Los Promotores (9–10) restan los Detractores (0–6) para calcular el NPS final. Los Pasivos (7–8) no afectan el indicador.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">5</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Cobertura en Base Instalada (3 indicadores)</div>
+          <div class="seq-desc">Cruza los encuestados con la base instalada para mostrar qué proporción del equipamiento representado por TECSERVICE pertenece a instituciones que respondieron la encuesta. Indica el alcance real de la medición.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">6</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Instituciones Encuestadas</div>
+          <div class="seq-desc">Una fila por institución. Muestra su sector, si tiene contrato vigente, cantidad de respuestas recibidas, equipamiento en la base instalada y puntajes individuales de calidad, tiempo y recomendación.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> # · Institución · Sector · Contrato · Resp. · BI (equipos) · Calidad · Tiempo · Recom.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">7</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Recomendación Promedio por Tramo de BI (barras)</div>
+          <div class="seq-desc">Agrupa las instituciones en tramos según la cantidad de equipos en la base instalada y muestra el promedio de recomendación de cada tramo. Permite ver si los clientes con más equipos tienen diferente satisfacción.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">8</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Composición BI · Tipo de Equipamiento (dona)</div>
+          <div class="seq-desc">Distribución de los equipos en la base instalada de los encuestados según tipo (esterilizadores, endoscopios, etc.). Muestra qué tecnologías están más presentes en los clientes que dieron su opinión.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">9</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Base Instalada vs Recomendación (dispersión, con filtro por tramo)</div>
+          <div class="seq-desc">Gráfico de puntos donde cada punto es una institución. Eje X = equipos en la BI (escala logarítmica), Eje Y = puntaje de recomendación. Color del punto: verde = Promotor (≥7) · amarillo = Pasivo (4–6) · rojo = Detractor (0–3). Al hacer clic en un punto aparece el detalle de la composición del equipamiento de esa institución. Filtros por tramo de BI: 1–10 / 11–50 / 51–100 / 101+.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">10</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Detractores</div>
+          <div class="seq-desc">Tabla con todas las instituciones que calificaron como Detractores (recomendación 0–6). Permite identificarlas individualmente para priorizar acciones de recuperación. Se puede ver su sector, si tienen contrato, equipamiento en la BI y los puntajes desglosados.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> # · Institución · Sector · Categoría · Contrato · Resp. · BI · Calidad · Tiempo · Recom.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">11</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Motivos de Insatisfacción · Categoría Detractor (barras + tabla)</div>
+          <div class="seq-desc">Muestra las razones que declararon los Detractores en sus respuestas, agrupadas por categoría de motivo. A la derecha del gráfico aparece el detalle por motivo específico. Útil para priorizar las mejoras operativas que mayor impacto tendrán en el NPS.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">12</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Análisis por Tipo de Institución (tarjetas)</div>
+          <div class="seq-desc">Una tarjeta por cada categoría de institución (Sector Público / Sector Privado / Personal). Muestra el promedio de calidad, tiempo de respuesta y recomendación para cada segmento, junto al número de respuestas. Permite ver si hay diferencias de satisfacción entre sectores.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">13</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Promedios por Institución · Dominio Email (con filtro Público / Privado)</div>
+          <div class="seq-desc">Una fila por dominio de correo electrónico (institución). Muestra cuántas respuestas provienen de ese dominio y los promedios de calidad, tiempo de respuesta y recomendación. Permite identificar instituciones específicas con satisfacción baja o alta.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> # · Dominio · Sector · N° Resp. · Calidad · Tiempo Resp. · Recom.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">14</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Comentarios de Mejora (con filtro Todos / Detractores)</div>
+          <div class="seq-desc">Muestra los comentarios escritos por los encuestados en la pregunta de sugerencias de mejora. Se pueden filtrar para ver solo los comentarios de Detractores (puntaje 0–6), que son los más críticos y accionables para mejorar el servicio.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S10 ═══ -->
+<div class="section" id="s10">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">10</div>
+    <div class="acc-meta">
+      <div class="acc-name">Visitas Ejecutivos</div>
+      <div class="acc-desc">Análisis de cobertura comercial de Eglys Ramírez y Cristián Pérez. Visitas, reuniones, clientes únicos visitados y comparativo entre períodos y ejecutivos.</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● KPIs por ejecutivo</span>
+        <span class="chip chip-graf">◈ Gráficos</span>
+        <span class="chip chip-tbl">▦ Tabla</span>
+        <span class="chip chip-fil">▾ Ejecutivo · Búsqueda</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen Eglys Ramírez (4 indicadores)</div>
+          <div class="seq-desc">
+            <strong>Total Visitas:</strong> suma histórica 2025–2026.<br>
+            <strong>2026 (Ene–May):</strong> visitas del año en curso.<br>
+            <strong>2025 (Ene–May):</strong> mismo período del año anterior para comparar.<br>
+            <strong>Clientes 2026:</strong> clientes únicos visitados en el año en curso.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen Cristián Pérez (4 indicadores)</div>
+          <div class="seq-desc">Misma estructura que el panel de Eglys: Total Visitas / 2026 Ene–May / 2025 Ene–May / Clientes 2026. Permite comparar directamente la actividad de ambos ejecutivos.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Visitas Mensuales 2026 por Ejecutivo y Cobertura % (barras + línea)</div>
+          <div class="seq-desc">Barras mensuales de visitas de cada ejecutivo, con una línea superpuesta que muestra el porcentaje de cobertura (visitas realizadas / clientes únicos del portafolio). Combina volumen y alcance en un solo gráfico.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">4</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Tipo de Actividad · Total Histórico (barras agrupadas)</div>
+          <div class="seq-desc">Compara el total de Visitas de Cobertura vs Reuniones por ejecutivo, a lo largo de todo el historial. Muestra si la actividad de cada ejecutivo está orientada a visitas de terreno o reuniones administrativas.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">5</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Total Visitas 2025 vs 2026 Ene–May (barras)</div>
+          <div class="seq-desc">Comparativo de las visitas acumuladas en enero–mayo de 2025 vs el mismo período de 2026, por ejecutivo. Permite evaluar si la productividad comercial está creciendo respecto al año anterior.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">6</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Visitas por Cliente · Buscador interactivo</div>
+          <div class="seq-desc">Campo de búsqueda para filtrar por nombre de cliente. Muestra el total de visitas, los clientes encontrados, y un gráfico de barras con los 10 más visitados que coincidan. Debajo aparece la evolución mensual 2026 del ejecutivo correspondiente.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">7</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Top 12 Clientes · Eglys Ramírez (barras horizontales)</div>
+          <div class="seq-desc">Los 12 clientes que Eglys ha visitado con mayor frecuencia en el historial 2025–2026. Muestra si la cobertura está concentrada en pocos clientes o bien distribuida.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">8</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Top 12 Clientes · Cristián Pérez (barras horizontales)</div>
+          <div class="seq-desc">Mismo análisis para Cristián Pérez. Permite comparar si ambos ejecutivos tienen clientes prioritarios distintos o hay traslapes.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">9</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Detalle Clientes Visitados 2025–2026</div>
+          <div class="seq-desc">Tabla completa de todos los clientes con visitas registradas. Filtrable por ejecutivo (Ambos / Solo Eglys / Solo Cristián). Permite exportar y analizar la cobertura de terreno completa.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> Cliente · Ejecutivo · Total visitas · Última visita · 2025 · 2026</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S11 ═══ -->
+<div class="section" id="s11">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">11</div>
+    <div class="acc-meta">
+      <div class="acc-name">Mapa de Clientes</div>
+      <div class="acc-desc">Visualización geográfica de los clientes con contrato. Muestra la distribución espacial de la cartera en el territorio nacional.</div>
+      <div class="acc-chips">
+        <span class="chip chip-graf">◈ Mapa interactivo</span>
+        <span class="chip chip-fil">▾ Tipo · Región</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-fil">FILTRO</div>
+        <div class="seq-content">
+          <div class="seq-name">Filtros del mapa</div>
+          <div class="seq-desc">Permite filtrar los puntos del mapa por <strong>tipo de contrato</strong> (Comercial / Garantía / Todos) y por <strong>coordinadora</strong>. Los puntos se colorean según el tipo o el programa CARE del contrato.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Mapa interactivo de clientes</div>
+          <div class="seq-desc">Cada punto en el mapa representa un cliente con contrato activo. Al hacer clic, muestra el nombre del cliente, coordinadora, tipo de contrato y MM$ anual. Permite identificar zonas de alta densidad y oportunidades geográficas.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S12 ═══ -->
+<div class="section" id="s12">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">12</div>
+    <div class="acc-meta">
+      <div class="acc-name">Matriz de Clientes · Base Instalada</div>
+      <div class="acc-desc">Cruce entre la base instalada y el estado contractual de cada cliente. Identifica equipos sin cobertura de contrato y el potencial de negocio por capitalizar.</div>
+      <div class="acc-chips">
+        <span class="chip chip-tbl">▦ Tabla</span>
+        <span class="chip chip-fil">▾ Marca · Tipo · Contrato</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen de oportunidades</div>
+          <div class="seq-desc">Equipos totales con Potencial ST, clientes sin contrato que tienen equipamiento TECSERVICE, y el valor estimado de MM$ anualizables si se contractualizara ese universo.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Matriz cliente × equipamiento × contrato</div>
+          <div class="seq-desc">Una fila por cliente–marca. Muestra si ese cliente tiene contrato vigente con TECSERVICE, cuántos equipos de esa marca tiene instalados y si representan una oportunidad abierta de venta de contrato.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S13 ═══ -->
+<div class="section" id="s13">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">13</div>
+    <div class="acc-meta">
+      <div class="acc-name">Casos Relevantes · Equipos Detenidos</div>
+      <div class="acc-desc">Seguimiento de situaciones críticas en terreno: casos comerciales abiertos y equipos fuera de operación. Datos alimentados directamente desde la hoja "Casos Relevantes" del Excel.</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● 5 KPIs</span>
+        <span class="chip chip-tbl">▦ 2 tablas</span>
+        <span class="chip chip-fil">▾ Coordinador · Responsable · Garantía</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen global (5 indicadores)</div>
+          <div class="seq-desc">
+            <strong>Casos abiertos:</strong> total de situaciones documentadas en la tabla de Casos Relevantes.<br>
+            <strong>Equipos detenidos:</strong> total de equipos fuera de operación registrados en la tabla inferior.<br>
+            <strong>Con Garantía vigente:</strong> equipos detenidos que tienen garantía activa — el fabricante o proveedor debe hacerse cargo.<br>
+            <strong>Sin garantía:</strong> equipos detenidos sin cobertura de garantía — implica gestión interna o presupuesto correctivo.<br>
+            <strong>Con Contrato:</strong> equipos detenidos que pertenecen a un cliente con contrato de mantención vigente.
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-fil">FILTRO</div>
+        <div class="seq-content">
+          <div class="seq-name">Búsqueda global + filtros de tabla</div>
+          <div class="seq-desc">El campo de búsqueda filtra simultáneamente ambas tablas por cliente, problema, equipo o comentario. La tabla de Casos también tiene selectores de <strong>Coordinador</strong> y <strong>Responsable</strong>. La tabla de Equipos Detenidos tiene filtro por <strong>Estado Garantía</strong> (Todos / Con Garantía / Sin Garantía).</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Casos Relevantes</div>
+          <div class="seq-desc">Tabla de seguimiento de situaciones comerciales críticas: clientes con problemas de atención, conflictos de cobertura, reclamos abiertos, etc. Cada fila es un caso activo con su descripción del problema, el responsable asignado y el enlace a Salesforce si existe.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> Coordinador · Cliente · Problema · Responsable · Comentario · Salesforce (N° caso)</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">4</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Equipos Detenidos</div>
+          <div class="seq-desc">Tabla de equipos que están actualmente fuera de operación en terreno. Indica si el equipo tiene garantía vigente (responsabilidad del proveedor) o no (requiere intervención de TECSERVICE o gestión de repuesto). Vincula cada equipo con su contrato de mantención si está asociado a uno, mostrando la facturación esperada y real del contrato.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> Modelo · Nombre Activo · N° Serie · Marca · Estado · Coordinadora · Comentario · N° Contrato · Estado Garantía · Cliente · Neta Mes · Fact. Anual Esp. · Fact. a la Fecha · Inicio · Término</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S14 ═══ -->
+<div class="section" id="s14">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">14</div>
+    <div class="acc-meta">
+      <div class="acc-name">Facturación Bajo Contrato</div>
+      <div class="acc-desc">Alerta de gestión: clientes cuya facturación real acumulada está por debajo de lo esperado según sus contratos. Muestra el calendario de mantenciones y la brecha por cliente.</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● Resumen</span>
+        <span class="chip chip-tbl">▦ Tabla</span>
+        <span class="chip chip-fil">▾ Coordinadora · Búsqueda</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Badge resumen global</div>
+          <div class="seq-desc">Muestra cuántos contratos están bajo lo esperado y el total de la brecha acumulada en MM$. Señala la magnitud del problema de facturación pendiente.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-fil">FILTRO</div>
+        <div class="seq-content">
+          <div class="seq-name">Por coordinadora y búsqueda</div>
+          <div class="seq-desc">Botones de filtro por coordinadora para ver solo los contratos de un ejecutivo específico. Campo de búsqueda por nombre de cliente.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Contratos con facturación bajo contrato</div>
+          <div class="seq-desc">Una fila por contrato. Muestra un calendario visual de los meses del año (Ene–Dic) indicando en cuáles hay mantención esperada según el contrato. Luego compara el total esperado acumulado a la fecha vs la facturación real del cliente.</div>
+          <div class="seq-cols"><strong>Columnas:</strong> Coord. · Cliente · N° Contrato · Inicio · Término · Ene–Dic (calendario) · N° Mant. esperadas · Cuota UF · Neta Mes · Esperado a la fecha · Real a la fecha · Diferencia</div>
+        </div>
+      </div>
+    </div>
+    <div class="note"><span class="note-icon">⚠</span>Un cliente aparece en esta vista si el total de su facturación real YTD (sumando todos sus contratos) está por debajo de lo esperado. La facturación se compara a nivel cliente, no contrato a contrato.</div>
+  </div>
+</div>
+
+<!-- ═══ S15 ═══ -->
+<div class="section" id="s15">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">15</div>
+    <div class="acc-meta">
+      <div class="acc-name">EERR y Análisis de Ratios</div>
+      <div class="acc-desc">Estado de Resultado del Servicio Técnico S&amp;S. Análisis de costos sobre ingresos con comparativo mensual y visualización de ratios clave.</div>
+      <div class="acc-chips">
+        <span class="chip chip-tbl">▦ EERR + Ratios</span>
+        <span class="chip chip-graf">◈ Gráfico evolución</span>
+        <span class="chip chip-fil">▾ Mes · Ingreso · Costo</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Estado de Resultado mensual (con segmentador de mes)</div>
+          <div class="seq-desc">Tabla del EERR del área de Servicio Técnico S&amp;S. Muestra ingresos, costos y márgenes estructurados por línea contable. El segmentador de mes permite ver el acumulado hasta el mes seleccionado.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-fil">FILTRO</div>
+        <div class="seq-content">
+          <div class="seq-name">Selector de Ingreso base y Costo a comparar</div>
+          <div class="seq-desc">Permite elegir qué línea de ingreso usar como denominador y qué línea de costo usar como numerador para calcular el ratio. Esto da flexibilidad para analizar distintas combinaciones de eficiencia (ej. costo RRHH / ingreso total vs costo RRHH / ingreso contratos).</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Análisis de Ratios · Costo / Ingreso</div>
+          <div class="seq-desc">Tabla de ratios mes a mes calculados con la combinación seleccionada. Muestra el porcentaje que representa cada costo sobre el ingreso base elegido, permitiendo identificar meses con desviaciones.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">4</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Evolución de ratios mensual (líneas)</div>
+          <div class="seq-desc">Gráfico de líneas que muestra cómo han variado los ratios seleccionados a lo largo de los meses del año. Permite ver tendencias, outliers y la estabilidad de los costos relativos al ingreso.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ S16 ═══ -->
+<div class="section" id="s16">
+  <div class="acc-head" onclick="toggle(this)">
+    <div class="section-num">16</div>
+    <div class="acc-meta">
+      <div class="acc-name">Desglose de Ingresos</div>
+      <div class="acc-desc">Composición detallada de la facturación del Servicio Técnico S&amp;S. Desglosa los ingresos entre contratos (por línea de negocio) y otras fuentes (REAS, trazabilidad, reparaciones).</div>
+      <div class="acc-chips">
+        <span class="chip chip-kpi">● 3 KPIs</span>
+        <span class="chip chip-graf">◈ Gráfico</span>
+        <span class="chip chip-tbl">▦ Tabla</span>
+      </div>
+    </div>
+    <span class="acc-arrow">›</span>
+  </div>
+  <div class="acc-body">
+    <div class="seq-list">
+      <div class="seq-item">
+        <div class="seq-idx">1</div>
+        <div class="seq-badge seq-kpi">KPI</div>
+        <div class="seq-content">
+          <div class="seq-name">Resumen del período (3 indicadores)</div>
+          <div class="seq-desc">
+            <strong>Facturación Total:</strong> suma de todos los ingresos del área en el período (MM$).<br>
+            <strong>Ingreso por Contratos:</strong> porción proveniente de contratos de mantención preventiva (MM$).<br>
+            <strong>Otros Ingresos:</strong> todo lo que no es contrato preventivo — correctiva, REAS, trazabilidad (MM$).
+          </div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">2</div>
+        <div class="seq-badge seq-graf">GRÁFICO</div>
+        <div class="seq-content">
+          <div class="seq-name">Composición Mensual de la Facturación (barras apiladas)</div>
+          <div class="seq-desc">Barras apiladas por mes que muestran la composición del ingreso total entre Contratos (Esterilización / Endoscopía / Dental) y Otros Ingresos (Trazabilidad / REAS / Reparaciones). Permite ver cómo varía la mezcla de ingreso mes a mes.</div>
+        </div>
+      </div>
+      <div class="seq-item">
+        <div class="seq-idx">3</div>
+        <div class="seq-badge seq-tbl">TABLA</div>
+        <div class="seq-content">
+          <div class="seq-name">Detalle · Ingreso por Contratos y Otros Ingresos</div>
+          <div class="seq-desc">Tabla mensual con cada componente del ingreso desglosado por categoría. El total de cada mes calza exactamente con la facturación real del panel principal. Los contratos se distribuyen entre líneas según la composición de la cartera activa de cada mes.</div>
+          <div class="seq-cols"><strong>Filas:</strong> Contratos Esterilización · Contratos Endoscopía · Contratos Dental · Trazabilidad (ICTGroup) · REAS · Reparación Esterilización · Reparación Endoscopía · Otros · <strong>Total</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+
+<script>
+function toggleTheme(){
+  const r=document.documentElement;
+  const cur=r.getAttribute('data-theme');
+  r.setAttribute('data-theme',cur==='dark'?'light':'dark');
+}
+function toggle(head){
+  const sec=head.closest('.section');
+  sec.classList.toggle('open');
+}
+// Highlight nav on scroll
+const sections=document.querySelectorAll('.section');
+const navLinks=document.querySelectorAll('.nav-link');
+function onScroll(){
+  let found=null;
+  sections.forEach(s=>{
+    const r=s.getBoundingClientRect();
+    if(r.top<=80) found=s.id;
+  });
+  navLinks.forEach(a=>{
+    a.classList.toggle('active',a.getAttribute('href')==='#'+found);
+  });
+}
+window.addEventListener('scroll',onScroll,{passive:true});
+// Open section when nav link clicked
+navLinks.forEach(a=>{
+  a.addEventListener('click',e=>{
+    const id=a.getAttribute('href').slice(1);
+    const sec=document.getElementById(id);
+    if(sec&&!sec.classList.contains('open')){
+      sec.classList.add('open');
+    }
+  });
+});
+</script>
+</body>
+</html>

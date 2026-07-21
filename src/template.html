@@ -28,16 +28,16 @@
 body{font-family:'Roboto',sans-serif;background:#E8EBF5;color:var(--txt);min-height:100vh;font-size:14px}
 
 /* ── TOPBAR ── */
-.topbar{background:var(--az3);display:flex;align-items:center;flex-wrap:wrap;
-  justify-content:space-between;padding:.5rem 1.4rem;row-gap:.4rem;
-  position:sticky;top:0;z-index:300;
+.topbar{position:sticky;background:var(--az3);display:grid;grid-template-columns:auto 1fr auto;
+  align-items:center;padding:.5rem 1.4rem;gap:.5rem;
+  top:0;z-index:300;
   box-shadow:0 2px 16px rgba(0,0,0,.22)}
 .tl{display:flex;align-items:center;gap:.6rem}
 .logo{background:var(--teal);color:var(--az3);font-family:'Roboto Condensed',sans-serif;
   font-weight:900;font-size:.85rem;padding:.18rem .55rem;border-radius:3px;letter-spacing:.05em}
 .tname{font-family:'Roboto Condensed',sans-serif;font-weight:700;font-size:.95rem;
   color:#fff;letter-spacing:.04em;text-transform:uppercase}
-.tnav{display:flex;flex-wrap:wrap;gap:.3rem;flex:1 1 auto;justify-content:center;min-width:0}
+.tnav{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;justify-content:center}
 .nb{background:transparent;border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.68);
   font-family:'Roboto',sans-serif;font-size:.64rem;font-weight:700;padding:.2rem .55rem;
   border-radius:20px;cursor:pointer;transition:all .15s;text-transform:uppercase;letter-spacing:.03em;
@@ -334,9 +334,9 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
 .lg-btn:disabled{opacity:.55;cursor:not-allowed}
 
 @media(max-width:767px){
-  .topbar{flex-wrap:wrap;padding:.45rem .75rem;gap:.25rem;position:sticky;top:0}
-  .tl{flex:1;gap:.5rem}
-  .tright{flex-shrink:0}
+  .topbar{grid-template-columns:auto 1fr;grid-template-rows:auto auto;padding:.45rem .75rem;gap:.25rem;position:sticky;top:0}
+  .tl{gap:.5rem}
+  .tright{justify-self:end}
   .tname{font-size:.8rem}
   .logo{font-size:.78rem;padding:.15rem .45rem}
   .tnav{order:9;width:calc(100% + 1.5rem);margin-left:-.75rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;display:flex;flex-wrap:nowrap;padding:.25rem .75rem .35rem;gap:.25rem}
@@ -1352,18 +1352,6 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
     </div>
   </div>
 
-  <!-- Resumen estadístico por tipo de programa CARE -->
-  <div class="card" style="margin-top:.75rem" id="vg-resumen-prog-card">
-    <div class="ch"><span class="ct">Programas CARE · Resumen por Tipo</span>
-      <span class="ct-sub" style="margin-left:.6rem;font-weight:400;color:var(--mut)">Clientes, facturación y márgenes por programa · cartera activa</span>
-    </div>
-    <div class="cb" style="overflow-x:auto;padding:.5rem 0">
-      <table class="tbl" style="font-size:.63rem;width:100%;min-width:780px">
-        <thead id="tb-resumen-prog-head"></thead>
-        <tbody id="tb-resumen-prog"></tbody>
-      </table>
-    </div>
-  </div>
 </div>
 
 </div><!-- /wrap -->
@@ -2218,11 +2206,11 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
         </div>
         <div class="ppto-kpi" style="background:rgba(255,255,255,.08)">
           <div class="ppto-kv" style="color:#fff" id="vis-eg-26">—</div>
-          <div class="ppto-kl" style="color:#E2D1F3">2026 (Ene-May)</div>
+          <div class="ppto-kl" style="color:#E2D1F3" id="vis-eg-26-lbl">2026</div>
         </div>
         <div class="ppto-kpi" style="background:rgba(255,255,255,.08)">
           <div class="ppto-kv" style="color:#A8DADC" id="vis-eg-25">—</div>
-          <div class="ppto-kl" style="color:#E2D1F3">2025 (Ene-May)</div>
+          <div class="ppto-kl" style="color:#E2D1F3" id="vis-eg-25-lbl">2025</div>
         </div>
         <div class="ppto-kpi" style="background:rgba(255,255,255,.08)">
           <div class="ppto-kv" style="color:#28D2C3" id="vis-eg-cli">—</div>
@@ -2243,11 +2231,11 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
         </div>
         <div class="ppto-kpi" style="background:rgba(255,255,255,.08)">
           <div class="ppto-kv" style="color:#fff" id="vis-cr-26">—</div>
-          <div class="ppto-kl" style="color:#A8DADC">2026 (Ene-May)</div>
+          <div class="ppto-kl" style="color:#A8DADC" id="vis-cr-26-lbl">2026</div>
         </div>
         <div class="ppto-kpi" style="background:rgba(255,255,255,.08)">
           <div class="ppto-kv" style="color:#A8DADC" id="vis-cr-25">—</div>
-          <div class="ppto-kl" style="color:#A8DADC">2025 (Ene-May)</div>
+          <div class="ppto-kl" style="color:#A8DADC" id="vis-cr-25-lbl">2025</div>
         </div>
         <div class="ppto-kpi" style="background:rgba(255,255,255,.08)">
           <div class="ppto-kv" style="color:#28D2C3" id="vis-cr-cli">—</div>
@@ -2277,7 +2265,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
       </div>
     </div>
     <div class="card">
-      <div class="ch"><span class="ct">Total Visitas 2025 vs 2026 (Ene-May)</span></div>
+      <div class="ch"><span class="ct" id="vis-anual-tit">Total Visitas 2025 vs 2026</span></div>
       <div class="cb"><canvas id="cVisAnual" height="240"></canvas></div>
       <div style="padding:.55rem .9rem;background:var(--gy);border-top:1px solid var(--brd);font-size:.6rem;color:var(--mut);text-align:center">
         Comparativo enero-mayo para evaluar productividad
@@ -2321,7 +2309,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
     </div>
     <div style="padding:.6rem 1rem .5rem;border-top:2px solid var(--brd)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
-        <span style="font-size:.68rem;font-weight:700;color:var(--az1)">📅 Visitas Mensuales 2026 · Ene–May</span>
+        <span style="font-size:.68rem;font-weight:700;color:var(--az1)" id="vis-cli-mes-lbl">📅 Visitas Mensuales 2026</span>
         <span id="vis-cli-mes-title" style="font-size:.6rem;color:var(--mut)">Ambos ejecutivos</span>
       </div>
       <canvas id="cVisCliMensual" height="110"></canvas>

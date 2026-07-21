@@ -14,6 +14,12 @@ function initVisitas(){
   // Ejecutivos derivados dinámicamente de los datos
   const _ejes=Object.keys(v.resumen||{});
   const _ejeA=_ejes[0]||'';const _ejeB=_ejes[1]||'';
+  const _rngLbl='Ene-'+MES_CORTE_NOMBRE;
+  ['vis-eg-26-lbl','vis-cr-26-lbl'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=ANO_ACTUAL+' ('+_rngLbl+')';});
+  ['vis-eg-25-lbl','vis-cr-25-lbl'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=(ANO_ACTUAL-1)+' ('+_rngLbl+')';});
+  const _tit=document.getElementById('vis-anual-tit');if(_tit)_tit.textContent='Total Visitas '+(ANO_ACTUAL-1)+' vs '+ANO_ACTUAL+' ('+_rngLbl+')';
+  const _climes=document.getElementById('vis-cli-mes-lbl');if(_climes)_climes.textContent='📅 Visitas Mensuales '+ANO_ACTUAL+' · '+_rngLbl;
+
   const re=v.resumen[_ejeA]||{};
   document.getElementById('vis-eg-tot').textContent=re.total||0;
   document.getElementById('vis-eg-26').textContent=re.tot_2026_ytd||0;
