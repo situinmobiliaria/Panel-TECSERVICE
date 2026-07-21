@@ -14,7 +14,7 @@ const ALLOWED=new Set([
   'marcelo.ruminot@tecservice.cl','alexis.flores@gemco.cl',
   'cristian.valenzuela@aspencapital.cl','ignacio.cargioli@aspencapital.cl',
   'cristobal.munoz@aspencapital.cl','rafael.vergara@gemco.cl',
-  'rafael.vergara@aspencapital.cl'
+  'rafael.vergara@aspencapital.cl','cristianvalenzuelaguerra@gmail.com'
 ]);
 let _otp=null,_otpEmail=null,_otpExpiry=null,_otpTimer=null;
 
