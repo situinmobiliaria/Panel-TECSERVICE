@@ -789,17 +789,18 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
             <th onclick="sortT('tb-tc-com',0,this)">#</th>
             <th onclick="sortT('tb-tc-com',1,this)">Cliente<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-tc-com',this.value,1)" onclick="event.stopPropagation()"></th>
             <th onclick="sortT('tb-tc-com',2,this)">Coordinadora<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-tc-com',this.value,2)" onclick="event.stopPropagation()"></th>
-            <th onclick="sortT('tb-tc-com',3,this)">Inicio</th>
-            <th onclick="sortT('tb-tc-com',4,this)">Vence</th>
-            <th onclick="sortT('tb-tc-com',5,this)">MM$ Anual</th>
-            <th onclick="sortT('tb-tc-com',6,this)">% s/Total</th>
-            <th onclick="sortT('tb-tc-com',7,this)">% Consumido</th>
-            <th onclick="sortT('tb-tc-com',8,this)">Días rest.</th>
+            <th onclick="sortT('tb-tc-com',3,this)">Vendedor Téc.</th>
+            <th onclick="sortT('tb-tc-com',4,this)">Inicio</th>
+            <th onclick="sortT('tb-tc-com',5,this)">Vence</th>
+            <th onclick="sortT('tb-tc-com',6,this)">MM$ Anual</th>
+            <th onclick="sortT('tb-tc-com',7,this)">% s/Total</th>
+            <th onclick="sortT('tb-tc-com',8,this)">% Consumido</th>
+            <th onclick="sortT('tb-tc-com',9,this)">Días rest.</th>
             <th>Programa</th>
             <th>🆕</th>
           </tr></thead>
           <tbody id="tb-tc-com"></tbody>
-<tfoot><tr id="tfoot-tc-com"><td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-tc-com"><td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
         </table>
       </div>
       <div style="padding:.55rem 1rem;background:var(--gy);border-top:1px solid var(--brd);
@@ -818,17 +819,18 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
             <th onclick="sortT('tb-tc-gar',0,this)">#</th>
             <th onclick="sortT('tb-tc-gar',1,this)">Cliente<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-tc-gar',this.value,1)" onclick="event.stopPropagation()"></th>
             <th onclick="sortT('tb-tc-gar',2,this)">Coordinadora<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-tc-gar',this.value,2)" onclick="event.stopPropagation()"></th>
-            <th onclick="sortT('tb-tc-gar',3,this)">Inicio</th>
-            <th onclick="sortT('tb-tc-gar',4,this)">Vence</th>
-            <th onclick="sortT('tb-tc-gar',5,this)">Valor Anual</th>
-            <th onclick="sortT('tb-tc-gar',6,this)">% Cartera Gar.</th>
-            <th onclick="sortT('tb-tc-gar',7,this)">% Consumido</th>
+            <th onclick="sortT('tb-tc-gar',3,this)">Vendedor Téc.</th>
+            <th onclick="sortT('tb-tc-gar',4,this)">Inicio</th>
+            <th onclick="sortT('tb-tc-gar',5,this)">Vence</th>
+            <th onclick="sortT('tb-tc-gar',6,this)">Valor Anual</th>
+            <th onclick="sortT('tb-tc-gar',7,this)">% Cartera Gar.</th>
+            <th onclick="sortT('tb-tc-gar',8,this)">% Consumido</th>
             <th>Estado</th>
             <th>Programa</th>
             <th>🆕</th>
           </tr></thead>
           <tbody id="tb-tc-gar"></tbody>
-<tfoot><tr id="tfoot-tc-gar"><td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-tc-gar"><td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
         </table>
       </div>
       <div style="padding:.55rem 1rem;background:var(--gy);border-top:1px solid var(--brd);
@@ -1008,6 +1010,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="ncSort('n')">#</th>
           <th onclick="ncSort('cliente')">Cliente</th>
           <th onclick="ncSort('coord')">Coordinadora</th>
+          <th>Vendedor Téc.</th>
           <th onclick="ncSort('tipo')">Tipo</th>
           <th>Programa</th>
           <th onclick="ncSort('inicio')">Inicio</th>
@@ -1018,7 +1021,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="ncSort('tpo_activo')">Antigüedad</th>
         </tr></thead>
         <tbody id="tb-nc"></tbody>
-<tfoot><tr id="tfoot-nc"><td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-nc"><td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
       </table>
     </div>
     <div style="padding:.55rem .95rem;background:var(--gy);border-top:1px solid var(--brd);
@@ -1091,12 +1094,13 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
         <table class="tbl">
           <thead><tr>
             <th onclick="sortT('tb-hz',0,this)">#</th><th onclick="sortT('tb-hz',1,this)">Cliente<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-hz',this.value,1)" onclick="event.stopPropagation()"></th><th onclick="sortT('tb-hz',2,this)" style="font-size:.6rem">Estado Relación</th><th onclick="sortT('tb-hz',3,this)">Coordinadora<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-hz',this.value,2)" onclick="event.stopPropagation()"></th>
-            <th onclick="sortT('tb-hz',3,this)">Tipo</th><th onclick="sortT('tb-hz',4,this)">Programa</th><th onclick="sortT('tb-hz',5,this)">Vence</th>
+            <th>Vendedor Téc.</th>
+            <th onclick="sortT('tb-hz',4,this)">Tipo</th><th onclick="sortT('tb-hz',4,this)">Programa</th><th onclick="sortT('tb-hz',5,this)">Vence</th>
             <th onclick="sortT('tb-hz',6,this)">Días ↕</th>
             <th onclick="sortT('tb-hz',7,this)">MM$ Anual</th><th onclick="sortT('tb-hz',8,this)">% s/Total</th><th onclick="sortT('tb-hz',9,this)">% Consumido</th>
           </tr></thead>
           <tbody id="tb-hz"></tbody>
-<tfoot><tr id="tfoot-hz"><td class="flab" colspan="10" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-hz"><td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
         </table>
       </div>
       <div style="padding:.55rem .95rem;background:var(--gy);border-top:1px solid var(--brd);
@@ -1224,6 +1228,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="sortT('tb-vg',0,this)">#</th>
           <th onclick="vgSortCol('cliente')">Cliente ↕<br><input class="col-filter" placeholder="filtrar..." oninput="vgCliFilter=this.value;renderVG()" onclick="event.stopPropagation()"></th>
           <th onclick="vgSortCol('coord')">Coordinadora ↕</th>
+          <th onclick="vgSortCol('vendedor')">Vendedor Téc. ↕</th>
           <th>Tipo</th>
           <th>Programa</th>
           <th onclick="vgSortCol('linea_negocio')">Línea Negocio ↕</th>
@@ -1241,7 +1246,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="vgSortCol('dias_vence')">Días rest. ↕</th>
         </tr></thead>
         <tbody id="tb-vg"></tbody>
-<tfoot><tr id="tfoot-vg"><td class="flab" colspan="18" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-vg"><td class="flab" colspan="19" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
       </table>
     </div>
     <div style="padding:.55rem .95rem;background:var(--gy);border-top:1px solid var(--brd);

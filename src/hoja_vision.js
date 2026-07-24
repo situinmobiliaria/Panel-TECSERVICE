@@ -65,6 +65,7 @@ function renderVG(){
       <td class="num">${nLabel}</td>
       <td style="font-size:.67rem;line-height:1.3">${shortN(x.cliente)}</td>
       <td style="font-size:.62rem;color:var(--mut)">${shortC(x.coord)}</td>
+      <td style="font-size:.62rem;color:var(--mut)">${x.vendedor||'—'}</td>
       <td>${esPerdidoFac?'<span style="font-size:.6rem;color:var(--mut)">Expirado</span>':tipoBadge(x.tipo)}</td>
       <td style="text-align:center">${esPerdidoFac?'—':_progBadge(x.programa||'')}</td>
       <td style="text-align:center">${_lineaBadge(x.linea_negocio)}</td>

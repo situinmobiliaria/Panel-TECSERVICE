@@ -31,6 +31,7 @@ function renderNC(){
     <td class="num">${r.n}</td>
     <td style="font-size:.67rem">${shortN(r.cliente)}</td>
     <td style="font-size:.62rem;color:var(--mut)">${shortC(r.coord)}</td>
+    <td style="font-size:.62rem;color:var(--mut)">${r.vendedor||'—'}</td>
     <td>${tipoBadge(r.tipo)}</td>
     <td style="text-align:center">${_progBadge(r.programa||'')}</td>
     <td style="font-size:.67rem">${r.inicio_fmt}</td>
@@ -39,7 +40,7 @@ function renderNC(){
     <td class="num" style="color:var(--mut)">${pctOf(r.val,totalVal)}</td>
     <td>${urgP(r.dias_vence)}</td>
     <td><span class="pill pgr">${r.dias_inicio_cli<0?'Futuro':r.dias_inicio_cli+'d'}</span></td>
-  </tr>`).join(''):`<tr><td colspan="11" style="text-align:center;padding:2rem;color:var(--mut);font-size:.75rem">Sin resultados para este período/filtro</td></tr>`;
+  </tr>`).join(''):`<tr><td colspan="12" style="text-align:center;padding:2rem;color:var(--mut);font-size:.75rem">Sin resultados para este período/filtro</td></tr>`;
 
   document.getElementById('nc-ftl').textContent=`${d.length} contratos · ${clientes} clientes nuevos · ${garN} tipo Garantía`;
   document.getElementById('nc-ftr').textContent=totalVal>0?'+ '+mm(totalVal):'Sin valor económico';

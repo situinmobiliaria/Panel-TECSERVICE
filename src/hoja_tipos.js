@@ -36,9 +36,9 @@ function initTipos(){
   set('tc-foot-com-val',mm(totalComVal)+' cartera anual');
   set('tc-foot-gar-txt',gar.length+' contratos tipo Garantía · '+garCli+' clientes únicos');
   const tfc=document.getElementById('tfoot-tc-com');
-  if(tfc)tfc.innerHTML='<td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+com.length+' contratos Comerciales · '+comCli+' clientes únicos · '+mm(totalComVal)+' cartera anual</td>';
+  if(tfc)tfc.innerHTML='<td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+com.length+' contratos Comerciales · '+comCli+' clientes únicos · '+mm(totalComVal)+' cartera anual</td>';
   const tfg=document.getElementById('tfoot-tc-gar');
-  if(tfg)tfg.innerHTML='<td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+gar.length+' contratos Garantía · '+garCli+' clientes únicos · '+mm(totalGarVal)+' cartera valorizada</td>';
+  if(tfg)tfg.innerHTML='<td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+gar.length+' contratos Garantía · '+garCli+' clientes únicos · '+mm(totalGarVal)+' cartera valorizada</td>';
   const fgv=document.getElementById('tc-foot-gar-val');
   if(fgv)fgv.textContent=mm(totalGarVal)+' cartera garantías';
 
@@ -46,6 +46,7 @@ function initTipos(){
     <td class="num">${d.n}</td>
     <td style="font-size:.67rem">${shortN(d.cliente)}</td>
     <td style="font-size:.63rem;color:var(--mut)">${shortC(d.coord)}</td>
+    <td style="font-size:.62rem;color:var(--mut)">${d.vendedor||'—'}</td>
     <td style="font-size:.67rem">${d.inicio_fmt}</td><td style="font-size:.67rem">${d.fin_fmt}</td>
     <td class="num" style="color:${d.val>0?'var(--az2)':'var(--mut)'}">${d.val>0?mm(d.val):'—'}</td>
     <td class="num" style="color:var(--mut)">${pctOf(d.val,totalComVal)}</td>
@@ -59,6 +60,7 @@ function initTipos(){
     <td class="num">${d.n}</td>
     <td style="font-size:.67rem">${shortN(d.cliente)}</td>
     <td style="font-size:.63rem;color:var(--mut)">${shortC(d.coord)}</td>
+    <td style="font-size:.62rem;color:var(--mut)">${d.vendedor||'—'}</td>
     <td style="font-size:.67rem">${d.inicio_fmt}</td><td style="font-size:.67rem">${d.fin_fmt}</td>
     <td class="num" style="color:${d.val>0?'var(--az2)':'var(--mut)'}">${d.val>0?mm(d.val):'—'}</td>
     <td class="num" style="color:var(--mut)">${totalGarVal>0?pctOf(d.val,totalGarVal):'—'}</td>

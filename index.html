@@ -789,17 +789,18 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
             <th onclick="sortT('tb-tc-com',0,this)">#</th>
             <th onclick="sortT('tb-tc-com',1,this)">Cliente<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-tc-com',this.value,1)" onclick="event.stopPropagation()"></th>
             <th onclick="sortT('tb-tc-com',2,this)">Coordinadora<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-tc-com',this.value,2)" onclick="event.stopPropagation()"></th>
-            <th onclick="sortT('tb-tc-com',3,this)">Inicio</th>
-            <th onclick="sortT('tb-tc-com',4,this)">Vence</th>
-            <th onclick="sortT('tb-tc-com',5,this)">MM$ Anual</th>
-            <th onclick="sortT('tb-tc-com',6,this)">% s/Total</th>
-            <th onclick="sortT('tb-tc-com',7,this)">% Consumido</th>
-            <th onclick="sortT('tb-tc-com',8,this)">Días rest.</th>
+            <th onclick="sortT('tb-tc-com',3,this)">Vendedor Téc.</th>
+            <th onclick="sortT('tb-tc-com',4,this)">Inicio</th>
+            <th onclick="sortT('tb-tc-com',5,this)">Vence</th>
+            <th onclick="sortT('tb-tc-com',6,this)">MM$ Anual</th>
+            <th onclick="sortT('tb-tc-com',7,this)">% s/Total</th>
+            <th onclick="sortT('tb-tc-com',8,this)">% Consumido</th>
+            <th onclick="sortT('tb-tc-com',9,this)">Días rest.</th>
             <th>Programa</th>
             <th>🆕</th>
           </tr></thead>
           <tbody id="tb-tc-com"></tbody>
-<tfoot><tr id="tfoot-tc-com"><td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-tc-com"><td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
         </table>
       </div>
       <div style="padding:.55rem 1rem;background:var(--gy);border-top:1px solid var(--brd);
@@ -818,17 +819,18 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
             <th onclick="sortT('tb-tc-gar',0,this)">#</th>
             <th onclick="sortT('tb-tc-gar',1,this)">Cliente<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-tc-gar',this.value,1)" onclick="event.stopPropagation()"></th>
             <th onclick="sortT('tb-tc-gar',2,this)">Coordinadora<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-tc-gar',this.value,2)" onclick="event.stopPropagation()"></th>
-            <th onclick="sortT('tb-tc-gar',3,this)">Inicio</th>
-            <th onclick="sortT('tb-tc-gar',4,this)">Vence</th>
-            <th onclick="sortT('tb-tc-gar',5,this)">Valor Anual</th>
-            <th onclick="sortT('tb-tc-gar',6,this)">% Cartera Gar.</th>
-            <th onclick="sortT('tb-tc-gar',7,this)">% Consumido</th>
+            <th onclick="sortT('tb-tc-gar',3,this)">Vendedor Téc.</th>
+            <th onclick="sortT('tb-tc-gar',4,this)">Inicio</th>
+            <th onclick="sortT('tb-tc-gar',5,this)">Vence</th>
+            <th onclick="sortT('tb-tc-gar',6,this)">Valor Anual</th>
+            <th onclick="sortT('tb-tc-gar',7,this)">% Cartera Gar.</th>
+            <th onclick="sortT('tb-tc-gar',8,this)">% Consumido</th>
             <th>Estado</th>
             <th>Programa</th>
             <th>🆕</th>
           </tr></thead>
           <tbody id="tb-tc-gar"></tbody>
-<tfoot><tr id="tfoot-tc-gar"><td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-tc-gar"><td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
         </table>
       </div>
       <div style="padding:.55rem 1rem;background:var(--gy);border-top:1px solid var(--brd);
@@ -1008,6 +1010,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="ncSort('n')">#</th>
           <th onclick="ncSort('cliente')">Cliente</th>
           <th onclick="ncSort('coord')">Coordinadora</th>
+          <th>Vendedor Téc.</th>
           <th onclick="ncSort('tipo')">Tipo</th>
           <th>Programa</th>
           <th onclick="ncSort('inicio')">Inicio</th>
@@ -1018,7 +1021,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="ncSort('tpo_activo')">Antigüedad</th>
         </tr></thead>
         <tbody id="tb-nc"></tbody>
-<tfoot><tr id="tfoot-nc"><td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-nc"><td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
       </table>
     </div>
     <div style="padding:.55rem .95rem;background:var(--gy);border-top:1px solid var(--brd);
@@ -1091,12 +1094,13 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
         <table class="tbl">
           <thead><tr>
             <th onclick="sortT('tb-hz',0,this)">#</th><th onclick="sortT('tb-hz',1,this)">Cliente<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-hz',this.value,1)" onclick="event.stopPropagation()"></th><th onclick="sortT('tb-hz',2,this)" style="font-size:.6rem">Estado Relación</th><th onclick="sortT('tb-hz',3,this)">Coordinadora<br><input class="col-filter" placeholder="filtrar..." oninput="filterColT('tb-hz',this.value,2)" onclick="event.stopPropagation()"></th>
-            <th onclick="sortT('tb-hz',3,this)">Tipo</th><th onclick="sortT('tb-hz',4,this)">Programa</th><th onclick="sortT('tb-hz',5,this)">Vence</th>
+            <th>Vendedor Téc.</th>
+            <th onclick="sortT('tb-hz',4,this)">Tipo</th><th onclick="sortT('tb-hz',4,this)">Programa</th><th onclick="sortT('tb-hz',5,this)">Vence</th>
             <th onclick="sortT('tb-hz',6,this)">Días ↕</th>
             <th onclick="sortT('tb-hz',7,this)">MM$ Anual</th><th onclick="sortT('tb-hz',8,this)">% s/Total</th><th onclick="sortT('tb-hz',9,this)">% Consumido</th>
           </tr></thead>
           <tbody id="tb-hz"></tbody>
-<tfoot><tr id="tfoot-hz"><td class="flab" colspan="10" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-hz"><td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
         </table>
       </div>
       <div style="padding:.55rem .95rem;background:var(--gy);border-top:1px solid var(--brd);
@@ -1224,6 +1228,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="sortT('tb-vg',0,this)">#</th>
           <th onclick="vgSortCol('cliente')">Cliente ↕<br><input class="col-filter" placeholder="filtrar..." oninput="vgCliFilter=this.value;renderVG()" onclick="event.stopPropagation()"></th>
           <th onclick="vgSortCol('coord')">Coordinadora ↕</th>
+          <th onclick="vgSortCol('vendedor')">Vendedor Téc. ↕</th>
           <th>Tipo</th>
           <th>Programa</th>
           <th onclick="vgSortCol('linea_negocio')">Línea Negocio ↕</th>
@@ -1241,7 +1246,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th onclick="vgSortCol('dias_vence')">Días rest. ↕</th>
         </tr></thead>
         <tbody id="tb-vg"></tbody>
-<tfoot><tr id="tfoot-vg"><td class="flab" colspan="18" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
+<tfoot><tr id="tfoot-vg"><td class="flab" colspan="19" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">Cargando totales…</td></tr></tfoot>
       </table>
     </div>
     <div style="padding:.55rem .95rem;background:var(--gy);border-top:1px solid var(--brd);
@@ -3915,9 +3920,9 @@ function initTipos(){
   set('tc-foot-com-val',mm(totalComVal)+' cartera anual');
   set('tc-foot-gar-txt',gar.length+' contratos tipo Garantía · '+garCli+' clientes únicos');
   const tfc=document.getElementById('tfoot-tc-com');
-  if(tfc)tfc.innerHTML='<td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+com.length+' contratos Comerciales · '+comCli+' clientes únicos · '+mm(totalComVal)+' cartera anual</td>';
+  if(tfc)tfc.innerHTML='<td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+com.length+' contratos Comerciales · '+comCli+' clientes únicos · '+mm(totalComVal)+' cartera anual</td>';
   const tfg=document.getElementById('tfoot-tc-gar');
-  if(tfg)tfg.innerHTML='<td class="flab" colspan="11" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+gar.length+' contratos Garantía · '+garCli+' clientes únicos · '+mm(totalGarVal)+' cartera valorizada</td>';
+  if(tfg)tfg.innerHTML='<td class="flab" colspan="12" style="background:var(--az3);color:rgba(255,255,255,.7);padding:.5rem .7rem;font-size:.64rem">'+gar.length+' contratos Garantía · '+garCli+' clientes únicos · '+mm(totalGarVal)+' cartera valorizada</td>';
   const fgv=document.getElementById('tc-foot-gar-val');
   if(fgv)fgv.textContent=mm(totalGarVal)+' cartera garantías';
 
@@ -3925,6 +3930,7 @@ function initTipos(){
     <td class="num">${d.n}</td>
     <td style="font-size:.67rem">${shortN(d.cliente)}</td>
     <td style="font-size:.63rem;color:var(--mut)">${shortC(d.coord)}</td>
+    <td style="font-size:.62rem;color:var(--mut)">${d.vendedor||'—'}</td>
     <td style="font-size:.67rem">${d.inicio_fmt}</td><td style="font-size:.67rem">${d.fin_fmt}</td>
     <td class="num" style="color:${d.val>0?'var(--az2)':'var(--mut)'}">${d.val>0?mm(d.val):'—'}</td>
     <td class="num" style="color:var(--mut)">${pctOf(d.val,totalComVal)}</td>
@@ -3938,6 +3944,7 @@ function initTipos(){
     <td class="num">${d.n}</td>
     <td style="font-size:.67rem">${shortN(d.cliente)}</td>
     <td style="font-size:.63rem;color:var(--mut)">${shortC(d.coord)}</td>
+    <td style="font-size:.62rem;color:var(--mut)">${d.vendedor||'—'}</td>
     <td style="font-size:.67rem">${d.inicio_fmt}</td><td style="font-size:.67rem">${d.fin_fmt}</td>
     <td class="num" style="color:${d.val>0?'var(--az2)':'var(--mut)'}">${d.val>0?mm(d.val):'—'}</td>
     <td class="num" style="color:var(--mut)">${totalGarVal>0?pctOf(d.val,totalGarVal):'—'}</td>
@@ -4171,6 +4178,7 @@ function renderNC(){
     <td class="num">${r.n}</td>
     <td style="font-size:.67rem">${shortN(r.cliente)}</td>
     <td style="font-size:.62rem;color:var(--mut)">${shortC(r.coord)}</td>
+    <td style="font-size:.62rem;color:var(--mut)">${r.vendedor||'—'}</td>
     <td>${tipoBadge(r.tipo)}</td>
     <td style="text-align:center">${_progBadge(r.programa||'')}</td>
     <td style="font-size:.67rem">${r.inicio_fmt}</td>
@@ -4179,7 +4187,7 @@ function renderNC(){
     <td class="num" style="color:var(--mut)">${pctOf(r.val,totalVal)}</td>
     <td>${urgP(r.dias_vence)}</td>
     <td><span class="pill pgr">${r.dias_inicio_cli<0?'Futuro':r.dias_inicio_cli+'d'}</span></td>
-  </tr>`).join(''):`<tr><td colspan="11" style="text-align:center;padding:2rem;color:var(--mut);font-size:.75rem">Sin resultados para este período/filtro</td></tr>`;
+  </tr>`).join(''):`<tr><td colspan="12" style="text-align:center;padding:2rem;color:var(--mut);font-size:.75rem">Sin resultados para este período/filtro</td></tr>`;
 
   document.getElementById('nc-ftl').textContent=`${d.length} contratos · ${clientes} clientes nuevos · ${garN} tipo Garantía`;
   document.getElementById('nc-ftr').textContent=totalVal>0?'+ '+mm(totalVal):'Sin valor económico';
@@ -4240,6 +4248,7 @@ function renderHz(){
     <td style="font-size:.67rem">${shortN(d.cliente)}</td>
     <td><span style="background:${relCol};color:#fff;padding:.12rem .35rem;border-radius:3px;font-size:.55rem;font-weight:700;white-space:nowrap">${relIco} ${rel}</span></td>
     <td style="font-size:.62rem;color:var(--mut)">${shortC(d.coord)}</td>
+    <td style="font-size:.62rem;color:var(--mut)">${d.vendedor||'—'}</td>
     <td>${tipoBadge(d.tipo)}</td>
     <td style="text-align:center">${_progBadge(d.programa||'')}</td>
     <td style="font-size:.67rem">${d.fin_fmt}</td>
@@ -4247,7 +4256,7 @@ function renderHz(){
     <td class="num" style="color:${d.val>0?'var(--az2)':'var(--mut)'}">${d.val>0?mm(d.val):'—'}</td>
     <td class="num" style="color:var(--mut)">${pctOf(d.val,totalHzVal)}</td>
     <td style="min-width:75px">${pbarHTML(d.pct_consumido,urgC(d.dias_vence))}<span style="font-size:.6rem;color:var(--mut)">${d.pct_consumido}%</span></td>
-  </tr>`;}).join('')||`<tr><td colspan="10" style="text-align:center;padding:2rem;color:var(--mut)">Sin contratos en este horizonte</td></tr>`;
+  </tr>`;}).join('')||`<tr><td colspan="12" style="text-align:center;padding:2rem;color:var(--mut)">Sin contratos en este horizonte</td></tr>`;
 
   document.getElementById('hz-ft').textContent=`${data.length} contratos · ${data.filter(d=>d.tipo==='Comercial').length} Comercial · ${data.filter(d=>d.tipo==='Garantia').length} Garantía`;
   document.getElementById('hz-tot').textContent=mm(data.filter(d=>d.tipo==='Comercial').reduce((s,d)=>s+d.val,0))+' Comercial en riesgo';
@@ -4366,6 +4375,7 @@ function renderVG(){
       <td class="num">${nLabel}</td>
       <td style="font-size:.67rem;line-height:1.3">${shortN(x.cliente)}</td>
       <td style="font-size:.62rem;color:var(--mut)">${shortC(x.coord)}</td>
+      <td style="font-size:.62rem;color:var(--mut)">${x.vendedor||'—'}</td>
       <td>${esPerdidoFac?'<span style="font-size:.6rem;color:var(--mut)">Expirado</span>':tipoBadge(x.tipo)}</td>
       <td style="text-align:center">${esPerdidoFac?'—':_progBadge(x.programa||'')}</td>
       <td style="text-align:center">${_lineaBadge(x.linea_negocio)}</td>
