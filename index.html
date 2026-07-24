@@ -2474,12 +2474,15 @@ const PERDIDOS_VG = [{"n": "—", "cliente": "FUNDACIÓN OFTALMOLÓGICA LOS ANDE
 (function syncFacDataCoord(){
   if(typeof DATA==='undefined'||!DATA) return;
   const coordMap = {};
+  const vendMap = {};
   DATA.forEach(d => {
     const k = d.cliente;
     if(d.coord && d.coord !== 'Sin contrato') coordMap[k] = d.coord;
+    if(d.vendedor) vendMap[k] = d.vendedor;
   });
   FAC_DATA.forEach(d => {
     if(coordMap[d.cliente]) d.coord = coordMap[d.cliente];
+    if(vendMap[d.cliente]) d.vendedor = vendMap[d.cliente];
   });
 })();
 </script>
