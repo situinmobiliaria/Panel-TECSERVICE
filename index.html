@@ -920,6 +920,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
           <th>#</th>
           <th>Cliente</th>
           <th>Coordinadora</th>
+          <th>Vendedor Téc.</th>
           <th>Estado</th>
           <th style="text-align:right">MM$ Total Fac.</th>
           <th style="text-align:right">MM$ 2026</th>
@@ -4104,6 +4105,7 @@ function renderRelTabla(){
       <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">${i+1}</td>
       <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${d.cliente}"><strong>${shortN(d.cliente)}</strong></td>
       <td style="font-size:.65rem;color:var(--mut)">${shortC(d.coord)}</td>
+      <td style="font-size:.62rem;color:var(--mut)">${d.vendedor||'—'}</td>
       <td><span style="background:${estCol};color:#fff;padding:.18rem .45rem;border-radius:4px;font-size:.6rem;font-weight:700">${estIco} ${d.estado_relacion}</span></td>
       <td class="num" style="text-align:right;font-weight:700">${mm(d.fac_total)}</td>
       <td class="num" style="text-align:right;color:var(--am)">${mm(d.fac_2026)}</td>
