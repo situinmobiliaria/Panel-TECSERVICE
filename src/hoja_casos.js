@@ -105,6 +105,29 @@ function _casosHTML() {
       </table>
     </div>
     <div style="padding:.4rem .9rem;background:var(--gy);border-top:1px solid var(--brd);font-size:.58rem;color:var(--mut)" id="cas-nota">—</div>
+  </div>
+
+  <!-- Tabla 3: Resumen por Modelo/Marca -->
+  <div class="card" style="margin-top:.9rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(255,160,0,.18),rgba(255,160,0,.06));flex-wrap:wrap;gap:.4rem">
+      <span class="ct" style="color:var(--am)">Tabla Resumen Equipos</span>
+      <span style="font-size:.58rem;color:var(--mut)" id="cas-t3-count">—</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="cas-table3" style="min-width:800px">
+        <thead><tr>
+          <th style="min-width:100px">Marca</th>
+          <th style="min-width:140px">Modelo</th>
+          <th style="min-width:110px">N° Equipos Detenidos</th>
+          <th style="min-width:100px">N° Contratos</th>
+          <th style="min-width:100px">N° Sin Contrato</th>
+          <th style="min-width:110px">N° Total Asociados</th>
+          <th style="min-width:140px">$ Facturación Mes (Contratos)</th>
+        </tr></thead>
+        <tbody id="cas-tbody3"></tbody>
+        <tfoot id="cas-tfoot3"></tfoot>
+      </table>
+    </div>
   </div>`;
 }
 
@@ -245,6 +268,83 @@ function renderCasos() {
         <td style="text-align:center">${finCell}</td>
       </tr>`;
     }).join('');
+  }
+
+  // ── Tabla 3: Resumen por Modelo/Marca ──────────────────────────
+  const tbody3 = document.getElementById('cas-tbody3');
+  const tfoot3 = document.getElementById('cas-tfoot3');
+  if (tbody3) {
+    const _fmtM3 = v => v > 0 ? 'MM$' + fN1(v / 1e6) : '—';
+
+    // Agrupar equipos filtrados por Marca → Modelo
+    const porMarca = {};
+    eqFilt.forEach(e => {
+      const marca  = e.marca  || 'Sin marca';
+      const modelo = e.modelo || 'Sin modelo';
+      if (!porMarca[marca]) porMarca[marca] = {};
+      if (!porMarca[marca][modelo]) porMarca[marca][modelo] = { cantidad: 0, conContrato: 0, sinContrato: 0, facMes: 0 };
+      const g = porMarca[marca][modelo];
+      g.cantidad++;
+      if (e.contrato_num) { g.conContrato++; g.facMes += (e.neta_mes || 0); }
+      else g.sinContrato++;
+    });
+
+    const marcas = Object.keys(porMarca).sort();
+    const html = [];
+    let granCant = 0, granCon = 0, granSin = 0, granTot = 0, granFac = 0;
+
+    marcas.forEach(marca => {
+      const modelos = Object.keys(porMarca[marca]).sort();
+      let subCant = 0, subCon = 0, subSin = 0, subFac = 0;
+
+      modelos.forEach((modelo, idx) => {
+        const g = porMarca[marca][modelo];
+        const total = g.conContrato + g.sinContrato;
+        subCant += g.cantidad; subCon += g.conContrato; subSin += g.sinContrato; subFac += g.facMes;
+
+        const marcaCell = idx === 0
+          ? `<td rowspan="${modelos.length + 1}" style="font-weight:700;font-size:.62rem;vertical-align:middle;text-align:center;background:rgba(255,160,0,.08)">${_escH(marca)}</td>`
+          : '';
+
+        html.push(`<tr>
+          ${marcaCell}
+          <td><span style="font-size:.62rem;font-weight:600;color:var(--am)">${_escH(modelo)}</span></td>
+          <td style="text-align:center;font-size:.62rem">${g.cantidad}</td>
+          <td style="text-align:center;font-size:.62rem;color:var(--az2)">${g.conContrato}</td>
+          <td style="text-align:center;font-size:.62rem;color:var(--mut)">${g.sinContrato}</td>
+          <td style="text-align:center;font-size:.62rem;font-weight:700">${total}</td>
+          <td style="text-align:right;font-size:.62rem;font-weight:700;color:var(--teal)">${_fmtM3(g.facMes)}</td>
+        </tr>`);
+      });
+
+      const subTotal = subCon + subSin;
+      html.push(`<tr style="background:rgba(255,160,0,.14)">
+        <td colspan="2" style="text-align:right;font-size:.6rem;font-style:italic;color:var(--txt);padding:.3rem .6rem">Subtotal ${_escH(marca)}</td>
+        <td style="text-align:center;font-size:.62rem;font-weight:700">${subCant}</td>
+        <td style="text-align:center;font-size:.62rem;font-weight:700;color:var(--az2)">${subCon}</td>
+        <td style="text-align:center;font-size:.62rem;font-weight:700;color:var(--mut)">${subSin}</td>
+        <td style="text-align:center;font-size:.62rem;font-weight:800">${subTotal}</td>
+        <td style="text-align:right;font-size:.62rem;font-weight:800;color:var(--teal)">${_fmtM3(subFac)}</td>
+      </tr>`);
+
+      granCant += subCant; granCon += subCon; granSin += subSin; granTot += subTotal; granFac += subFac;
+    });
+
+    tbody3.innerHTML = html.join('') || '<tr><td colspan="7" style="text-align:center;padding:1.2rem;color:var(--mut)">Sin equipos para los filtros seleccionados</td></tr>';
+
+    if (tfoot3) {
+      tfoot3.innerHTML = marcas.length ? `<tr>
+        <td colspan="2" style="padding:.4rem .7rem;font-size:.62rem">Total General · ${marcas.length} marca${marcas.length !== 1 ? 's' : ''}</td>
+        <td style="text-align:center;font-size:.65rem">${granCant}</td>
+        <td style="text-align:center;font-size:.65rem">${granCon}</td>
+        <td style="text-align:center;font-size:.65rem">${granSin}</td>
+        <td style="text-align:center;font-size:.65rem">${granTot}</td>
+        <td style="text-align:right;font-size:.65rem">${_fmtM3(granFac)}</td>
+      </tr>` : '';
+    }
+
+    const t3count = document.getElementById('cas-t3-count');
+    if (t3count) t3count.textContent = marcas.length + ' marca' + (marcas.length !== 1 ? 's' : '') + ' · ' + eqFilt.length + ' equipo' + (eqFilt.length !== 1 ? 's' : '');
   }
 
   // KPIs
