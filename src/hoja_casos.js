@@ -117,7 +117,7 @@ function _casosHTML() {
       <table class="tbl" id="cas-table3" style="min-width:800px">
         <thead><tr>
           <th style="min-width:100px">Marca</th>
-          <th style="min-width:140px">Modelo</th>
+          <th style="min-width:140px">Familia de Equipo</th>
           <th style="min-width:110px">N° Equipos Detenidos</th>
           <th style="min-width:100px">N° Contratos</th>
           <th style="min-width:100px">N° Sin Contrato</th>
@@ -155,6 +155,59 @@ function _poblarSelect(id, valores) {
     ...valores.map(v => `<option value="${_escH(v)}"${current===v?' selected':''}>${_escH(v)}</option>`)
   ].join('');
   if (sel.innerHTML !== opts) sel.innerHTML = opts;
+}
+
+// ── NORMALIZACIÓN MARCA / FAMILIA DE EQUIPO ────────────────────────
+// Corrige duplicados de marca por errores de tipeo o nombres alternos
+// del mismo fabricante, y agrupa variantes de un mismo equipo bajo
+// una única "familia" (ej: DS610, DS610-1SL-2S, DS610/2SL → DS610).
+const _MARCA_NORM = {
+  'STELLCO':    'STEELCO',      // typo: falta una L de menos / letra de más
+  'DDC':        'DDC DOLPHIN',  // mismo fabricante, nombre abreviado
+  'DOLPHIN':    'DDC DOLPHIN',  // mismo fabricante, nombre abreviado
+  'CLINICLAVE': 'MELAG'         // Cliniclave es una línea de esterilizadores MELAG
+};
+
+const _FAMILIA_NORM = {
+  'STEELCO': {
+    'AD 400/1': 'AD 400/1', 'AD400/1': 'AD 400/1',
+    'DS1000': 'DS1000',
+    'DS500': 'DS500', 'DS500 CL': 'DS500',
+    'DS5000SCL': 'DS5000SCL',
+    'DS610': 'DS610', 'DS610 - 1SL-2S': 'DS610', 'DS610 - 2SL-2S': 'DS610',
+    'DS610-1SL-2S': 'DS610', 'DS610-2SL-SL': 'DS610', 'DS610/1SL/2S': 'DS610', 'DS610/2 SL': 'DS610',
+    'LVS 2 C/2 EDX 2P': 'LVS 2', 'LVS 2C/2': 'LVS 2',
+    'US100': 'US100', 'US80': 'US80',
+    'VS 4/2': 'VS 4', 'VS 8/1': 'VS 8', 'VS 8/2': 'VS 8', 'VS6/2': 'VS 6'
+  },
+  'BIEN AIR': {
+    'CHIROPRO PLUS': 'CHIROPRO PLUS', 'CHIROPRO PLUS 3G': 'CHIROPRO PLUS',
+    'MC MX-i': 'MX-i', 'MX-I PLUS': 'MX-i',
+    'PUNTA RECTA': 'PUNTA RECTA'
+  },
+  'MELAG': {
+    '45M': '45M', 'C45': 'C45',
+    'MELAQUICK 12+P': 'MELAQUICK 12+P',
+    'MELASEAL': 'MELASEAL', 'MELASEAL PRO': 'MELASEAL'
+  },
+  'DDC DOLPHIN': {
+    'DOLPHIN PULMATIC': 'PULMATIC', 'PULMATIC': 'PULMATIC'
+  }
+};
+
+function _normMarca(marca) {
+  const m = (marca || '').trim().toUpperCase();
+  return _MARCA_NORM[m] || (marca || '').trim() || 'Sin marca';
+}
+
+function _familiaModelo(marcaNorm, modelo) {
+  const mod = (modelo || '').trim();
+  const tabla = _FAMILIA_NORM[marcaNorm];
+  if (tabla) {
+    const key = Object.keys(tabla).find(k => k.toUpperCase() === mod.toUpperCase());
+    if (key) return tabla[key];
+  }
+  return mod || 'Sin modelo';
 }
 
 // ── RENDER ────────────────────────────────────────────────────────
@@ -270,17 +323,17 @@ function renderCasos() {
     }).join('');
   }
 
-  // ── Tabla 3: Resumen por Modelo/Marca ──────────────────────────
+  // ── Tabla 3: Resumen por Familia de Equipo/Marca ────────────────
   const tbody3 = document.getElementById('cas-tbody3');
   const tfoot3 = document.getElementById('cas-tfoot3');
   if (tbody3) {
     const _fmtM3 = v => v > 0 ? 'MM$' + fN1(v / 1e6) : '—';
 
-    // Agrupar equipos filtrados por Marca → Modelo
+    // Agrupar equipos filtrados por Marca (normalizada) → Familia de equipo (normalizada)
     const porMarca = {};
     eqFilt.forEach(e => {
-      const marca  = e.marca  || 'Sin marca';
-      const modelo = e.modelo || 'Sin modelo';
+      const marca  = _normMarca(e.marca);
+      const modelo = _familiaModelo(marca, e.modelo);
       if (!porMarca[marca]) porMarca[marca] = {};
       if (!porMarca[marca][modelo]) porMarca[marca][modelo] = { cantidad: 0, conContrato: 0, sinContrato: 0, facMes: 0 };
       const g = porMarca[marca][modelo];
