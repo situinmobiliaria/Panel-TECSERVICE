@@ -107,151 +107,153 @@
   }
 
   // ── REGIÓN ───────────────────────────────────────────────────
+  // Misma base que la tabla de desglose: contr_meses_2026 + otros proporcional
   const PR = D.por_region || {};
   const regiones = PR.regiones || [];
   const regData  = PR.data    || {};
 
+  const PALETTE_MAP = {
+    'Esterilización':'#002D73','Endoscopía':'#28D2C3','Dental':'#FFC000',
+    'Trazabilidad':'#7A1FAA','REAS':'#E87722',
+    'Reparación Esterilización':'#0A5C8C','Reparación Endoscopía':'#00832F','Reparación Dental':'#D46000',
+  };
+  const PALETTE_REG = ['#002D73','#28D2C3','#FFC000','#E87722','#7A1FAA',
+                       '#0A5C8C','#00832F','#D46000','#8B008B','#5a7da8',
+                       '#c44569','#574b90','#3c9d4e','#b5451b','#888','#333','#aaa'];
+
   if(regiones.length > 0){
-    const PALETTE_REG = ['#002D73','#28D2C3','#FFC000','#E87722','#7A1FAA',
-                         '#0A5C8C','#00832F','#D46000','#8B008B','#999'];
     let selReg  = null;
     let chartReg = null;
+    let mainChart = null; // referencia al gráfico global para poder reemplazarlo
 
     const regSub  = document.getElementById('desg-reg-sub');
     const regBtns = document.getElementById('desg-reg-btns');
 
-    // Botones de filtro
-    ['Todas', ...regiones].forEach((r, i) => {
-      const b = document.createElement('button');
-      b.className = 'btn' + (i === 0 ? ' on' : '');
-      b.textContent = r;
-      b.style.fontSize = '.58rem';
-      if(i > 0) b.style.borderLeftColor = PALETTE_REG[(i-1) % PALETTE_REG.length];
-      b.addEventListener('click', () => {
-        selReg = r === 'Todas' ? null : r;
-        regBtns.querySelectorAll('.btn').forEach(x => x.classList.remove('on'));
-        b.classList.add('on');
-        renderRegTable();
-        renderRegChart();
+    function setRegion(r){
+      selReg = r;
+      regBtns && regBtns.querySelectorAll('.btn').forEach(x=>x.classList.remove('on'));
+      const btn = regBtns && regBtns.querySelector(`[data-reg="${r||'__todas__'}"]`);
+      if(btn) btn.classList.add('on');
+      renderRegTable();
+      renderRegChart();
+    }
+
+    // ── Botones de filtro ───────────────────────────────────
+    if(regBtns){
+      const allBtn = document.createElement('button');
+      allBtn.className='btn on'; allBtn.textContent='Todas';
+      allBtn.dataset.reg='__todas__';
+      allBtn.addEventListener('click',()=>setRegion(null));
+      regBtns.appendChild(allBtn);
+
+      regiones.forEach((r,i)=>{
+        const b=document.createElement('button');
+        b.className='btn'; b.textContent=r;
+        b.dataset.reg=r;
+        b.style.cssText=`font-size:.57rem;border-left:3px solid ${PALETTE_REG[i%PALETTE_REG.length]}`;
+        b.addEventListener('click',()=>setRegion(r));
+        regBtns.appendChild(b);
       });
-      if(regBtns) regBtns.appendChild(b);
-    });
+    }
 
     // ── Tabla resumen por región ────────────────────────────
+    // Usa misma base: contratos + otros proporcional → calza con tabla desglose
     function renderRegTable(){
-      const el = document.getElementById('desg-reg-table');
+      const el=document.getElementById('desg-reg-table');
       if(!el) return;
-      const colHdr = `background:var(--az3);color:rgba(255,255,255,.85);font-size:.57rem;
-        font-weight:700;text-align:center;padding:.28rem .38rem;white-space:nowrap;position:sticky;top:0;z-index:1`;
-      const thMeses = meses.map(m=>`<th style="${colHdr}">${m.slice(0,3)}</th>`).join('');
-      const list = selReg ? [selReg] : regiones;
-      const rows = list.map((r, i) => {
-        const rd  = regData[r] || {total:[],contratos:[],otros:[]};
-        const clr = PALETTE_REG[regiones.indexOf(r) % PALETTE_REG.length];
-        const totCells = Array.from({length:n+1},(_,j)=>
-          `<td class="num" style="color:${clr};font-weight:700;font-size:.6rem">${fmm(rd.total[j]||0)}</td>`).join('');
-        const conCells = Array.from({length:n+1},(_,j)=>
-          `<td class="num" style="color:var(--mut);font-size:.57rem">${fmm(rd.contratos[j]||0)}</td>`).join('');
-        const otrCells = Array.from({length:n+1},(_,j)=>
-          `<td class="num" style="color:var(--mut);font-size:.57rem">${fmm(rd.otros[j]||0)}</td>`).join('');
-        return `
-          <tr>
-            <td rowspan="3" style="font-size:.6rem;font-weight:700;white-space:nowrap;padding:.3rem .55rem;
-              border-left:3px solid ${clr};background:${clr}18">${r}</td>
-            ${totCells}
-          </tr>
-          <tr style="background:${clr}08">
-            <td colspan="${n+2}" style="padding:.05rem 0;font-size:.55rem;color:var(--mut);
-              padding-left:.55rem">Contratos</td>
-          </tr>
-          <tr style="background:${clr}08">
-            ${conCells}
-          </tr>`;
+      const H='background:var(--az3);color:rgba(255,255,255,.85);font-size:.57rem;font-weight:700;text-align:center;padding:.28rem .38rem;white-space:nowrap';
+      const Ht='background:#1a3a6b;color:rgba(255,255,255,.85);font-size:.57rem;font-weight:700;text-align:center;padding:.28rem .38rem';
+      const thM=meses.map(m=>`<th style="${H}">${m.slice(0,3)}</th>`).join('');
+      const list=selReg?[selReg]:regiones;
+
+      const rows=list.map((r,i)=>{
+        const rd=regData[r]||{contratos:[],otros:[],total:[]};
+        const clr=PALETTE_REG[regiones.indexOf(r)%PALETTE_REG.length];
+        const cell=(arr,j,bold,c)=>`<td class="num" style="font-size:.58rem;${bold?'font-weight:700;':''}color:${c||'inherit'}">${fmm(arr[j]||0)}</td>`;
+        const rowTot  =Array.from({length:n+1},(_,j)=>cell(rd.total,j,true,clr)).join('');
+        const rowCon  =Array.from({length:n+1},(_,j)=>cell(rd.contratos,j,false,'var(--mut)')).join('');
+        const rowOtr  =Array.from({length:n+1},(_,j)=>cell(rd.otros,j,false,'var(--mut)')).join('');
+        const bg=`${clr}12`;
+        return`<tr style="background:${bg}">
+          <td rowspan="3" style="font-size:.6rem;font-weight:700;white-space:nowrap;padding:.3rem .55rem .3rem .65rem;
+            border-left:3px solid ${clr}">${r}</td>${rowTot}</tr>
+          <tr style="background:${bg};font-size:.56rem;color:var(--mut)">
+            <td colspan="${n+2}" style="padding:0 .55rem;font-style:italic">Contratos</td></tr>
+          <tr style="background:${bg}">${rowCon}</tr>`;
       });
 
-      // Total row
-      const totRow = Array.from({length:n+1},(_,j)=>{
-        const v = list.reduce((s,r)=>s+(regData[r]&&regData[r].total[j]||0),0);
-        return `<td class="num" style="font-weight:700;font-size:.6rem">${fmm(v)}</td>`;
+      // Total row calzado con la tabla global
+      const totRowCells=Array.from({length:n+1},(_,j)=>{
+        const v=list.reduce((s,r)=>s+(regData[r]&&regData[r].total[j]||0),0);
+        return`<td class="num" style="font-weight:700;font-size:.59rem">${fmm(v)}</td>`;
       }).join('');
 
-      el.innerHTML = `<table class="tbl" style="font-size:.6rem;width:100%;min-width:420px;border-collapse:separate;border-spacing:0">
-        <thead><tr>
-          <th style="${colHdr};text-align:left;min-width:110px">Región</th>
-          ${thMeses}
-          <th style="${colHdr};background:#1a3a6b">TOTAL</th>
-        </tr></thead>
-        <tbody>${rows.join('')}
-          <tr class="desg-azul" style="background:var(--az3)">
-            <td style="font-size:.6rem;font-weight:700;color:#fff;padding:.32rem .55rem">TOTAL</td>
-            ${totRow}
-          </tr>
-        </tbody>
-      </table>`;
+      el.innerHTML=`<div style="overflow-x:auto;overflow-y:auto;max-height:400px">
+        <table class="tbl" style="font-size:.6rem;width:100%;min-width:400px;border-collapse:separate;border-spacing:0">
+          <thead><tr>
+            <th style="${H};text-align:left;min-width:115px;position:sticky;left:0;top:0;z-index:3">Región</th>
+            ${thM}
+            <th style="${Ht};position:sticky;top:0;z-index:2">TOTAL</th>
+          </tr></thead>
+          <tbody>${rows.join('')}
+            <tr class="desg-azul" style="background:var(--az3)">
+              <td style="font-size:.6rem;font-weight:700;color:#fff;padding:.32rem .55rem;position:sticky;left:0;background:var(--az3)">TOTAL</td>
+              ${totRowCells}
+            </tr>
+          </tbody>
+        </table></div>`;
     }
 
     // ── Gráfico por región ──────────────────────────────────
+    // Sin región: apilado por región (contratos, misma base)
+    // Con región: desglose por línea (mismo que gráfico global pero filtrado)
     function renderRegChart(){
-      const ctx2 = document.getElementById('cDesgRegion');
-      if(!ctx2 || !window.Chart) return;
-      if(chartReg){ chartReg.destroy(); chartReg=null; }
-
-      const labels = meses.map(m => m.slice(0,3));
+      const ctx2=document.getElementById('cDesgRegion');
+      if(!ctx2||!window.Chart) return;
+      if(chartReg){chartReg.destroy();chartReg=null;}
+      const labels=meses.map(m=>m.slice(0,3));
+      let datasets, title;
 
       if(!selReg){
-        // Todas: barras apiladas por región
-        const datasets = regiones.map((r, i) => ({
-          label: r,
-          data: (regData[r]||{total:[]}).total.slice(0, n),
-          backgroundColor: PALETTE_REG[i % PALETTE_REG.length],
-          stack: 's1', borderRadius: 3,
+        datasets=regiones.map((r,i)=>({
+          label:r,
+          data:(regData[r]||{contratos:[]}).contratos.slice(0,n),
+          backgroundColor:PALETTE_REG[i%PALETTE_REG.length],
+          stack:'s1',borderRadius:3,
         }));
-        chartReg = new Chart(ctx2.getContext('2d'), {
-          type: 'bar',
-          data: { labels, datasets },
-          options: {
-            responsive: true, maintainAspectRatio: false,
-            interaction: { mode:'index', intersect:false },
-            plugins: {
-              legend: { position:'bottom', labels:{boxWidth:10,font:{size:8},padding:6} },
-              tooltip: { callbacks: { label: c => ` ${c.dataset.label}: MM$${fN1(c.raw||0)}` } }
-            },
-            scales: {
-              x: { stacked:true, grid:{display:false}, ticks:{font:{size:9}} },
-              y: { stacked:true, grid:{color:'#E2E6F0'},
-                   ticks:{font:{size:9},callback:v=>'MM$'+(v||0).toLocaleString('es-CL',{maximumFractionDigits:0})}}
-            }
-          }
-        });
-        if(regSub) regSub.textContent = regiones.length + ' regiones · Todas';
+        title='Ingreso Contratos por Región (MM$)';
+        if(regSub) regSub.textContent=regiones.length+' regiones · calza con "Total Ingreso por Contratos"';
       } else {
-        // Región seleccionada: Contratos vs Otros
-        const rd = regData[selReg] || {contratos:[], otros:[]};
-        chartReg = new Chart(ctx2.getContext('2d'), {
-          type: 'bar',
-          data: {
-            labels,
-            datasets: [
-              { label:'Contratos', data: rd.contratos.slice(0,n), backgroundColor:'#002D73', stack:'s1', borderRadius:3 },
-              { label:'Otros',     data: rd.otros.slice(0,n),     backgroundColor:'#28D2C3', stack:'s1', borderRadius:3 },
-            ]
-          },
-          options: {
-            responsive: true, maintainAspectRatio: false,
-            interaction: { mode:'index', intersect:false },
-            plugins: {
-              legend: { position:'bottom', labels:{boxWidth:10,font:{size:9},padding:6} },
-              tooltip: { callbacks: { label: c => ` ${c.dataset.label}: MM$${fN1(c.raw||0)}` } }
-            },
-            scales: {
-              x: { stacked:true, grid:{display:false}, ticks:{font:{size:9}} },
-              y: { stacked:true, grid:{color:'#E2E6F0'},
-                   ticks:{font:{size:9},callback:v=>'MM$'+(v||0).toLocaleString('es-CL',{maximumFractionDigits:0})}}
-            }
-          }
-        });
-        if(regSub) regSub.textContent = selReg + ' · Total YTD MM$' + fmm(rd.total[n]||0);
+        const rd=regData[selReg]||{};
+        const lineas=rd.lineas||{};
+        datasets=[
+          {label:'Esterilización',data:(lineas['Esterilización']||[]).slice(0,n),backgroundColor:PALETTE_MAP['Esterilización'],stack:'s1',borderRadius:3},
+          {label:'Endoscopía',    data:(lineas['Endoscopía']||[]).slice(0,n),    backgroundColor:PALETTE_MAP['Endoscopía'],    stack:'s1',borderRadius:3},
+          {label:'Dental',        data:(lineas['Dental']||[]).slice(0,n),        backgroundColor:PALETTE_MAP['Dental'],        stack:'s1',borderRadius:3},
+          {label:'Otros Ingresos',data:(rd.otros||[]).slice(0,n),                backgroundColor:'#C0C0C0',                    stack:'s1',borderRadius:3},
+        ];
+        title=selReg+' · Contratos por línea + Otros';
+        if(regSub) regSub.textContent=selReg+' · Contratos YTD MM$'+fmm((rd.contratos||[])[n]||0)+' · Total MM$'+fmm((rd.total||[])[n]||0);
       }
+
+      chartReg=new Chart(ctx2.getContext('2d'),{
+        type:'bar',
+        data:{labels,datasets},
+        options:{
+          responsive:true,maintainAspectRatio:false,
+          interaction:{mode:'index',intersect:false},
+          plugins:{
+            title:{display:true,text:title,font:{size:9},color:'var(--mut)',padding:{bottom:4}},
+            legend:{position:'bottom',labels:{boxWidth:10,font:{size:8},padding:6}},
+            tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${fN1(c.raw||0)}`}}
+          },
+          scales:{
+            x:{stacked:true,grid:{display:false},ticks:{font:{size:9}}},
+            y:{stacked:true,grid:{color:'#E2E6F0'},
+               ticks:{font:{size:9},callback:v=>'MM$'+(v||0).toLocaleString('es-CL',{maximumFractionDigits:0})}}
+          }
+        }
+      });
     }
 
     renderRegTable();

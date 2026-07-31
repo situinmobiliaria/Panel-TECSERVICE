@@ -1749,6 +1749,11 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
     total_general = with_total(to_mm([fac_arr[m] if m < len(fac_arr) else 0.0 for m in range(n)]))
 
     # ── Desglose por región ──────────────────────────────────────
+    # Usa la MISMA fuente que la tabla global:
+    #   - Contratos: contr_meses_2026 por cliente (= contr_real_monthly global)
+    #   - Líneas: misma lógica de ponderación que linea_month global
+    #   - Otros: prorrateo proporcional de otros_total_month global
+    # Así los totales suman exacto a la tabla de desglose.
     cli_to_region = {}
     if mapa_data:
         for entry in mapa_data:
@@ -1757,40 +1762,60 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
                 r = (entry.get("region") or "Sin región").strip() or "Sin región"
                 cli_to_region[nombre] = r
 
-    mensual_por_cli = bbdd.get("mensual_por_cliente", {})
-    reg_tot = {}    # {region: [n floats]}  total billing MM$
-    reg_con = {}    # {region: [n floats]}  contratos billing MM$
-
-    for cli, arr in mensual_por_cli.items():
-        region = cli_to_region.get(cli, "Sin región")
-        if region not in reg_tot:
-            reg_tot[region] = [0.0] * n
-            reg_con[region] = [0.0] * n
-        for m in range(n):
-            reg_tot[region][m] += arr[m] if m < len(arr) else 0.0
+    # Contratos y desglose por línea por región
+    reg_con  = {}   # {region: [n floats]} contratos brutos
+    reg_lin  = {}   # {region: {linea: [n floats]}} contratos por línea
 
     for p in panel_raw:
-        cli = p["cliente"]
+        cli    = p["cliente"]
         region = cli_to_region.get(cli, "Sin región")
-        if region not in reg_tot:
-            reg_tot[region] = [0.0] * n
+        if region not in reg_con:
             reg_con[region] = [0.0] * n
-        ca = p.get("contr_meses_2026") or [0.0] * 12
+            reg_lin[region] = {L: [0.0] * n for L in LINEAS}
+        cons = contratos_by_cli.get(cli, [])
+        ca   = p.get("contr_meses_2026") or [0.0] * 12
         for m in range(n):
-            reg_con[region][m] += ca[m] if m < len(ca) else 0.0
+            real_m = ca[m] if m < len(ca) else 0.0
+            reg_con[region][m] += real_m
+            if abs(real_m) < 1:
+                continue
+            # misma lógica de ponderación por línea que linea_month
+            weights = defaultdict(float)
+            for c in cons:
+                if c["fact_flags"][m]:
+                    weights[c["linea_negocio"]] += c["val_mes"]
+            wsum = sum(weights.values())
+            if wsum <= 0:
+                weights = defaultdict(float)
+                for c in cons:
+                    weights[c["linea_negocio"]] += c["val"]
+                wsum = sum(weights.values())
+            if wsum <= 0:
+                weights = {"Esterilización": 1.0}
+                wsum = 1.0
+            for L, w in weights.items():
+                if L in reg_lin[region]:
+                    reg_lin[region][L][m] += real_m * (w / wsum)
 
+    # Otros: prorrateo proporcional de otros_total_month global
     reg_out = {}
-    for r in reg_tot:
-        tot = to_mm(reg_tot[r])
-        con = to_mm(reg_con.get(r, [0.0] * n))
-        otr = [max(0.0, round(tot[m] - con[m], 3)) for m in range(n)]
+    for r, con_arr in reg_con.items():
+        con_mm = to_mm(con_arr)
+        otr_arr = []
+        for m in range(n):
+            prop = (con_arr[m] / contr_real_monthly[m]) if (m < len(contr_real_monthly) and contr_real_monthly[m] > 1) else 0.0
+            otr_arr.append(otros_total_month[m] * prop if m < len(otros_total_month) else 0.0)
+        otr_mm  = to_mm(otr_arr)
+        tot_mm  = [round(con_mm[m] + otr_mm[m], 3) for m in range(n)]
+        rlm     = reg_lin.get(r, {L: [0.0]*n for L in LINEAS})
         reg_out[r] = {
-            "total":     with_total(tot),
-            "contratos": with_total(con),
-            "otros":     otr + [round(sum(otr), 3)],
+            "contratos": with_total(con_mm),
+            "otros":     with_total(otr_mm),
+            "total":     with_total(tot_mm),
+            "lineas": {L: with_total(to_mm(rlm.get(L, [0.0]*n))) for L in LINEAS},
         }
 
-    regiones_sorted = sorted(reg_out, key=lambda r: reg_out[r]["total"][n], reverse=True)
+    regiones_sorted = sorted(reg_out, key=lambda r: reg_out[r]["contratos"][n], reverse=True)
 
     return {
         "meses": meses_lbl,
