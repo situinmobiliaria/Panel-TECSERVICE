@@ -346,6 +346,11 @@
     renderRegTable();
     renderRegChart();
     renderRegMap();
+
+    // Permite que sv() llame invalidateSize cuando la vista se hace visible
+    window._desgMapRefresh = function(){
+      if(_regMapL){ _regMapL.invalidateSize(); renderRegMap(); }
+    };
   }
 
   // ── GRÁFICO APILADO ──────────────────────────────────────────

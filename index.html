@@ -2546,6 +2546,7 @@ function sv(name,btn){
   if(name==='vision')renderVG();
   if(name==='nuevos')renderNC();
   if(name==='facturacion') setTimeout(renderFcGraficos, 100);
+  if(name==='desglose') setTimeout(()=>{ if(window._desgMapRefresh) window._desgMapRefresh(); }, 80);
   // 150ms: mapa/matriz/casos interceptan sv() y pintan su contenido recién a
   // los 80ms (lazy render), así que hay que esperar más que eso para
   // encontrar su .sh y no perderse el badge en esas 3 vistas.
@@ -10006,6 +10007,11 @@ function renderAlertas(){
     renderRegTable();
     renderRegChart();
     renderRegMap();
+
+    // Permite que sv() llame invalidateSize cuando la vista se hace visible
+    window._desgMapRefresh = function(){
+      if(_regMapL){ _regMapL.invalidateSize(); renderRegMap(); }
+    };
   }
 
   // ── GRÁFICO APILADO ──────────────────────────────────────────
