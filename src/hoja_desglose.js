@@ -122,9 +122,9 @@
                        '#c44569','#574b90','#3c9d4e','#b5451b','#888','#333','#aaa'];
 
   if(regiones.length > 0){
-    let selReg  = null;
+    let selReg   = null;
     let chartReg = null;
-    let mainChart = null; // referencia al gráfico global para poder reemplazarlo
+    let mapChart  = null;
 
     const regSub  = document.getElementById('desg-reg-sub');
     const regBtns = document.getElementById('desg-reg-btns');
@@ -136,6 +136,7 @@
       if(btn) btn.classList.add('on');
       renderRegTable();
       renderRegChart();
+      renderRegMap();
     }
 
     // ── Botones de filtro ───────────────────────────────────
@@ -156,62 +157,75 @@
       });
     }
 
-    // ── Tabla resumen por región ────────────────────────────
-    // Usa misma base: contratos + otros proporcional → calza con tabla desglose
+    // ── Tabla detallada por región (espeja estructura de tabla global) ─────────
     function renderRegTable(){
-      const el=document.getElementById('desg-reg-table');
+      const el = document.getElementById('desg-reg-table');
       if(!el) return;
-      const H='background:var(--az3);color:rgba(255,255,255,.85);font-size:.57rem;font-weight:700;text-align:center;padding:.28rem .38rem;white-space:nowrap';
-      const Ht='background:#1a3a6b;color:rgba(255,255,255,.85);font-size:.57rem;font-weight:700;text-align:center;padding:.28rem .38rem';
-      const thM=meses.map(m=>`<th style="${H}">${m.slice(0,3)}</th>`).join('');
-      const list=selReg?[selReg]:regiones;
 
-      const rows=list.map((r,i)=>{
-        const rd=regData[r]||{contratos:[],otros:[],total:[]};
-        const clr=PALETTE_REG[regiones.indexOf(r)%PALETTE_REG.length];
-        const cell=(arr,j,bold,c)=>`<td class="num" style="font-size:.58rem;${bold?'font-weight:700;':''}color:${c||'inherit'}">${fmm(arr[j]||0)}</td>`;
-        const rowTot  =Array.from({length:n+1},(_,j)=>cell(rd.total,j,true,clr)).join('');
-        const rowCon  =Array.from({length:n+1},(_,j)=>cell(rd.contratos,j,false,'var(--mut)')).join('');
-        const rowOtr  =Array.from({length:n+1},(_,j)=>cell(rd.otros,j,false,'var(--mut)')).join('');
-        const bg=`${clr}12`;
-        return`<tr style="background:${bg}">
-          <td rowspan="3" style="font-size:.6rem;font-weight:700;white-space:nowrap;padding:.3rem .55rem .3rem .65rem;
-            border-left:3px solid ${clr}">${r}</td>${rowTot}</tr>
-          <tr style="background:${bg};font-size:.56rem;color:var(--mut)">
-            <td colspan="${n+2}" style="padding:0 .55rem;font-style:italic">Contratos</td></tr>
-          <tr style="background:${bg}">${rowCon}</tr>`;
+      const H  = 'background:var(--az3);color:rgba(255,255,255,.85);font-size:.57rem;font-weight:700;text-align:center;padding:.26rem .38rem;white-space:nowrap';
+      const Ht = 'background:#1a3a6b;color:rgba(255,255,255,.85);font-size:.57rem;font-weight:700;text-align:center;padding:.26rem .38rem';
+      const thM = meses.map(m=>`<th style="${H}">${m.slice(0,3)}</th>`).join('');
+      const list = selReg ? [selReg] : regiones;
+
+      const LINEAS = ['Esterilización','Endoscopía','Dental'];
+      const LCLR   = {'Esterilización':'#002D73','Endoscopía':'#28D2C3','Dental':'#FFC000'};
+
+      function cell(arr, j, opts={}){
+        return `<td class="num" style="font-size:.56rem;${opts.bold?'font-weight:700;':''}color:${opts.color||'inherit'};padding:.2rem .38rem">${fmm((arr||[])[j]||0)}</td>`;
+      }
+      function dataRow(lbl, arr, opts={}){
+        const cells = Array.from({length:n+1},(_,j)=>cell(arr,j,opts)).join('');
+        return `<tr style="${opts.bg?'background:'+opts.bg:''};${opts.rowX||''}">
+          <td style="font-size:${opts.sz||'.56rem'};${opts.bold?'font-weight:700;':''}color:${opts.color||'inherit'};padding:.2rem .5rem;white-space:nowrap;${opts.bgL?'background:'+opts.bgL+';':''}">${lbl}</td>
+          ${cells}
+        </tr>`;
+      }
+
+      const rows = list.map(r=>{
+        const rd  = regData[r] || {contratos:[],otros:[],total:[],lineas:{}};
+        const clr = PALETTE_REG[regiones.indexOf(r)%PALETTE_REG.length];
+        const L   = rd.lineas || {};
+        return [
+          `<tr style="background:${clr}18">
+            <td colspan="${n+2}" style="font-size:.61rem;font-weight:700;color:${clr};padding:.3rem .55rem .26rem;border-top:2px solid ${clr}30;border-left:4px solid ${clr}">${r}</td>
+          </tr>`,
+          ...LINEAS.map(ln=>dataRow('  '+ln, L[ln]||[], {color:LCLR[ln]||'var(--mut)'})),
+          dataRow('Total Contratos', rd.contratos, {bold:true, color:'var(--az2)', bg:'rgba(0,160,220,.07)', sz:'.57rem'}),
+          dataRow('Otros Ingresos',  rd.otros,     {color:'#888'}),
+          dataRow('TOTAL FACTURACIÓN', rd.total,   {bold:true, color:'#fff', bg:'var(--az3)', bgL:'var(--az3)', sz:'.58rem'}),
+          `<tr style="height:4px"><td colspan="${n+2}"></td></tr>`,
+        ].join('');
       });
 
-      // Total row calzado con la tabla global
-      const totRowCells=Array.from({length:n+1},(_,j)=>{
-        const v=list.reduce((s,r)=>s+(regData[r]&&regData[r].total[j]||0),0);
-        return`<td class="num" style="font-weight:700;font-size:.59rem">${fmm(v)}</td>`;
+      const grandCells = Array.from({length:n+1},(_,j)=>{
+        const v = list.reduce((s,r)=>s+(regData[r]&&regData[r].total[j]||0),0);
+        return `<td class="num" style="font-weight:700;font-size:.58rem;color:#fff;padding:.24rem .38rem">${fmm(v)}</td>`;
       }).join('');
 
-      el.innerHTML=`<div style="overflow-x:auto;overflow-y:auto;max-height:400px">
-        <table class="tbl" style="font-size:.6rem;width:100%;min-width:400px;border-collapse:separate;border-spacing:0">
+      el.innerHTML=`<div style="overflow-x:auto;overflow-y:auto;max-height:480px">
+        <table class="tbl" style="font-size:.58rem;width:100%;min-width:420px;border-collapse:separate;border-spacing:0">
           <thead><tr>
-            <th style="${H};text-align:left;min-width:115px;position:sticky;left:0;top:0;z-index:3">Región</th>
+            <th style="${H};text-align:left;min-width:140px;position:sticky;left:0;top:0;z-index:3">Concepto</th>
             ${thM}
             <th style="${Ht};position:sticky;top:0;z-index:2">TOTAL</th>
           </tr></thead>
-          <tbody>${rows.join('')}
+          <tbody>
+            ${rows.join('')}
             <tr class="desg-azul" style="background:var(--az3)">
-              <td style="font-size:.6rem;font-weight:700;color:#fff;padding:.32rem .55rem;position:sticky;left:0;background:var(--az3)">TOTAL</td>
-              ${totRowCells}
+              <td style="font-size:.6rem;font-weight:700;color:#fff;padding:.3rem .55rem;position:sticky;left:0;background:var(--az3);white-space:nowrap">${selReg?selReg+' · TOTAL':'TOTAL GENERAL'}</td>
+              ${grandCells}
             </tr>
           </tbody>
-        </table></div>`;
+        </table>
+      </div>`;
     }
 
-    // ── Gráfico por región ──────────────────────────────────
-    // Sin región: apilado por región (contratos, misma base)
-    // Con región: desglose por línea (mismo que gráfico global pero filtrado)
+    // ── Gráfico mensual por región ──────────────────────────
     function renderRegChart(){
-      const ctx2=document.getElementById('cDesgRegion');
+      const ctx2 = document.getElementById('cDesgRegion');
       if(!ctx2||!window.Chart) return;
       if(chartReg){chartReg.destroy();chartReg=null;}
-      const labels=meses.map(m=>m.slice(0,3));
+      const labels = meses.map(m=>m.slice(0,3));
       let datasets, title;
 
       if(!selReg){
@@ -219,32 +233,31 @@
           label:r,
           data:(regData[r]||{contratos:[]}).contratos.slice(0,n),
           backgroundColor:PALETTE_REG[i%PALETTE_REG.length],
-          stack:'s1',borderRadius:3,
+          stack:'s1',borderRadius:2,
         }));
-        title='Ingreso Contratos por Región (MM$)';
-        if(regSub) regSub.textContent=regiones.length+' regiones · calza con "Total Ingreso por Contratos"';
+        title='Contratos por Región (MM$)';
+        if(regSub) regSub.textContent=regiones.length+' regiones';
       } else {
         const rd=regData[selReg]||{};
         const lineas=rd.lineas||{};
         datasets=[
-          {label:'Esterilización',data:(lineas['Esterilización']||[]).slice(0,n),backgroundColor:PALETTE_MAP['Esterilización'],stack:'s1',borderRadius:3},
-          {label:'Endoscopía',    data:(lineas['Endoscopía']||[]).slice(0,n),    backgroundColor:PALETTE_MAP['Endoscopía'],    stack:'s1',borderRadius:3},
-          {label:'Dental',        data:(lineas['Dental']||[]).slice(0,n),        backgroundColor:PALETTE_MAP['Dental'],        stack:'s1',borderRadius:3},
-          {label:'Otros Ingresos',data:(rd.otros||[]).slice(0,n),                backgroundColor:'#C0C0C0',                    stack:'s1',borderRadius:3},
+          {label:'Esterilización',data:(lineas['Esterilización']||[]).slice(0,n),backgroundColor:PALETTE_MAP['Esterilización'],stack:'s1',borderRadius:2},
+          {label:'Endoscopía',    data:(lineas['Endoscopía']||[]).slice(0,n),    backgroundColor:PALETTE_MAP['Endoscopía'],    stack:'s1',borderRadius:2},
+          {label:'Dental',        data:(lineas['Dental']||[]).slice(0,n),        backgroundColor:PALETTE_MAP['Dental'],        stack:'s1',borderRadius:2},
+          {label:'Otros',         data:(rd.otros||[]).slice(0,n),                backgroundColor:'#C0C0C0',                    stack:'s1',borderRadius:2},
         ];
-        title=selReg+' · Contratos por línea + Otros';
-        if(regSub) regSub.textContent=selReg+' · Contratos YTD MM$'+fmm((rd.contratos||[])[n]||0)+' · Total MM$'+fmm((rd.total||[])[n]||0);
+        title=selReg;
+        if(regSub) regSub.textContent=selReg+' · YTD MM$'+fmm((rd.total||[])[n]||0);
       }
 
       chartReg=new Chart(ctx2.getContext('2d'),{
-        type:'bar',
-        data:{labels,datasets},
+        type:'bar',data:{labels,datasets},
         options:{
           responsive:true,maintainAspectRatio:false,
           interaction:{mode:'index',intersect:false},
           plugins:{
-            title:{display:true,text:title,font:{size:9},color:'var(--mut)',padding:{bottom:4}},
-            legend:{position:'bottom',labels:{boxWidth:10,font:{size:8},padding:6}},
+            title:{display:true,text:title,font:{size:9},color:'var(--mut)',padding:{bottom:3}},
+            legend:{position:'bottom',labels:{boxWidth:9,font:{size:8},padding:5}},
             tooltip:{callbacks:{label:c=>` ${c.dataset.label}: MM$${fN1(c.raw||0)}`}}
           },
           scales:{
@@ -256,8 +269,86 @@
       });
     }
 
+    // ── Mapa de Chile con burbujas ──────────────────────────
+    // Bubble chart con coordenadas geográficas → aspecto de mapa estrecho N→S
+    const GEO_CL = {
+      'Arica y Parinacota':                 {lat:-18.5,lon:-70.3},
+      'Tarapacá':                            {lat:-20.2,lon:-69.3},
+      'Antofagasta':                         {lat:-23.7,lon:-69.7},
+      'Atacama':                             {lat:-27.4,lon:-70.3},
+      'Coquimbo':                            {lat:-30.0,lon:-71.3},
+      'Valparaíso':                          {lat:-33.0,lon:-71.6},
+      'Metropolitana de Santiago':           {lat:-33.5,lon:-70.6},
+      'Metropolitana':                       {lat:-33.5,lon:-70.6},
+      "O'Higgins":                           {lat:-34.6,lon:-71.0},
+      'Maule':                               {lat:-35.4,lon:-71.7},
+      'Ñuble':                               {lat:-36.7,lon:-71.8},
+      'Bío Bío':                             {lat:-37.5,lon:-72.4},
+      'Araucanía':                           {lat:-38.9,lon:-72.3},
+      'Los Ríos':                            {lat:-39.8,lon:-73.2},
+      'Los Lagos':                           {lat:-41.5,lon:-73.0},
+      'Aysén':                               {lat:-45.6,lon:-72.1},
+      'Magallanes y la Antártica Chilena':   {lat:-53.2,lon:-70.9},
+      'Sin región':                          {lat:-35.0,lon:-65.5},
+    };
+
+    function renderRegMap(){
+      const ctxM = document.getElementById('cDesgMap');
+      if(!ctxM||!window.Chart) return;
+      if(mapChart){mapChart.destroy();mapChart=null;}
+
+      const maxV = Math.max(...regiones.map(r=>(regData[r]||{total:[]}).total[n]||0), 1);
+
+      const datasets = regiones.map((r,i)=>{
+        const rd  = regData[r]||{total:[]};
+        const geo = GEO_CL[r] || {lat:-35,lon:-70};
+        const val = rd.total[n]||0;
+        const radius = Math.max(7, Math.sqrt(val/maxV)*32);
+        const clr = PALETTE_REG[i%PALETTE_REG.length];
+        const sel = selReg===r;
+        return {
+          label: r,
+          data: [{x:geo.lon, y:geo.lat, r:radius}],
+          backgroundColor: clr+(sel?'dd':'77'),
+          borderColor: sel?'#fff':clr,
+          borderWidth: sel?2.5:1,
+        };
+      });
+
+      mapChart = new Chart(ctxM.getContext('2d'),{
+        type:'bubble',
+        data:{datasets},
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          plugins:{
+            legend:{display:false},
+            title:{display:true,text:'Facturación total por región (YTD)',font:{size:9},color:'var(--mut)',padding:{bottom:2}},
+            tooltip:{callbacks:{
+              title:()=>'',
+              label:c=>{
+                const r=datasets[c.datasetIndex].label;
+                const rd=regData[r]||{total:[]};
+                return ` ${r}: MM$${fN1(rd.total[n]||0)}`;
+              }
+            }}
+          },
+          scales:{
+            x:{min:-77,max:-63,display:false,grid:{display:false}},
+            y:{min:-57,max:-16,display:false,grid:{display:false}},
+          },
+          onClick:(e,elements)=>{
+            if(elements.length>0){
+              const r=datasets[elements[0].datasetIndex].label;
+              setRegion(selReg===r?null:r);
+            }
+          }
+        }
+      });
+    }
+
     renderRegTable();
     renderRegChart();
+    renderRegMap();
   }
 
   // ── GRÁFICO APILADO ──────────────────────────────────────────
