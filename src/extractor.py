@@ -1429,9 +1429,9 @@ def read_ratios2(wb):
     # Fila 7=Ingresos, 8=Contratos, 9=Otras, 10=CdV, 11=Margen, 12=Margen%,
     # 14=Empleados, 15=Otros, 17=EBITDA Directo, 20=GAV Indirecto, 30=EBITDA Empresa
     MAX_MONTHS = 12
-    MAX_COL    = 2 + MAX_MONTHS * 4 + 1
+    MAX_COL    = max(2 + MAX_MONTHS * 4 + 1, 2 + MAX_MONTHS * 2 + 1)  # cubre formato EERR y RATIOS
 
-    rows = list(ws.iter_rows(min_row=1, max_row=50, max_col=MAX_COL, values_only=True))
+    rows = list(ws.iter_rows(min_row=1, max_row=70, max_col=MAX_COL, values_only=True))
 
     MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
              "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
@@ -1548,6 +1548,60 @@ def read_ratios2(wb):
         "resultado_antes_imp":  r42, "resultado_antes_imp_p":  p42, "resultado_antes_imp_v":  v42, "resultado_antes_imp_vp":  vp42,
         "impuesto_renta":       r44, "impuesto_renta_p":       p44, "impuesto_renta_v":       v44, "impuesto_renta_vp":       vp44,
         "resultado_ejercicio":  r45, "resultado_ejercicio_p":  p45, "resultado_ejercicio_v":  v45, "resultado_ejercicio_vp":  vp45,
+        # ── SECCIÓN RATIOS (filas 49-64, 2 cols/mes: Real=col[2+i*2], PTTO=col[3+i*2]) ──
+        # Detectar cuántos meses tienen datos reales válidos en la sección RATIOS
+        **_read_ratios_section(rows, MESES),
+    }
+
+
+def _read_ratios_section(rows, MESES):
+    """Lee la sección RATIOS (filas 49-64) de Ratio Costos 2.
+    Formato: 2 columnas por mes (Real = col[2+i*2], PTTO = col[3+i*2]).
+    Filas clave (índice 0-based desde fila Excel 1):
+      52 → Ingresos ordinarios, 53 → Contratos, 54 → Otras actividades
+      55 → Costo Total, 56 → Costo de ventas
+      58 → Empleados directos, 59 → Otros directos
+      60 → GAV Indirecto, 61 → GAV Total, 63 → Margen del Producto
+    """
+    def gv(row_idx, col_idx):
+        row = rows[row_idx] if row_idx < len(rows) else []
+        if col_idx < len(row) and row[col_idx] is not None:
+            try: return float(row[col_idx])
+            except: return 0.0
+        return 0.0
+
+    def real(ri, i): return round(gv(ri, 2 + i * 2), 3)
+    def ptto(ri, i): return round(gv(ri, 3 + i * 2), 3)
+
+    # Detectar meses con datos (fila 53 = index 52, Ingresos)
+    n_r = 0
+    for i in range(12):
+        if abs(gv(52, 2 + i * 2)) > 0.01:
+            n_r = i + 1
+        else:
+            break
+
+    if n_r == 0:
+        return {"ratios_kpis": {}}
+
+    def arr_r(ri): return [real(ri, i) for i in range(n_r)]
+    def arr_p(ri): return [ptto(ri, i) for i in range(n_r)]
+
+    return {
+        "ratios_kpis": {
+            "n": n_r,
+            "meses": MESES[:n_r],
+            "ingresos_r":     arr_r(52), "ingresos_p":     arr_p(52),   # fila 53
+            "contratos_r":    arr_r(53), "contratos_p":    arr_p(53),   # fila 54
+            "otras_r":        arr_r(54), "otras_p":        arr_p(54),   # fila 55
+            "costo_total_r":  arr_r(55), "costo_total_p":  arr_p(55),   # fila 56
+            "cdv_r":          arr_r(56), "cdv_p":          arr_p(56),   # fila 57
+            "empleados_r":    arr_r(58), "empleados_p":    arr_p(58),   # fila 59
+            "otros_dir_r":    arr_r(59), "otros_dir_p":    arr_p(59),   # fila 60
+            "gav_ind_r":      arr_r(60), "gav_ind_p":      arr_p(60),   # fila 61
+            "gav_total_r":    arr_r(61), "gav_total_p":    arr_p(61),   # fila 62
+            "margen_prod_r":  arr_r(63), "margen_prod_p":  arr_p(63),   # fila 64
+        }
     }
 
 
