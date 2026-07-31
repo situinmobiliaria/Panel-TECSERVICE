@@ -9260,10 +9260,7 @@ function renderAlertas(){
     <div style="display:grid;grid-template-columns:1fr 1.85fr;gap:.8rem;padding:.5rem .95rem 0;align-items:start">
       <div>
         <div style="position:relative;height:190px"><canvas id="cDesgRegion"></canvas></div>
-        <div style="position:relative;height:280px;margin-top:.55rem;cursor:pointer" title="Haz clic en una burbuja para filtrar por región">
-          <canvas id="cDesgMap"></canvas>
-          <div style="position:absolute;bottom:3px;right:6px;font-size:.49rem;color:var(--mut);pointer-events:none">Tamaño = Facturación total · Clic para filtrar</div>
-        </div>
+        <div id="cDesgMap" style="height:280px;margin-top:.55rem;border-radius:6px;overflow:hidden"></div>
       </div>
       <div id="desg-reg-table"></div>
     </div>
@@ -9785,9 +9782,10 @@ function renderAlertas(){
                        '#c44569','#574b90','#3c9d4e','#b5451b','#888','#333','#aaa'];
 
   if(regiones.length > 0){
-    let selReg   = null;
-    let chartReg = null;
-    let mapChart  = null;
+    let selReg      = null;
+    let chartReg    = null;
+    let _regMapL    = null;
+    let _regMapLyr  = null;
 
     const regSub  = document.getElementById('desg-reg-sub');
     const regBtns = document.getElementById('desg-reg-btns');
@@ -9932,8 +9930,7 @@ function renderAlertas(){
       });
     }
 
-    // ── Mapa de Chile con burbujas ──────────────────────────
-    // Bubble chart con coordenadas geográficas → aspecto de mapa estrecho N→S
+    // ── Mapa Leaflet con burbujas por región ───────────────
     const GEO_CL = {
       'Arica y Parinacota':                 {lat:-18.5,lon:-70.3},
       'Tarapacá':                            {lat:-20.2,lon:-69.3},
@@ -9947,66 +9944,63 @@ function renderAlertas(){
       'Maule':                               {lat:-35.4,lon:-71.7},
       'Ñuble':                               {lat:-36.7,lon:-71.8},
       'Bío Bío':                             {lat:-37.5,lon:-72.4},
+      'Biobío':                              {lat:-37.5,lon:-72.4},
       'Araucanía':                           {lat:-38.9,lon:-72.3},
       'Los Ríos':                            {lat:-39.8,lon:-73.2},
       'Los Lagos':                           {lat:-41.5,lon:-73.0},
       'Aysén':                               {lat:-45.6,lon:-72.1},
       'Magallanes y la Antártica Chilena':   {lat:-53.2,lon:-70.9},
-      'Sin región':                          {lat:-35.0,lon:-65.5},
+      'Magallanes':                          {lat:-53.2,lon:-70.9},
     };
 
     function renderRegMap(){
-      const ctxM = document.getElementById('cDesgMap');
-      if(!ctxM||!window.Chart) return;
-      if(mapChart){mapChart.destroy();mapChart=null;}
+      if(!window.L) return;
+      const div = document.getElementById('cDesgMap');
+      if(!div) return;
 
-      const maxV = Math.max(...regiones.map(r=>(regData[r]||{total:[]}).total[n]||0), 1);
+      if(!_regMapL){
+        _regMapL = L.map('cDesgMap',{zoomControl:true,scrollWheelZoom:false})
+                    .setView([-35.5,-70.5],4);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
+          attribution:'© OpenStreetMap © CARTO',maxZoom:18
+        }).addTo(_regMapL);
+      }
+      if(!_regMapLyr){ _regMapLyr=L.layerGroup().addTo(_regMapL); }
+      _regMapLyr.clearLayers();
 
-      const datasets = regiones.map((r,i)=>{
+      const maxV = Math.max(...regiones.map(r=>(regData[r]||{total:[]}).total[n]||0),1);
+
+      regiones.forEach((r,i)=>{
         const rd  = regData[r]||{total:[]};
-        const geo = GEO_CL[r] || {lat:-35,lon:-70};
+        const geo = GEO_CL[r];
+        if(!geo) return;
         const val = rd.total[n]||0;
-        const radius = Math.max(7, Math.sqrt(val/maxV)*32);
         const clr = PALETTE_REG[i%PALETTE_REG.length];
-        const sel = selReg===r;
-        return {
-          label: r,
-          data: [{x:geo.lon, y:geo.lat, r:radius}],
-          backgroundColor: clr+(sel?'dd':'77'),
-          borderColor: sel?'#fff':clr,
-          borderWidth: sel?2.5:1,
-        };
+        const isSel = selReg===r;
+        const radius = Math.max(8, Math.sqrt(val/maxV)*36);
+
+        const circ = L.circleMarker([geo.lat,geo.lon],{
+          radius, fillColor:clr,
+          color: isSel?'#fff':clr,
+          weight: isSel?2.5:1.5,
+          opacity:1, fillOpacity: isSel?0.95:0.78,
+        });
+        circ.bindTooltip(
+          `<strong style="font-size:.7rem">${r}</strong><br>`+
+          `<span style="font-size:.62rem">Total YTD: <strong>MM$${fN1(val)}</strong></span><br>`+
+          `<span style="font-size:.62rem">Contratos: <strong>MM$${fN1((rd.contratos||[])[n]||0)}</strong></span>`,
+          {sticky:true,opacity:.95}
+        );
+        circ.on('click',()=>setRegion(selReg===r?null:r));
+        _regMapLyr.addLayer(circ);
       });
 
-      mapChart = new Chart(ctxM.getContext('2d'),{
-        type:'bubble',
-        data:{datasets},
-        options:{
-          responsive:true, maintainAspectRatio:false,
-          plugins:{
-            legend:{display:false},
-            title:{display:true,text:'Facturación total por región (YTD)',font:{size:9},color:'var(--mut)',padding:{bottom:2}},
-            tooltip:{callbacks:{
-              title:()=>'',
-              label:c=>{
-                const r=datasets[c.datasetIndex].label;
-                const rd=regData[r]||{total:[]};
-                return ` ${r}: MM$${fN1(rd.total[n]||0)}`;
-              }
-            }}
-          },
-          scales:{
-            x:{min:-77,max:-63,display:false,grid:{display:false}},
-            y:{min:-57,max:-16,display:false,grid:{display:false}},
-          },
-          onClick:(e,elements)=>{
-            if(elements.length>0){
-              const r=datasets[elements[0].datasetIndex].label;
-              setRegion(selReg===r?null:r);
-            }
-          }
-        }
-      });
+      // Si hay región seleccionada, centrar mapa en ella
+      if(selReg && GEO_CL[selReg]){
+        _regMapL.setView([GEO_CL[selReg].lat,GEO_CL[selReg].lon],6,{animate:true});
+      } else {
+        _regMapL.setView([-35.5,-70.5],4,{animate:true});
+      }
     }
 
     renderRegTable();
