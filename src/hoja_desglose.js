@@ -106,6 +106,158 @@
       </div>`;
   }
 
+  // ── REGIÓN ───────────────────────────────────────────────────
+  const PR = D.por_region || {};
+  const regiones = PR.regiones || [];
+  const regData  = PR.data    || {};
+
+  if(regiones.length > 0){
+    const PALETTE_REG = ['#002D73','#28D2C3','#FFC000','#E87722','#7A1FAA',
+                         '#0A5C8C','#00832F','#D46000','#8B008B','#999'];
+    let selReg  = null;
+    let chartReg = null;
+
+    const regSub  = document.getElementById('desg-reg-sub');
+    const regBtns = document.getElementById('desg-reg-btns');
+
+    // Botones de filtro
+    ['Todas', ...regiones].forEach((r, i) => {
+      const b = document.createElement('button');
+      b.className = 'btn' + (i === 0 ? ' on' : '');
+      b.textContent = r;
+      b.style.fontSize = '.58rem';
+      if(i > 0) b.style.borderLeftColor = PALETTE_REG[(i-1) % PALETTE_REG.length];
+      b.addEventListener('click', () => {
+        selReg = r === 'Todas' ? null : r;
+        regBtns.querySelectorAll('.btn').forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+        renderRegTable();
+        renderRegChart();
+      });
+      if(regBtns) regBtns.appendChild(b);
+    });
+
+    // ── Tabla resumen por región ────────────────────────────
+    function renderRegTable(){
+      const el = document.getElementById('desg-reg-table');
+      if(!el) return;
+      const colHdr = `background:var(--az3);color:rgba(255,255,255,.85);font-size:.57rem;
+        font-weight:700;text-align:center;padding:.28rem .38rem;white-space:nowrap;position:sticky;top:0;z-index:1`;
+      const thMeses = meses.map(m=>`<th style="${colHdr}">${m.slice(0,3)}</th>`).join('');
+      const list = selReg ? [selReg] : regiones;
+      const rows = list.map((r, i) => {
+        const rd  = regData[r] || {total:[],contratos:[],otros:[]};
+        const clr = PALETTE_REG[regiones.indexOf(r) % PALETTE_REG.length];
+        const totCells = Array.from({length:n+1},(_,j)=>
+          `<td class="num" style="color:${clr};font-weight:700;font-size:.6rem">${fmm(rd.total[j]||0)}</td>`).join('');
+        const conCells = Array.from({length:n+1},(_,j)=>
+          `<td class="num" style="color:var(--mut);font-size:.57rem">${fmm(rd.contratos[j]||0)}</td>`).join('');
+        const otrCells = Array.from({length:n+1},(_,j)=>
+          `<td class="num" style="color:var(--mut);font-size:.57rem">${fmm(rd.otros[j]||0)}</td>`).join('');
+        return `
+          <tr>
+            <td rowspan="3" style="font-size:.6rem;font-weight:700;white-space:nowrap;padding:.3rem .55rem;
+              border-left:3px solid ${clr};background:${clr}18">${r}</td>
+            ${totCells}
+          </tr>
+          <tr style="background:${clr}08">
+            <td colspan="${n+2}" style="padding:.05rem 0;font-size:.55rem;color:var(--mut);
+              padding-left:.55rem">Contratos</td>
+          </tr>
+          <tr style="background:${clr}08">
+            ${conCells}
+          </tr>`;
+      });
+
+      // Total row
+      const totRow = Array.from({length:n+1},(_,j)=>{
+        const v = list.reduce((s,r)=>s+(regData[r]&&regData[r].total[j]||0),0);
+        return `<td class="num" style="font-weight:700;font-size:.6rem">${fmm(v)}</td>`;
+      }).join('');
+
+      el.innerHTML = `<table class="tbl" style="font-size:.6rem;width:100%;min-width:420px;border-collapse:separate;border-spacing:0">
+        <thead><tr>
+          <th style="${colHdr};text-align:left;min-width:110px">Región</th>
+          ${thMeses}
+          <th style="${colHdr};background:#1a3a6b">TOTAL</th>
+        </tr></thead>
+        <tbody>${rows.join('')}
+          <tr class="desg-azul" style="background:var(--az3)">
+            <td style="font-size:.6rem;font-weight:700;color:#fff;padding:.32rem .55rem">TOTAL</td>
+            ${totRow}
+          </tr>
+        </tbody>
+      </table>`;
+    }
+
+    // ── Gráfico por región ──────────────────────────────────
+    function renderRegChart(){
+      const ctx2 = document.getElementById('cDesgRegion');
+      if(!ctx2 || !window.Chart) return;
+      if(chartReg){ chartReg.destroy(); chartReg=null; }
+
+      const labels = meses.map(m => m.slice(0,3));
+
+      if(!selReg){
+        // Todas: barras apiladas por región
+        const datasets = regiones.map((r, i) => ({
+          label: r,
+          data: (regData[r]||{total:[]}).total.slice(0, n),
+          backgroundColor: PALETTE_REG[i % PALETTE_REG.length],
+          stack: 's1', borderRadius: 3,
+        }));
+        chartReg = new Chart(ctx2.getContext('2d'), {
+          type: 'bar',
+          data: { labels, datasets },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode:'index', intersect:false },
+            plugins: {
+              legend: { position:'bottom', labels:{boxWidth:10,font:{size:8},padding:6} },
+              tooltip: { callbacks: { label: c => ` ${c.dataset.label}: MM$${fN1(c.raw||0)}` } }
+            },
+            scales: {
+              x: { stacked:true, grid:{display:false}, ticks:{font:{size:9}} },
+              y: { stacked:true, grid:{color:'#E2E6F0'},
+                   ticks:{font:{size:9},callback:v=>'MM$'+(v||0).toLocaleString('es-CL',{maximumFractionDigits:0})}}
+            }
+          }
+        });
+        if(regSub) regSub.textContent = regiones.length + ' regiones · Todas';
+      } else {
+        // Región seleccionada: Contratos vs Otros
+        const rd = regData[selReg] || {contratos:[], otros:[]};
+        chartReg = new Chart(ctx2.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              { label:'Contratos', data: rd.contratos.slice(0,n), backgroundColor:'#002D73', stack:'s1', borderRadius:3 },
+              { label:'Otros',     data: rd.otros.slice(0,n),     backgroundColor:'#28D2C3', stack:'s1', borderRadius:3 },
+            ]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode:'index', intersect:false },
+            plugins: {
+              legend: { position:'bottom', labels:{boxWidth:10,font:{size:9},padding:6} },
+              tooltip: { callbacks: { label: c => ` ${c.dataset.label}: MM$${fN1(c.raw||0)}` } }
+            },
+            scales: {
+              x: { stacked:true, grid:{display:false}, ticks:{font:{size:9}} },
+              y: { stacked:true, grid:{color:'#E2E6F0'},
+                   ticks:{font:{size:9},callback:v=>'MM$'+(v||0).toLocaleString('es-CL',{maximumFractionDigits:0})}}
+            }
+          }
+        });
+        if(regSub) regSub.textContent = selReg + ' · Total YTD MM$' + fmm(rd.total[n]||0);
+      }
+    }
+
+    renderRegTable();
+    renderRegChart();
+  }
+
   // ── GRÁFICO APILADO ──────────────────────────────────────────
   const ctx = document.getElementById('cDesglose');
   if(ctx && window.Chart){

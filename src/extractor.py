@@ -505,6 +505,19 @@ def read_bbdd(xlsx_path):
     ytd_contr_2024 = ytd_contr_total(ANO - 2, mes_corte)
     ytd_contr_2025 = ytd_contr_total(ANO - 1, mes_corte)
 
+    # Monthly billing per client for current year (same filters as df_fac_ano)
+    mensual_por_cliente = {}
+    for cli_k, grp in df_fac_ano.groupby(c_cliente):
+        s = str(cli_k).strip()
+        if not s or s.lower() in ("nan", "none"):
+            continue
+        a = [0.0] * 12
+        for m_val, sub in grp.groupby(c_mes):
+            mi = int(m_val) - 1
+            if 0 <= mi < 12:
+                a[mi] = float(sub[c_monto].sum())
+        mensual_por_cliente[s] = a
+
     return {
         "mensual_total":         mensual_total,
         "mensual_facturado":     mensual_facturado,
@@ -523,6 +536,7 @@ def read_bbdd(xlsx_path):
         "ytd_contr_2024":        ytd_contr_2024,
         "ytd_contr_2025":        ytd_contr_2025,
         "mes_corte":             mes_corte,
+        "mensual_por_cliente":   mensual_por_cliente,
     }
 
 
@@ -1593,7 +1607,7 @@ def enrich_mapa_data(mapa_data, contratos, satisf):
 #     Otros Ingresos (Trazabilidad / REAS / Marca). Reconciliado 1:1 con la
 #     facturación real mensual (fac_arr) y con contr_real_monthly.
 # ══════════════════════════════════════════════════════════════════════════════
-def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fac_arr, mes_corte):
+def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fac_arr, mes_corte, mapa_data=None):
     n = mes_corte
     if n <= 0:
         return {}
@@ -1734,18 +1748,63 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
 
     total_general = with_total(to_mm([fac_arr[m] if m < len(fac_arr) else 0.0 for m in range(n)]))
 
+    # ── Desglose por región ──────────────────────────────────────
+    cli_to_region = {}
+    if mapa_data:
+        for entry in mapa_data:
+            nombre = entry.get("n", "")
+            if nombre:
+                r = (entry.get("region") or "Sin región").strip() or "Sin región"
+                cli_to_region[nombre] = r
+
+    mensual_por_cli = bbdd.get("mensual_por_cliente", {})
+    reg_tot = {}    # {region: [n floats]}  total billing MM$
+    reg_con = {}    # {region: [n floats]}  contratos billing MM$
+
+    for cli, arr in mensual_por_cli.items():
+        region = cli_to_region.get(cli, "Sin región")
+        if region not in reg_tot:
+            reg_tot[region] = [0.0] * n
+            reg_con[region] = [0.0] * n
+        for m in range(n):
+            reg_tot[region][m] += arr[m] if m < len(arr) else 0.0
+
+    for p in panel_raw:
+        cli = p["cliente"]
+        region = cli_to_region.get(cli, "Sin región")
+        if region not in reg_tot:
+            reg_tot[region] = [0.0] * n
+            reg_con[region] = [0.0] * n
+        ca = p.get("contr_meses_2026") or [0.0] * 12
+        for m in range(n):
+            reg_con[region][m] += ca[m] if m < len(ca) else 0.0
+
+    reg_out = {}
+    for r in reg_tot:
+        tot = to_mm(reg_tot[r])
+        con = to_mm(reg_con.get(r, [0.0] * n))
+        otr = [max(0.0, round(tot[m] - con[m], 3)) for m in range(n)]
+        reg_out[r] = {
+            "total":     with_total(tot),
+            "contratos": with_total(con),
+            "otros":     otr + [round(sum(otr), 3)],
+        }
+
+    regiones_sorted = sorted(reg_out, key=lambda r: reg_out[r]["total"][n], reverse=True)
+
     return {
         "meses": meses_lbl,
         "contratos": {"lineas": contratos_lineas, "total": contratos_total},
         "otros":     {"categorias": otros_categorias, "total": otros_total},
         "total_general": total_general,
+        "por_region": {"regiones": regiones_sorted, "data": reg_out},
     }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 7. ENSAMBLAR APP_DATA
 # ══════════════════════════════════════════════════════════════════════════════
-def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac=None, base_instalada=None):
+def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac=None, base_instalada=None, mapa_data=None):
 
     # Lookups from CONTRATOS
     coord_by_cli   = {}
@@ -1837,7 +1896,7 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
     _fac_arr = to_arr(bbdd["mensual_facturado"], ANO)
     nocontr_real_monthly = [max(0, _fac_arr[m] - contr_real_monthly[m]) for m in range(12)]
 
-    desglose_ingresos = compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, _fac_arr, mes_corte)
+    desglose_ingresos = compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, _fac_arr, mes_corte, mapa_data=mapa_data)
 
     _MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
               "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
@@ -2202,7 +2261,7 @@ def main():
 
     # ── Construir estructuras de datos ───────────────────────────────────────
     print("[6/6] Construyendo estructuras de datos...")
-    app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada)
+    app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada, mapa_data=mapa_data)
     app_data["ratios2"] = ratios2
     app_data["resumen_programas"] = resumen_programas
     # Hora fija 02:50 am (el proceso real de actualización se considera
