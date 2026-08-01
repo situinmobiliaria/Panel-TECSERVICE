@@ -19,14 +19,48 @@ from collections import defaultdict
 import openpyxl
 import pandas as pd
 
+def _xlsb_to_xlsx(xlsb_path):
+    """Convierte .xlsb a .xlsx temporal usando Excel COM. Retorna la ruta del xlsx generado."""
+    import win32com.client, shutil, tempfile
+    # Guardar en directorio temporal para evitar conflictos con archivo existente
+    tmp_dir  = tempfile.gettempdir()
+    tmp_path = os.path.join(tmp_dir, "panel_ts_converted.xlsx")
+    print(f"  Convirtiendo {os.path.basename(xlsb_path)} con Excel COM ...")
+    excel = None
+    wb_com = None
+    try:
+        excel = win32com.client.Dispatch("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        excel.AskToUpdateLinks = False
+        wb_com = excel.Workbooks.Open(
+            os.path.abspath(xlsb_path),
+            UpdateLinks=0, ReadOnly=True
+        )
+        # Si ya existe el tmp, borrarlo primero
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        wb_com.SaveAs(tmp_path, FileFormat=51)  # 51 = xlOpenXMLWorkbook
+        print(f"  Conversión completada → {tmp_path}")
+        return tmp_path
+    finally:
+        if wb_com:
+            try: wb_com.Close(False)
+            except: pass
+        if excel:
+            try: excel.Quit()
+            except: pass
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIG — editar aquí si cambia algo
 # ══════════════════════════════════════════════════════════════════════════════
 DIR  = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(DIR)
-XLSX      = os.path.join(ROOT, "data", "CONTRATOS -FACTURACION -SATISFACCION -VISITAS.xlsx")
-TMPL = os.path.join(DIR, "template.html")
-OUT  = os.path.join(DIR, "dashboard_contratos_v16.2.html")
+_BASE_NAME = "CONTRATOS -FACTURACION -SATISFACCION -VISITAS"
+XLSX  = os.path.join(ROOT, "data", _BASE_NAME + ".xlsx")
+XLSB  = os.path.join(ROOT, "data", _BASE_NAME + ".xlsb")
+TMPL  = os.path.join(DIR, "template.html")
+OUT   = os.path.join(DIR, "dashboard_contratos_v16.2.html")
 
 PPTO_ANUAL_TOTAL = 2_724_000_000   # Presupuesto anual total del área (CLP)
 
@@ -2286,16 +2320,22 @@ def main():
     print(f"  Fecha : {TODAY}  |  Ano : {ANO}")
     print("=" * 60)
 
-    if not os.path.exists(XLSX):
-        print(f"\nERROR: No se encontro el Excel en:\n  {XLSX}")
+    # Detectar archivo: si existe .xlsb, convertir a xlsx temporal (siempre fresco)
+    xlsx_to_use = XLSX
+    if os.path.exists(XLSB):
+        print(f"\n  Encontrado .xlsb — convirtiendo con Excel COM...")
+        xlsx_to_use = _xlsb_to_xlsx(XLSB)
+    elif not os.path.exists(XLSX):
+        print(f"\nERROR: No se encontro el Excel en:\n  {XLSX}\n  ni en: {XLSB}")
         return
+
     if not os.path.exists(TMPL):
         print(f"\nERROR: No se encontro el template HTML en:\n  {TMPL}")
         return
 
     # ── Leer hojas simples con openpyxl ──────────────────────────────────────
     print("\n[1/5] Abriendo Excel con openpyxl...")
-    wb = openpyxl.load_workbook(XLSX, read_only=True, data_only=True)
+    wb = openpyxl.load_workbook(xlsx_to_use, read_only=True, data_only=True)
 
     print("[2/5] Leyendo CONTRATOS TODOS...")
     contratos = read_contratos(wb)
@@ -2316,12 +2356,12 @@ def main():
 
     # ── Leer BBDD FACTURACION con pandas ─────────────────────────────────────
     print("[5/5] Leyendo BBDD FACTURACION...")
-    bbdd      = read_bbdd(XLSX)
+    bbdd      = read_bbdd(xlsx_to_use)
     mes_corte = bbdd["mes_corte"]
     print(f"       MES_CORTE detectado automaticamente: {mes_corte}")
 
     # Ahora sí leemos visitas con mes_corte correcto
-    wb2 = openpyxl.load_workbook(XLSX, read_only=True, data_only=True)
+    wb2 = openpyxl.load_workbook(xlsx_to_use, read_only=True, data_only=True)
     visitas = read_visitas(wb2, mes_corte)
     analisis_fac = read_analisis_fac(wb2)
     base_instalada = read_base_instalada(wb2)
