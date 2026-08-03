@@ -94,6 +94,26 @@ function _repHTML() {
         <tfoot id="rep-tfoot"></tfoot>
       </table>
     </div>
+  </div>
+
+  <!-- Tabla: Resumen por Cliente -->
+  <div class="card" style="margin-top:.9rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(51,68,141,.18),rgba(51,68,141,.06));flex-wrap:wrap;gap:.4rem">
+      <span class="ct" style="color:var(--az2)">Resumen por Cliente</span>
+      <span style="font-size:.58rem;color:var(--mut)" id="rep-cli-count">—</span>
+    </div>
+    <div style="overflow-x:auto;overflow-y:auto;max-height:55vh">
+      <table class="tbl" id="rep-table-cli" style="min-width:700px">
+        <thead><tr>
+          <th style="min-width:280px;position:sticky;top:0;z-index:2">Cliente</th>
+          <th style="min-width:100px;position:sticky;top:0;z-index:2">N° Casos</th>
+          <th style="min-width:120px;position:sticky;top:0;z-index:2">$ Monto</th>
+          <th style="min-width:90px;position:sticky;top:0;z-index:2">% del Total</th>
+        </tr></thead>
+        <tbody id="rep-tbody-cli"></tbody>
+        <tfoot id="rep-tfoot-cli"></tfoot>
+      </table>
+    </div>
   </div>`;
 }
 
@@ -350,6 +370,38 @@ function renderRepuestos() {
 
   const tCount = document.getElementById('rep-t-count');
   if (tCount) tCount.textContent = equiposFilt.length + ' equipo' + (equiposFilt.length !== 1 ? 's' : '') + ' · ' + totalRepuestos + ' repuesto' + (totalRepuestos !== 1 ? 's' : '');
+
+  // ── Tabla: Resumen por Cliente ────────────────────────────────
+  const tbodyCli = document.getElementById('rep-tbody-cli');
+  const tfootCli = document.getElementById('rep-tfoot-cli');
+  if (tbodyCli) {
+    const clientes = D.clientes || [];
+    const granCasosCli  = clientes.reduce((s, c) => s + c.casos, 0);
+    const granMontoCli  = clientes.reduce((s, c) => s + c.monto, 0);
+
+    tbodyCli.innerHTML = clientes.map(c => {
+      const esSinCliente = c.cliente === 'Sin Cliente';
+      return `<tr>
+        <td>${esSinCliente
+          ? `<span style="font-size:.6rem;color:var(--mut);font-style:italic">${_escH(c.cliente)}</span>`
+          : `<strong style="font-size:.62rem">${_escH(c.cliente)}</strong>`}</td>
+        <td style="text-align:center;font-size:.63rem;font-weight:700">${c.casos}</td>
+        <td style="text-align:right;font-size:.63rem;font-weight:700;color:var(--teal)">${_fmtRep(c.monto)}</td>
+        <td style="text-align:right;font-size:.63rem;color:var(--mut)">${c.monto > 0 ? fN1(c.pct) + '%' : '—'}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="4" style="text-align:center;padding:1.2rem;color:var(--mut)">Sin datos</td></tr>';
+
+    if (tfootCli) {
+      tfootCli.innerHTML = clientes.length ? `<tr>
+        <td style="padding:.4rem .7rem;font-size:.62rem">Total General · ${clientes.length} cliente${clientes.length !== 1 ? 's' : ''}</td>
+        <td style="text-align:center;font-size:.65rem">${granCasosCli}</td>
+        <td style="text-align:right;font-size:.65rem">${_fmtRep(granMontoCli)}</td>
+        <td style="text-align:right;font-size:.65rem">100,0%</td>
+      </tr>` : '';
+    }
+    const cliCount = document.getElementById('rep-cli-count');
+    if (cliCount) cliCount.textContent = clientes.length + ' cliente' + (clientes.length !== 1 ? 's' : '');
+  }
 }
 
 // ── HOOK sv() ────────────────────────────────────────────────────

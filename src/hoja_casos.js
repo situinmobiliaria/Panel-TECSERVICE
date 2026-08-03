@@ -198,6 +198,29 @@ function _casosHTML() {
         <tfoot id="cas-tfoot6"></tfoot>
       </table>
     </div>
+  </div>
+
+  <!-- Tabla 7: Detalle de Equipos por Cliente -->
+  <div class="card" style="margin-top:.9rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(51,68,141,.18),rgba(51,68,141,.06));flex-wrap:wrap;gap:.4rem">
+      <span class="ct" style="color:var(--az2)">Detalle de Equipos por Cliente</span>
+      <span style="font-size:.58rem;color:var(--mut)" id="cas-t7-count">—</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="cas-table7" style="min-width:1200px">
+        <thead><tr>
+          <th style="min-width:220px">Cliente</th>
+          <th style="min-width:140px">Familia de Equipo</th>
+          <th style="min-width:100px">Marca</th>
+          <th style="min-width:190px">Razón</th>
+          <th style="min-width:110px">$ por Cliente</th>
+          <th style="min-width:110px">$ Contrato</th>
+          <th style="min-width:100px">% del Contrato</th>
+        </tr></thead>
+        <tbody id="cas-tbody7"></tbody>
+        <tfoot id="cas-tfoot7"></tfoot>
+      </table>
+    </div>
   </div>`;
 }
 
@@ -681,6 +704,97 @@ function renderCasos() {
     }
     const t6count = document.getElementById('cas-t6-count');
     if (t6count) t6count.textContent = clientes.length + ' cliente' + (clientes.length !== 1 ? 's' : '') + ' · ' + eqFilt.length + ' equipo' + (eqFilt.length !== 1 ? 's' : '');
+  }
+
+  // ── Tabla 7: Detalle de Equipos por Cliente ─────────────────────
+  const tbody7 = document.getElementById('cas-tbody7');
+  const tfoot7 = document.getElementById('cas-tfoot7');
+  if (tbody7) {
+    const _fmtM7  = v => v > 0 ? 'MM$' + fN1(v / 1e6) : '—';
+    const _dash7  = '<span style="color:var(--mut);font-size:.6rem">—</span>';
+
+    const porCliente7 = {};
+    eqFilt.forEach(e => {
+      const cliente = e.nombre_cliente || 'Sin Cliente Asociado';
+      if (!porCliente7[cliente]) porCliente7[cliente] = [];
+      porCliente7[cliente].push(e);
+    });
+
+    // Ordenar clientes por $ Contrato total desc (Sin Cliente Asociado al final)
+    const clientes7 = Object.keys(porCliente7).sort((a, b) => {
+      if (a === 'Sin Cliente Asociado') return 1;
+      if (b === 'Sin Cliente Asociado') return -1;
+      const sumA = porCliente7[a].reduce((s, e) => s + (e.fac_anual || 0), 0);
+      const sumB = porCliente7[b].reduce((s, e) => s + (e.fac_anual || 0), 0);
+      return sumB - sumA;
+    });
+
+    const html7 = [];
+    let gran7Cant = 0, gran7Cliente = 0, gran7Contrato = 0;
+
+    clientes7.forEach(cli => {
+      const list = porCliente7[cli];
+      const esSinCliente = cli === 'Sin Cliente Asociado';
+      let firstRow = true;
+      let subCliente = 0, subContrato = 0;
+
+      list.forEach(e => {
+        const marca   = _normMarca(e.marca);
+        const familia = _familiaModelo(marca, e.modelo);
+        const razon   = _clasificarRazon(e.comentario_coord);
+
+        const clienteCell = firstRow
+          ? `<td rowspan="${list.length}" style="vertical-align:top;padding-top:.4rem">${esSinCliente
+              ? `<span style="font-size:.6rem;color:var(--mut);font-style:italic">${_escH(cli)}</span>`
+              : `<strong style="font-size:.62rem">${_escH(cli)}</strong>`}</td>`
+          : '';
+        firstRow = false;
+
+        const porClienteCell = !esSinCliente && e.neta_mes > 0
+          ? `<span style="font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM7(e.neta_mes)}</span>` : _dash7;
+        const contratoCell = !esSinCliente && e.fac_anual > 0
+          ? `<span style="font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM7(e.fac_anual)}</span>` : _dash7;
+        const pctContrato = (!esSinCliente && e.fac_anual > 0) ? (e.fac_ytd / e.fac_anual) * 100 : null;
+        const pctCell = pctContrato !== null
+          ? `<span style="font-size:.62rem;font-weight:700;color:var(--teal)">${fN1(pctContrato)}%</span>` : _dash7;
+        const razonCell = `<span class="badge" style="font-size:.53rem;background:${razon.color}18;color:${razon.color};border:1px solid ${razon.color}55">${razon.label}</span>`;
+
+        subCliente  += (!esSinCliente ? (e.neta_mes  || 0) : 0);
+        subContrato += (!esSinCliente ? (e.fac_anual || 0) : 0);
+
+        html7.push(`<tr>
+          ${clienteCell}
+          <td><span style="font-size:.62rem;font-weight:600;color:var(--am)">${_escH(familia)}</span></td>
+          <td><span style="font-size:.6rem">${_escH(marca)}</span></td>
+          <td style="text-align:center">${razonCell}</td>
+          <td style="text-align:right">${porClienteCell}</td>
+          <td style="text-align:right">${contratoCell}</td>
+          <td style="text-align:center">${pctCell}</td>
+        </tr>`);
+      });
+
+      html7.push(`<tr style="background:rgba(51,68,141,.1)">
+        <td colspan="4" style="text-align:right;font-size:.6rem;font-style:italic;color:var(--txt);padding:.3rem .6rem">Subtotal ${_escH(cli)} · ${list.length} equipo${list.length !== 1 ? 's' : ''}</td>
+        <td style="text-align:right;font-size:.62rem;font-weight:800;color:var(--az2)">${_fmtM7(subCliente)}</td>
+        <td style="text-align:right;font-size:.62rem;font-weight:800;color:var(--az2)">${_fmtM7(subContrato)}</td>
+        <td></td>
+      </tr>`);
+
+      gran7Cant += list.length; gran7Cliente += subCliente; gran7Contrato += subContrato;
+    });
+
+    tbody7.innerHTML = html7.join('') || '<tr><td colspan="7" style="text-align:center;padding:1.2rem;color:var(--mut)">Sin equipos para los filtros seleccionados</td></tr>';
+
+    if (tfoot7) {
+      tfoot7.innerHTML = clientes7.length ? `<tr>
+        <td colspan="4" style="padding:.4rem .7rem;font-size:.62rem">Total General · ${clientes7.length} cliente${clientes7.length !== 1 ? 's' : ''} · ${gran7Cant} equipo${gran7Cant !== 1 ? 's' : ''}</td>
+        <td style="text-align:right;font-size:.65rem">${_fmtM7(gran7Cliente)}</td>
+        <td style="text-align:right;font-size:.65rem">${_fmtM7(gran7Contrato)}</td>
+        <td></td>
+      </tr>` : '';
+    }
+    const t7count = document.getElementById('cas-t7-count');
+    if (t7count) t7count.textContent = clientes7.length + ' cliente' + (clientes7.length !== 1 ? 's' : '') + ' · ' + eqFilt.length + ' equipo' + (eqFilt.length !== 1 ? 's' : '');
   }
 
   // KPIs

@@ -1552,6 +1552,7 @@ def read_repuestos(casos_data):
     ws = wb["Detalle de SKU vendidos"]
 
     agg = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {"casos": 0, "monto": 0.0})))
+    agg_cli = defaultdict(lambda: {"casos": 0, "monto": 0.0})
     tier_count = Counter()
     total_filas = 0
 
@@ -1575,6 +1576,11 @@ def read_repuestos(casos_data):
         cell = agg[(marca, familia)][producto][ano_s]
         cell["casos"] += 1
         cell["monto"] += monto
+
+        cliente_lbl = safe_str(cliente).strip() or "Sin Cliente"
+        cli_cell = agg_cli[cliente_lbl]
+        cli_cell["casos"] += 1
+        cli_cell["monto"] += monto
 
     wb.close()
 
@@ -1609,8 +1615,21 @@ def read_repuestos(casos_data):
 
     equipos_out.sort(key=lambda e: e["total_monto"], reverse=True)
 
+    tot_monto_global = sum(c["monto"] for c in agg_cli.values())
+    clientes_out = [
+        {
+            "cliente": cli,
+            "casos": c["casos"],
+            "monto": round(c["monto"]),
+            "pct": round(c["monto"] / tot_monto_global * 100, 1) if tot_monto_global > 0 else 0,
+        }
+        for cli, c in agg_cli.items()
+    ]
+    clientes_out.sort(key=lambda c: c["monto"], reverse=True)
+
     return {
         "equipos": equipos_out,
+        "clientes": clientes_out,
         "match_stats": {
             "total_filas": total_filas,
             "con_modelo": tier_count.get("modelo", 0),
@@ -2421,7 +2440,7 @@ def patch_html(html, data, app_data, mapa_data=None, casos_data=None, alerta_dat
     mapa_json   = json.dumps(mapa_data   or [], ensure_ascii=False)
     casos_json      = json.dumps(casos_data      or {"casos": [], "equipos": []}, ensure_ascii=False)
     alerta_json     = json.dumps(alerta_data     or [], ensure_ascii=False)
-    repuestos_json  = json.dumps(repuestos_data  or {"equipos": [], "match_stats": {}}, ensure_ascii=False)
+    repuestos_json  = json.dumps(repuestos_data  or {"equipos": [], "clientes": [], "match_stats": {}}, ensure_ascii=False)
     new_block = (
         "<script>\n"
         f"const DATA = {json.dumps(data, ensure_ascii=False)};\n\n"
