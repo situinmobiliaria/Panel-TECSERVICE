@@ -171,30 +171,51 @@
       const LINEAS = ['Esterilización','Endoscopía','Dental'];
       const LCLR   = {'Esterilización':'#002D73','Endoscopía':'#28D2C3','Dental':'#FFC000'};
 
+      const ac25Lbl = (meses[n-1]||'').slice(0,3).toUpperCase();
+      const EXTRA_COLS = 3; // % TOTAL, AC. 2025, VAR. YOY
+
       function cell(arr, j, opts={}){
         return `<td class="num" style="font-size:.56rem;${opts.bold?'font-weight:700;':''}color:${opts.color||'inherit'};padding:.2rem .38rem">${fmm((arr||[])[j]||0)}</td>`;
       }
+      function pctTotalCell(arr, base, opts={}){
+        const pct = opts.isTotal ? 100 : (base>0 ? ((arr[n]||0)/base*100) : null);
+        return `<td class="num" style="font-size:.56rem;${opts.bold?'font-weight:700;':''}color:${opts.color||'var(--mut)'};padding:.2rem .38rem">${pct==null?'—':fN1(pct)+'%'}</td>`;
+      }
+      function acum2025Cell(v, opts={}){
+        if (v==null) return `<td style="padding:.2rem .38rem"></td>`;
+        return `<td class="num" style="font-size:.56rem;${opts.bold?'font-weight:700;':''}color:${opts.color||'inherit'};padding:.2rem .38rem">${fmm(v)}</td>`;
+      }
+      function difCell(v){
+        if (v==null) return `<td style="padding:.2rem .38rem"><span style="font-size:.5rem;color:var(--mut)">s/d</span></td>`;
+        const clr = v>=0 ? 'var(--teal)' : '#ff8a8a';
+        const sign = v>=0 ? '+' : '';
+        return `<td class="num" style="font-size:.56rem;font-weight:700;color:${clr};padding:.2rem .38rem">${sign}${fN1(v)}%</td>`;
+      }
       function dataRow(lbl, arr, opts={}){
-        const cells = Array.from({length:n+1},(_,j)=>cell(arr,j,opts)).join('');
+        const cells  = Array.from({length:n+1},(_,j)=>cell(arr,j,opts)).join('');
+        const pctTd  = pctTotalCell(arr, opts.pctBase||0, opts);
+        const acumTd = opts.acum2025!=null ? acum2025Cell(opts.acum2025, opts) : `<td style="padding:.2rem .38rem"></td>`;
+        const varTd  = opts.acum2025!=null ? difCell(opts.dif2025!=null?opts.dif2025:null) : `<td style="padding:.2rem .38rem"></td>`;
         return `<tr style="${opts.bg?'background:'+opts.bg:''};${opts.rowX||''}">
           <td style="font-size:${opts.sz||'.56rem'};${opts.bold?'font-weight:700;':''}color:${opts.color||'inherit'};padding:.2rem .5rem;white-space:nowrap;${opts.bgL?'background:'+opts.bgL+';':''}">${lbl}</td>
-          ${cells}
+          ${cells}${pctTd}${acumTd}${varTd}
         </tr>`;
       }
 
       const rows = list.map(r=>{
-        const rd  = regData[r] || {contratos:[],otros:[],total:[],lineas:{}};
+        const rd  = regData[r] || {contratos:[],otros:[],total:[],lineas:{},acum_2025:0,dif_pct_2025:null};
         const clr = PALETTE_REG[regiones.indexOf(r)%PALETTE_REG.length];
         const L   = rd.lineas || {};
+        const base = rd.total[n] || 0;
         return [
           `<tr style="background:${clr}18">
-            <td colspan="${n+2}" style="font-size:.61rem;font-weight:700;color:${clr};padding:.3rem .55rem .26rem;border-top:2px solid ${clr}30;border-left:4px solid ${clr}">${r}</td>
+            <td colspan="${n+2+EXTRA_COLS}" style="font-size:.61rem;font-weight:700;color:${clr};padding:.3rem .55rem .26rem;border-top:2px solid ${clr}30;border-left:4px solid ${clr}">${r}</td>
           </tr>`,
-          ...LINEAS.map(ln=>dataRow('  '+ln, L[ln]||[], {color:LCLR[ln]||'var(--mut)'})),
-          dataRow('Total Contratos', rd.contratos, {bold:true, color:'var(--az2)', bg:'rgba(0,160,220,.07)', sz:'.57rem'}),
-          dataRow('Otros Ingresos',  rd.otros,     {color:'#888'}),
-          dataRow('TOTAL FACTURACIÓN', rd.total,   {bold:true, color:'#fff', bg:'var(--az3)', bgL:'var(--az3)', sz:'.58rem'}),
-          `<tr style="height:4px"><td colspan="${n+2}"></td></tr>`,
+          ...LINEAS.map(ln=>dataRow('  '+ln, L[ln]||[], {color:LCLR[ln]||'var(--mut)', pctBase:base})),
+          dataRow('Total Contratos', rd.contratos, {bold:true, color:'var(--az2)', bg:'rgba(0,160,220,.07)', sz:'.57rem', pctBase:base}),
+          dataRow('Otros Ingresos',  rd.otros,     {color:'#888', pctBase:base}),
+          dataRow('TOTAL FACTURACIÓN', rd.total,   {bold:true, color:'#fff', bg:'var(--az3)', bgL:'var(--az3)', sz:'.58rem', pctBase:base, isTotal:true, acum2025: rd.acum_2025, dif2025: rd.dif_pct_2025}),
+          `<tr style="height:4px"><td colspan="${n+2+EXTRA_COLS}"></td></tr>`,
         ].join('');
       });
 
@@ -202,6 +223,12 @@
         const v = list.reduce((s,r)=>s+(regData[r]&&regData[r].total[j]||0),0);
         return `<td class="num" style="font-weight:700;font-size:.58rem;color:#fff;padding:.24rem .38rem">${fmm(v)}</td>`;
       }).join('');
+      const grandTotal2026 = list.reduce((s,r)=>s+((regData[r]&&regData[r].total[n])||0),0);
+      const grandAcum2025  = list.reduce((s,r)=>s+((regData[r]&&regData[r].acum_2025)||0),0);
+      const grandDif       = grandAcum2025>0 ? ((grandTotal2026-grandAcum2025)/grandAcum2025*100) : null;
+      const grandPctTd  = `<td class="num" style="font-weight:700;font-size:.58rem;color:#fff;padding:.24rem .38rem">100,0%</td>`;
+      const grandAcumTd = `<td class="num" style="font-weight:700;font-size:.58rem;color:#fff;padding:.24rem .38rem">${fmm(grandAcum2025)}</td>`;
+      const grandVarTd  = difCell(grandDif).replace('font-size:.56rem','font-size:.58rem;font-weight:800');
 
       el.innerHTML=`<div style="overflow-x:auto;overflow-y:auto;max-height:480px">
         <table class="tbl" style="font-size:.58rem;width:100%;min-width:420px;border-collapse:separate;border-spacing:0">
@@ -209,12 +236,15 @@
             <th style="${H};text-align:left;min-width:140px;position:sticky;left:0;top:0;z-index:3">Concepto</th>
             ${thM}
             <th style="${Ht};position:sticky;top:0;z-index:2">TOTAL</th>
+            <th style="${Ht};position:sticky;top:0;z-index:2">% TOTAL</th>
+            <th style="${Ht};position:sticky;top:0;z-index:2">AC. ${ac25Lbl} 2025</th>
+            <th style="${Ht};position:sticky;top:0;z-index:2">VAR. YOY</th>
           </tr></thead>
           <tbody>
             ${rows.join('')}
             <tr class="desg-azul" style="background:var(--az3)">
               <td style="font-size:.6rem;font-weight:700;color:#fff;padding:.3rem .55rem;position:sticky;left:0;background:var(--az3);white-space:nowrap">${selReg?selReg+' · TOTAL':'TOTAL GENERAL'}</td>
-              ${grandCells}
+              ${grandCells}${grandPctTd}${grandAcumTd}${grandVarTd}
             </tr>
           </tbody>
         </table>

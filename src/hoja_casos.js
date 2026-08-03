@@ -92,6 +92,7 @@ function _casosHTML() {
           <th style="min-width:100px">Estado</th>
           <th style="min-width:110px">Coordinadora</th>
           <th style="min-width:260px">Comentario Coordinadora</th>
+          <th style="min-width:150px">Razón Estandarizada</th>
           <th style="min-width:90px">N° Contrato</th>
           <th style="min-width:120px">Estado Garantía</th>
           <th style="min-width:200px">Nombre Cliente</th>
@@ -127,6 +128,32 @@ function _casosHTML() {
         <tbody id="cas-tbody3"></tbody>
         <tfoot id="cas-tfoot3"></tfoot>
       </table>
+    </div>
+  </div>
+
+  <!-- Tabla 4: Equipos Detenidos y su Razón -->
+  <div class="card" style="margin-top:.9rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(192,0,0,.18),rgba(192,0,0,.06));flex-wrap:wrap;gap:.4rem">
+      <span class="ct" style="color:var(--rd)">Equipos Detenidos y su Razón</span>
+      <span style="font-size:.58rem;color:var(--mut)" id="cas-t4-count">—</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="cas-table4" style="min-width:1100px">
+        <thead><tr>
+          <th style="min-width:100px">Marca</th>
+          <th style="min-width:140px">Familia de Equipo</th>
+          <th style="min-width:200px">Cliente</th>
+          <th style="min-width:110px">$ por Cliente</th>
+          <th style="min-width:110px">$ Contrato</th>
+          <th style="min-width:100px">% del Contrato</th>
+          <th style="min-width:190px">Razón</th>
+        </tr></thead>
+        <tbody id="cas-tbody4"></tbody>
+        <tfoot id="cas-tfoot4"></tfoot>
+      </table>
+    </div>
+    <div style="padding:.4rem .9rem;background:var(--gy);border-top:1px solid var(--brd);font-size:.58rem;color:var(--mut)">
+      $ por Cliente = Facturación Neta Mes · $ Contrato = Facturación Anual Esperada · % del Contrato = Facturación a la Fecha / Facturación Anual Esperada
     </div>
   </div>`;
 }
@@ -208,6 +235,31 @@ function _familiaModelo(marcaNorm, modelo) {
     if (key) return tabla[key];
   }
   return mod || 'Sin modelo';
+}
+
+// ── CLASIFICACIÓN ESTANDARIZADA DEL COMENTARIO DE COORDINADORA ─────
+// Interpreta el texto libre de "Comentario Coordinadora" y lo agrupa en
+// categorías fijas mediante reglas por palabra clave (orden = prioridad,
+// gana la primera regla que calza). Así, cuando el Excel se actualiza con
+// comentarios nuevos, siguen clasificándose sin tener que tocar el código.
+const _RAZON_REGLAS = [
+  { label: 'Resuelto / Operativo',                    color: 'var(--teal)', rx: /reparad|reemplazad|equipo operativo|^operativo$/i },
+  { label: 'Entregado sin Reparar',                    color: 'var(--am)',   rx: /entregado.*sin reparaci/i },
+  { label: 'Baja / Desinstalación',                    color: 'var(--rd)',   rx: /dado de baja|\bbaja\b|desinstala|se quema/i },
+  { label: 'Equipo No Ubicado',                        color: '#7A1FAA',     rx: /no se (encuentra|encuntra)|no esta en (el|la)/i },
+  { label: 'Pendiente Confirmación del Cliente',       color: 'var(--az2)',  rx: /confirmaci[oó]n.*cliente|posicionado/i },
+  { label: 'Trabajos / Reparación en Curso',           color: 'var(--am)',   rx: /soldadura|trabajos de/i },
+  { label: 'Visita Correctiva Programada',             color: 'var(--az2)',  rx: /visita correctiva|se realizar[aá]/i },
+  { label: 'Esperando Repuesto',                       color: 'var(--rd)',   rx: /repuesto|tarjeta|v[aá]lvula|pieza|sin stock|puerta/i },
+  { label: 'Esperando OC / Cotización del Cliente',    color: '#E87722',     rx: /\boc\b|cotizaci[oó]n|orden de compra/i },
+  { label: 'Esperando Diagnóstico / Evaluación Técnica', color: 'var(--az3)', rx: /evaluando|diagn[oó]stico|revisar|res?puesta de|\bmp\b|f[aá]brica|software/i },
+];
+
+function _clasificarRazon(comentario) {
+  const c = (comentario || '').trim();
+  if (!c) return { label: 'Sin Información', color: 'var(--mut)' };
+  for (const r of _RAZON_REGLAS) if (r.rx.test(c)) return { label: r.label, color: r.color };
+  return { label: 'Otro', color: 'var(--mut)' };
 }
 
 // ── RENDER ────────────────────────────────────────────────────────
@@ -303,6 +355,8 @@ function renderCasos() {
         : e.fac_ytd > 0 ? `<span style="font-size:.63rem;font-weight:700;color:var(--teal)">${_fmtM(e.fac_ytd)}</span>` : _dash;
       const inicioCell = sinContrato ? _noContr : _mono(e.fecha_inicio);
       const finCell    = sinContrato ? _noContr : _mono(e.fecha_fin);
+      const razon = _clasificarRazon(e.comentario_coord);
+      const razonCell = `<span class="badge" style="font-size:.53rem;background:${razon.color}18;color:${razon.color};border:1px solid ${razon.color}55">${razon.label}</span>`;
       return `<tr>
         <td><strong style="font-size:.63rem;color:var(--am)">${_escH(e.modelo)}</strong></td>
         <td><span style="font-size:.63rem">${_escH(e.nombre)}</span></td>
@@ -311,6 +365,7 @@ function renderCasos() {
         <td style="text-align:center">${estadoBadge}</td>
         <td><span style="font-size:.62rem;color:var(--az3)">${_escH(e.coordinadora)||'—'}</span></td>
         <td><div style="font-size:.6rem;line-height:1.5;max-width:280px;color:#111;font-weight:600">${_escH(e.comentario_coord)||_dash}</div></td>
+        <td style="text-align:center">${razonCell}</td>
         <td style="text-align:center">${contrNum}</td>
         <td style="text-align:center">${garBadge}</td>
         <td>${clienteCell}</td>
@@ -398,6 +453,104 @@ function renderCasos() {
 
     const t3count = document.getElementById('cas-t3-count');
     if (t3count) t3count.textContent = marcas.length + ' marca' + (marcas.length !== 1 ? 's' : '') + ' · ' + eqFilt.length + ' equipo' + (eqFilt.length !== 1 ? 's' : '');
+  }
+
+  // ── Tabla 4: Equipos Detenidos y su Razón ───────────────────────
+  const tbody4 = document.getElementById('cas-tbody4');
+  const tfoot4 = document.getElementById('cas-tfoot4');
+  if (tbody4) {
+    const _fmtM4  = v => v > 0 ? 'MM$' + fN1(v / 1e6) : '—';
+    const _dash4  = '<span style="color:var(--mut);font-size:.6rem">—</span>';
+    const _noAsoc4 = '<span style="font-size:.57rem;color:var(--mut);font-style:italic">SIN CLIENTE ASOCIADO</span>';
+
+    // Agrupar equipos filtrados por Marca (normalizada) → Familia de equipo (normalizada)
+    const porMarca4 = {};
+    eqFilt.forEach(e => {
+      const marca   = _normMarca(e.marca);
+      const familia = _familiaModelo(marca, e.modelo);
+      if (!porMarca4[marca]) porMarca4[marca] = {};
+      if (!porMarca4[marca][familia]) porMarca4[marca][familia] = [];
+      porMarca4[marca][familia].push(e);
+    });
+
+    const marcas4 = Object.keys(porMarca4).sort();
+    const html4 = [];
+    let granCant4 = 0, granCliente4 = 0, granContrato4 = 0;
+
+    marcas4.forEach(marca => {
+      const familias = Object.keys(porMarca4[marca]).sort();
+      const totalRowsMarca = familias.reduce((s, f) => s + porMarca4[marca][f].length, 0);
+      let firstMarcaRow = true;
+      let subCant = 0, subCliente = 0, subContrato = 0;
+
+      familias.forEach(familia => {
+        const list = porMarca4[marca][familia];
+        list.forEach((e, idx) => {
+          const marcaCell = firstMarcaRow
+            ? `<td rowspan="${totalRowsMarca}" style="font-weight:700;font-size:.62rem;vertical-align:middle;text-align:center;background:rgba(192,0,0,.06)">${_escH(marca)}</td>`
+            : '';
+          firstMarcaRow = false;
+          const familiaCell = idx === 0
+            ? `<td rowspan="${list.length}" style="font-size:.62rem;font-weight:600;color:var(--am);vertical-align:middle">${_escH(familia)}</td>`
+            : '';
+
+          const tieneCliente = !!e.nombre_cliente;
+          const clienteCell = tieneCliente
+            ? `<strong style="font-size:.62rem">${_escH(e.nombre_cliente)}</strong>`
+            : _noAsoc4;
+          const porClienteCell = tieneCliente && e.neta_mes > 0
+            ? `<span style="font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM4(e.neta_mes)}</span>` : _dash4;
+          const contratoCell = tieneCliente && e.fac_anual > 0
+            ? `<span style="font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM4(e.fac_anual)}</span>` : _dash4;
+          const pctContrato = (tieneCliente && e.fac_anual > 0) ? (e.fac_ytd / e.fac_anual) * 100 : null;
+          const pctCell = pctContrato !== null
+            ? `<span style="font-size:.62rem;font-weight:700;color:var(--teal)">${fN1(pctContrato)}%</span>` : _dash4;
+
+          const razon = _clasificarRazon(e.comentario_coord);
+          const razonCell = `<span class="badge" style="font-size:.53rem;background:${razon.color}18;color:${razon.color};border:1px solid ${razon.color}55">${razon.label}</span>`;
+
+          subCant++;
+          subCliente  += (tieneCliente ? (e.neta_mes  || 0) : 0);
+          subContrato += (tieneCliente ? (e.fac_anual || 0) : 0);
+
+          html4.push(`<tr>
+            ${marcaCell}
+            ${familiaCell}
+            <td>${clienteCell}</td>
+            <td style="text-align:right">${porClienteCell}</td>
+            <td style="text-align:right">${contratoCell}</td>
+            <td style="text-align:center">${pctCell}</td>
+            <td style="text-align:center">${razonCell}</td>
+          </tr>`);
+        });
+      });
+
+      html4.push(`<tr style="background:rgba(192,0,0,.1)">
+        <td colspan="2" style="text-align:right;font-size:.6rem;font-style:italic;color:var(--txt);padding:.3rem .6rem">Subtotal ${_escH(marca)} · ${subCant} equipo${subCant !== 1 ? 's' : ''}</td>
+        <td></td>
+        <td style="text-align:right;font-size:.62rem;font-weight:800;color:var(--az2)">${_fmtM4(subCliente)}</td>
+        <td style="text-align:right;font-size:.62rem;font-weight:800;color:var(--az2)">${_fmtM4(subContrato)}</td>
+        <td></td>
+        <td></td>
+      </tr>`);
+
+      granCant4 += subCant; granCliente4 += subCliente; granContrato4 += subContrato;
+    });
+
+    tbody4.innerHTML = html4.join('') || '<tr><td colspan="7" style="text-align:center;padding:1.2rem;color:var(--mut)">Sin equipos para los filtros seleccionados</td></tr>';
+
+    if (tfoot4) {
+      tfoot4.innerHTML = marcas4.length ? `<tr>
+        <td colspan="3" style="padding:.4rem .7rem;font-size:.62rem">Total General · ${granCant4} equipo${granCant4 !== 1 ? 's' : ''}</td>
+        <td style="text-align:right;font-size:.65rem">${_fmtM4(granCliente4)}</td>
+        <td style="text-align:right;font-size:.65rem">${_fmtM4(granContrato4)}</td>
+        <td></td>
+        <td></td>
+      </tr>` : '';
+    }
+
+    const t4count = document.getElementById('cas-t4-count');
+    if (t4count) t4count.textContent = eqFilt.length + ' equipo' + (eqFilt.length !== 1 ? 's' : '');
   }
 
   // KPIs
