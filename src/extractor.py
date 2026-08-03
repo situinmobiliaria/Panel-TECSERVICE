@@ -510,8 +510,18 @@ def read_bbdd(xlsx_path):
             df_eje = df_eje_base[df_eje_base[c_ejecutivo] == eje]
             mensual_por_ejecutivo[eje] = monthly_dict(df_eje)
 
-    # MES_CORTE: mes calendario actual (dinámico)
+    # MES_CORTE: mes calendario actual (dinámico), pero si ese mes recién
+    # comienza y casi no tiene facturación cargada todavía en el Excel, se
+    # usa el mes anterior (cerrado) para no mostrar cifras truncadas como si
+    # fueran el cierre del mes. Se compara contra el 5% del mes anterior.
     mes_corte = TODAY.month
+    _ano_tot   = mensual_total.get(ANO, {})
+    _cand_tot  = _ano_tot.get(mes_corte, 0.0)
+    _prev_mes  = mes_corte - 1 if mes_corte > 1 else 12
+    _prev_ano  = ANO if mes_corte > 1 else ANO - 1
+    _prev_tot  = mensual_total.get(_prev_ano, {}).get(_prev_mes, 0.0)
+    if _prev_tot > 0 and _cand_tot < _prev_tot * 0.05:
+        mes_corte = _prev_mes
 
     # YTD per client: solo Facturas + catálogos ST/REAS/Trazabilidad
     _CATALOGOS_YTD = {"Servicio Técnico", "REAS", "Trazabilidad"}

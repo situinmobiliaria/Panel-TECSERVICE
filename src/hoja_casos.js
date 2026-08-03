@@ -131,25 +131,46 @@ function _casosHTML() {
     </div>
   </div>
 
-  <!-- Tabla 4: Equipos Detenidos y su Razón -->
+  <!-- Tabla 4: Resumen por Razón -->
   <div class="card" style="margin-top:.9rem">
     <div class="ch" style="background:linear-gradient(135deg,rgba(192,0,0,.18),rgba(192,0,0,.06));flex-wrap:wrap;gap:.4rem">
-      <span class="ct" style="color:var(--rd)">Equipos Detenidos y su Razón</span>
+      <span class="ct" style="color:var(--rd)">Resumen por Razón</span>
       <span style="font-size:.58rem;color:var(--mut)" id="cas-t4-count">—</span>
     </div>
     <div style="overflow-x:auto">
-      <table class="tbl" id="cas-table4" style="min-width:1100px">
+      <table class="tbl" id="cas-table4" style="min-width:700px">
         <thead><tr>
-          <th style="min-width:100px">Marca</th>
+          <th style="min-width:220px">Razón</th>
+          <th style="min-width:100px">N° Equipos</th>
+          <th style="min-width:120px">$ por Cliente</th>
+          <th style="min-width:120px">$ Contrato</th>
+          <th style="min-width:90px">% del Total</th>
+        </tr></thead>
+        <tbody id="cas-tbody4"></tbody>
+        <tfoot id="cas-tfoot4"></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tabla 5: Detalle de Equipos por Razón -->
+  <div class="card" style="margin-top:.9rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(192,0,0,.18),rgba(192,0,0,.06));flex-wrap:wrap;gap:.4rem">
+      <span class="ct" style="color:var(--rd)">Detalle de Equipos por Razón</span>
+      <span style="font-size:.58rem;color:var(--mut)" id="cas-t5-count">—</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="cas-table5" style="min-width:1200px">
+        <thead><tr>
+          <th style="min-width:190px">Razón</th>
           <th style="min-width:140px">Familia de Equipo</th>
+          <th style="min-width:100px">Marca</th>
           <th style="min-width:200px">Cliente</th>
           <th style="min-width:110px">$ por Cliente</th>
           <th style="min-width:110px">$ Contrato</th>
           <th style="min-width:100px">% del Contrato</th>
-          <th style="min-width:190px">Razón</th>
         </tr></thead>
-        <tbody id="cas-tbody4"></tbody>
-        <tfoot id="cas-tfoot4"></tfoot>
+        <tbody id="cas-tbody5"></tbody>
+        <tfoot id="cas-tfoot5"></tfoot>
       </table>
     </div>
     <div style="padding:.4rem .9rem;background:var(--gy);border-top:1px solid var(--brd);font-size:.58rem;color:var(--mut)">
@@ -455,44 +476,81 @@ function renderCasos() {
     if (t3count) t3count.textContent = marcas.length + ' marca' + (marcas.length !== 1 ? 's' : '') + ' · ' + eqFilt.length + ' equipo' + (eqFilt.length !== 1 ? 's' : '');
   }
 
-  // ── Tabla 4: Equipos Detenidos y su Razón ───────────────────────
+  // ── Tabla 4 y 5: Resumen y Detalle por Razón ────────────────────
   const tbody4 = document.getElementById('cas-tbody4');
   const tfoot4 = document.getElementById('cas-tfoot4');
-  if (tbody4) {
+  const tbody5 = document.getElementById('cas-tbody5');
+  const tfoot5 = document.getElementById('cas-tfoot5');
+  if (tbody4 || tbody5) {
     const _fmtM4  = v => v > 0 ? 'MM$' + fN1(v / 1e6) : '—';
     const _dash4  = '<span style="color:var(--mut);font-size:.6rem">—</span>';
     const _noAsoc4 = '<span style="font-size:.57rem;color:var(--mut);font-style:italic">SIN CLIENTE ASOCIADO</span>';
 
-    // Agrupar equipos filtrados por Marca (normalizada) → Familia de equipo (normalizada)
-    const porMarca4 = {};
+    // Agrupar equipos filtrados por Razón estandarizada
+    const porRazon = {};
     eqFilt.forEach(e => {
-      const marca   = _normMarca(e.marca);
-      const familia = _familiaModelo(marca, e.modelo);
-      if (!porMarca4[marca]) porMarca4[marca] = {};
-      if (!porMarca4[marca][familia]) porMarca4[marca][familia] = [];
-      porMarca4[marca][familia].push(e);
+      const razon = _clasificarRazon(e.comentario_coord);
+      if (!porRazon[razon.label]) porRazon[razon.label] = { color: razon.color, equipos: [] };
+      porRazon[razon.label].equipos.push(e);
     });
+    const razones = Object.keys(porRazon).sort((a, b) => porRazon[b].equipos.length - porRazon[a].equipos.length);
 
-    const marcas4 = Object.keys(porMarca4).sort();
-    const html4 = [];
-    let granCant4 = 0, granCliente4 = 0, granContrato4 = 0;
+    // ── Tabla 4: Resumen por Razón ──────────────────────────────
+    if (tbody4) {
+      const filas = razones.map(lbl => {
+        const g = porRazon[lbl];
+        const sumCliente  = g.equipos.reduce((s, e) => s + (e.nombre_cliente ? (e.neta_mes  || 0) : 0), 0);
+        const sumContrato = g.equipos.reduce((s, e) => s + (e.nombre_cliente ? (e.fac_anual || 0) : 0), 0);
+        return { lbl, color: g.color, cant: g.equipos.length, sumCliente, sumContrato };
+      });
+      const totContratoGlobal = filas.reduce((s, f) => s + f.sumContrato, 0);
+      const gran4Cant     = filas.reduce((s, f) => s + f.cant, 0);
+      const gran4Cliente  = filas.reduce((s, f) => s + f.sumCliente, 0);
+      const gran4Contrato = filas.reduce((s, f) => s + f.sumContrato, 0);
 
-    marcas4.forEach(marca => {
-      const familias = Object.keys(porMarca4[marca]).sort();
-      const totalRowsMarca = familias.reduce((s, f) => s + porMarca4[marca][f].length, 0);
-      let firstMarcaRow = true;
-      let subCant = 0, subCliente = 0, subContrato = 0;
+      tbody4.innerHTML = filas.map(f => {
+        const pct = totContratoGlobal > 0 ? (f.sumContrato / totContratoGlobal * 100) : 0;
+        return `<tr>
+          <td><span class="badge" style="font-size:.55rem;background:${f.color}18;color:${f.color};border:1px solid ${f.color}55">${_escH(f.lbl)}</span></td>
+          <td style="text-align:center;font-size:.63rem;font-weight:700">${f.cant}</td>
+          <td style="text-align:right;font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM4(f.sumCliente)}</td>
+          <td style="text-align:right;font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM4(f.sumContrato)}</td>
+          <td style="text-align:right;font-size:.63rem;color:var(--mut)">${f.sumContrato > 0 ? fN1(pct) + '%' : '—'}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="5" style="text-align:center;padding:1.2rem;color:var(--mut)">Sin equipos para los filtros seleccionados</td></tr>';
 
-      familias.forEach(familia => {
-        const list = porMarca4[marca][familia];
-        list.forEach((e, idx) => {
-          const marcaCell = firstMarcaRow
-            ? `<td rowspan="${totalRowsMarca}" style="font-weight:700;font-size:.62rem;vertical-align:middle;text-align:center;background:rgba(192,0,0,.06)">${_escH(marca)}</td>`
+      if (tfoot4) {
+        tfoot4.innerHTML = razones.length ? `<tr>
+          <td style="padding:.4rem .7rem;font-size:.62rem">Total General · ${razones.length} ${razones.length !== 1 ? 'razones' : 'razón'}</td>
+          <td style="text-align:center;font-size:.65rem">${gran4Cant}</td>
+          <td style="text-align:right;font-size:.65rem">${_fmtM4(gran4Cliente)}</td>
+          <td style="text-align:right;font-size:.65rem">${_fmtM4(gran4Contrato)}</td>
+          <td style="text-align:right;font-size:.65rem">100,0%</td>
+        </tr>` : '';
+      }
+      const t4count = document.getElementById('cas-t4-count');
+      if (t4count) t4count.textContent = razones.length + ' ' + (razones.length !== 1 ? 'razones' : 'razón') + ' · ' + eqFilt.length + ' equipo' + (eqFilt.length !== 1 ? 's' : '');
+    }
+
+    // ── Tabla 5: Detalle de Equipos por Razón ───────────────────
+    if (tbody5) {
+      const html5 = [];
+      let gran5Cant = 0, gran5Cliente = 0, gran5Contrato = 0;
+
+      razones.forEach(lbl => {
+        const g = porRazon[lbl];
+        let firstRow = true;
+        let subCant = 0, subCliente = 0, subContrato = 0;
+
+        g.equipos.forEach(e => {
+          const marca   = _normMarca(e.marca);
+          const familia = _familiaModelo(marca, e.modelo);
+          const razonCell = firstRow
+            ? `<td rowspan="${g.equipos.length}" style="vertical-align:top;padding-top:.4rem;text-align:center;background:${g.color}12">
+                <span class="badge" style="font-size:.53rem;background:${g.color}18;color:${g.color};border:1px solid ${g.color}55">${_escH(lbl)}</span>
+              </td>`
             : '';
-          firstMarcaRow = false;
-          const familiaCell = idx === 0
-            ? `<td rowspan="${list.length}" style="font-size:.62rem;font-weight:600;color:var(--am);vertical-align:middle">${_escH(familia)}</td>`
-            : '';
+          firstRow = false;
 
           const tieneCliente = !!e.nombre_cliente;
           const clienteCell = tieneCliente
@@ -506,51 +564,44 @@ function renderCasos() {
           const pctCell = pctContrato !== null
             ? `<span style="font-size:.62rem;font-weight:700;color:var(--teal)">${fN1(pctContrato)}%</span>` : _dash4;
 
-          const razon = _clasificarRazon(e.comentario_coord);
-          const razonCell = `<span class="badge" style="font-size:.53rem;background:${razon.color}18;color:${razon.color};border:1px solid ${razon.color}55">${razon.label}</span>`;
-
           subCant++;
           subCliente  += (tieneCliente ? (e.neta_mes  || 0) : 0);
           subContrato += (tieneCliente ? (e.fac_anual || 0) : 0);
 
-          html4.push(`<tr>
-            ${marcaCell}
-            ${familiaCell}
+          html5.push(`<tr>
+            ${razonCell}
+            <td><span style="font-size:.62rem;font-weight:600;color:var(--am)">${_escH(familia)}</span></td>
+            <td><span style="font-size:.6rem">${_escH(marca)}</span></td>
             <td>${clienteCell}</td>
             <td style="text-align:right">${porClienteCell}</td>
             <td style="text-align:right">${contratoCell}</td>
             <td style="text-align:center">${pctCell}</td>
-            <td style="text-align:center">${razonCell}</td>
           </tr>`);
         });
+
+        html5.push(`<tr style="background:${g.color}14">
+          <td colspan="4" style="text-align:right;font-size:.6rem;font-style:italic;color:var(--txt);padding:.3rem .6rem">Subtotal ${_escH(lbl)} · ${subCant} equipo${subCant !== 1 ? 's' : ''}</td>
+          <td style="text-align:right;font-size:.62rem;font-weight:800;color:var(--az2)">${_fmtM4(subCliente)}</td>
+          <td style="text-align:right;font-size:.62rem;font-weight:800;color:var(--az2)">${_fmtM4(subContrato)}</td>
+          <td></td>
+        </tr>`);
+
+        gran5Cant += subCant; gran5Cliente += subCliente; gran5Contrato += subContrato;
       });
 
-      html4.push(`<tr style="background:rgba(192,0,0,.1)">
-        <td colspan="2" style="text-align:right;font-size:.6rem;font-style:italic;color:var(--txt);padding:.3rem .6rem">Subtotal ${_escH(marca)} · ${subCant} equipo${subCant !== 1 ? 's' : ''}</td>
-        <td></td>
-        <td style="text-align:right;font-size:.62rem;font-weight:800;color:var(--az2)">${_fmtM4(subCliente)}</td>
-        <td style="text-align:right;font-size:.62rem;font-weight:800;color:var(--az2)">${_fmtM4(subContrato)}</td>
-        <td></td>
-        <td></td>
-      </tr>`);
+      tbody5.innerHTML = html5.join('') || '<tr><td colspan="7" style="text-align:center;padding:1.2rem;color:var(--mut)">Sin equipos para los filtros seleccionados</td></tr>';
 
-      granCant4 += subCant; granCliente4 += subCliente; granContrato4 += subContrato;
-    });
-
-    tbody4.innerHTML = html4.join('') || '<tr><td colspan="7" style="text-align:center;padding:1.2rem;color:var(--mut)">Sin equipos para los filtros seleccionados</td></tr>';
-
-    if (tfoot4) {
-      tfoot4.innerHTML = marcas4.length ? `<tr>
-        <td colspan="3" style="padding:.4rem .7rem;font-size:.62rem">Total General · ${granCant4} equipo${granCant4 !== 1 ? 's' : ''}</td>
-        <td style="text-align:right;font-size:.65rem">${_fmtM4(granCliente4)}</td>
-        <td style="text-align:right;font-size:.65rem">${_fmtM4(granContrato4)}</td>
-        <td></td>
-        <td></td>
-      </tr>` : '';
+      if (tfoot5) {
+        tfoot5.innerHTML = razones.length ? `<tr>
+          <td colspan="4" style="padding:.4rem .7rem;font-size:.62rem">Total General · ${gran5Cant} equipo${gran5Cant !== 1 ? 's' : ''}</td>
+          <td style="text-align:right;font-size:.65rem">${_fmtM4(gran5Cliente)}</td>
+          <td style="text-align:right;font-size:.65rem">${_fmtM4(gran5Contrato)}</td>
+          <td></td>
+        </tr>` : '';
+      }
+      const t5count = document.getElementById('cas-t5-count');
+      if (t5count) t5count.textContent = eqFilt.length + ' equipo' + (eqFilt.length !== 1 ? 's' : '');
     }
-
-    const t4count = document.getElementById('cas-t4-count');
-    if (t4count) t4count.textContent = eqFilt.length + ' equipo' + (eqFilt.length !== 1 ? 's' : '');
   }
 
   // KPIs

@@ -3,7 +3,7 @@
 // Depende de: DATA y APP_DATA (declarados en el HTML principal)
 // ═══════════════════════════════════════════════════════════════
 
-window.MES_CORTE = 8;
+window.MES_CORTE = 7;
 window.MESES_ABR = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 window.MESES_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 window.MES_CORTE_NOMBRE = window.MESES_FULL[window.MES_CORTE - 1];

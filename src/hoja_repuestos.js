@@ -45,10 +45,34 @@ function _repHTML() {
     </div>
   </div>
 
-  <!-- Tabla: Repuestos por Equipo -->
+  <!-- Tabla: Top 3 Repuestos más Solicitados por Equipo -->
+  <div class="card" style="margin-bottom:.9rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(255,160,0,.18),rgba(255,160,0,.06));flex-wrap:wrap;gap:.4rem">
+      <span class="ct" style="color:var(--am)">Top 3 Repuestos más Solicitados por Equipo</span>
+      <span style="font-size:.58rem;color:var(--mut)" id="rep-top3-count">—</span>
+    </div>
+    <div style="overflow-x:auto;overflow-y:auto;max-height:55vh">
+      <table class="tbl" id="rep-table-top3" style="min-width:900px">
+        <thead><tr>
+          <th style="min-width:100px;position:sticky;top:0;z-index:2">Marca</th>
+          <th style="min-width:140px;position:sticky;top:0;z-index:2">Familia de Equipo</th>
+          <th style="min-width:260px;position:sticky;top:0;z-index:2">Repuesto</th>
+          <th style="min-width:90px;position:sticky;top:0;z-index:2">Total Casos</th>
+          <th style="min-width:110px;position:sticky;top:0;z-index:2">Total Monto</th>
+        </tr></thead>
+        <tbody id="rep-tbody-top3"></tbody>
+        <tfoot id="rep-tfoot-top3"></tfoot>
+      </table>
+    </div>
+    <div style="padding:.4rem .9rem;background:var(--gy);border-top:1px solid var(--brd);font-size:.58rem;color:var(--mut)">
+      Los 3 repuestos con más casos (solicitudes) por equipo · "Otros" agrupa el resto de repuestos de ese equipo
+    </div>
+  </div>
+
+  <!-- Tabla: Detalle de Repuestos por Equipo -->
   <div class="card">
     <div class="ch" style="background:linear-gradient(135deg,rgba(192,0,0,.18),rgba(192,0,0,.06));flex-wrap:wrap;gap:.4rem">
-      <span class="ct" style="color:var(--rd)">Repuestos por Equipo</span>
+      <span class="ct" style="color:var(--rd)">Detalle de Repuestos por Equipo</span>
       <span style="font-size:.58rem;color:var(--mut)" id="rep-t-count">—</span>
     </div>
     <div style="overflow-x:auto;overflow-y:auto;max-height:65vh">
@@ -133,6 +157,80 @@ function renderRepuestos() {
     porMarca[e.marca].push(e);
   });
   const marcas = Object.keys(porMarca);
+
+  // ── Tabla: Top 3 Repuestos más Solicitados por Equipo ────────────
+  const tbodyTop3 = document.getElementById('rep-tbody-top3');
+  const tfootTop3 = document.getElementById('rep-tfoot-top3');
+  if (tbodyTop3) {
+    const htmlTop3 = [];
+    let gTop3Casos = 0, gTop3Monto = 0;
+
+    marcas.forEach(marca => {
+      const eqs = porMarca[marca];
+      const rowCountsT3 = eqs.map(e => Math.min(e.productos.length, 3) + (e.productos.length > 3 ? 1 : 0) || 1);
+      const totalRowsMarcaT3 = rowCountsT3.reduce((a, b) => a + b, 0);
+      let firstMarcaRowT3 = true;
+
+      eqs.forEach(e => {
+        const porCasos = [...e.productos].sort((a, b) => b.total_casos - a.total_casos);
+        const top3 = porCasos.slice(0, 3);
+        const otros = porCasos.slice(3);
+        const filasEquipoT3 = (top3.length || 1) + (otros.length ? 1 : 0);
+
+        const filas = top3.length ? top3 : [{ repuesto: '—', total_casos: 0, total_monto: 0 }];
+        filas.forEach((p, idxP) => {
+          const marcaCell = firstMarcaRowT3
+            ? `<td rowspan="${totalRowsMarcaT3}" style="font-weight:700;font-size:.62rem;vertical-align:top;text-align:center;background:rgba(255,160,0,.08);padding-top:.4rem">${_escH(marca)}</td>`
+            : '';
+          firstMarcaRowT3 = false;
+          const familiaCell = idxP === 0
+            ? `<td rowspan="${filasEquipoT3}" style="font-size:.62rem;font-weight:600;color:var(--am);vertical-align:top;padding-top:.4rem">${_escH(e.familia)}</td>`
+            : '';
+          htmlTop3.push(`<tr>
+            ${marcaCell}
+            ${familiaCell}
+            <td><span style="font-size:.6rem">${_escH(p.repuesto)}</span></td>
+            <td style="text-align:center;font-size:.6rem;font-weight:700">${p.total_casos || '—'}</td>
+            <td style="text-align:right;font-size:.6rem;font-weight:700;color:var(--teal)">${_fmtRep(p.total_monto)}</td>
+          </tr>`);
+        });
+
+        if (otros.length) {
+          const marcaCell = firstMarcaRowT3
+            ? `<td rowspan="${totalRowsMarcaT3}" style="font-weight:700;font-size:.62rem;vertical-align:top;text-align:center;background:rgba(255,160,0,.08);padding-top:.4rem">${_escH(marca)}</td>`
+            : '';
+          firstMarcaRowT3 = false;
+          const familiaCell = top3.length === 0
+            ? `<td rowspan="${filasEquipoT3}" style="font-size:.62rem;font-weight:600;color:var(--am);vertical-align:top;padding-top:.4rem">${_escH(e.familia)}</td>`
+            : '';
+          const otrosCasos = otros.reduce((s, p) => s + (p.total_casos || 0), 0);
+          const otrosMonto = otros.reduce((s, p) => s + (p.total_monto || 0), 0);
+          htmlTop3.push(`<tr style="background:rgba(0,0,0,.02)">
+            ${marcaCell}
+            ${familiaCell}
+            <td><span style="font-size:.58rem;font-style:italic;color:var(--mut)">Otros (${otros.length} repuesto${otros.length !== 1 ? 's' : ''})</span></td>
+            <td style="text-align:center;font-size:.6rem;color:var(--mut)">${otrosCasos || '—'}</td>
+            <td style="text-align:right;font-size:.6rem;color:var(--mut)">${_fmtRep(otrosMonto)}</td>
+          </tr>`);
+        }
+
+        gTop3Casos += e.total_casos;
+        gTop3Monto += e.total_monto;
+      });
+    });
+
+    tbodyTop3.innerHTML = htmlTop3.join('') || '<tr><td colspan="5" style="text-align:center;padding:1.2rem;color:var(--mut)">Sin resultados para los filtros seleccionados</td></tr>';
+
+    if (tfootTop3) {
+      tfootTop3.innerHTML = marcas.length ? `<tr>
+        <td colspan="3" style="padding:.4rem .7rem;font-size:.62rem">Total General · ${equiposFilt.length} equipo${equiposFilt.length !== 1 ? 's' : ''}</td>
+        <td style="text-align:center;font-size:.65rem">${gTop3Casos}</td>
+        <td style="text-align:right;font-size:.65rem">${_fmtRep(gTop3Monto)}</td>
+      </tr>` : '';
+    }
+    const top3Count = document.getElementById('rep-top3-count');
+    if (top3Count) top3Count.textContent = equiposFilt.length + ' equipo' + (equiposFilt.length !== 1 ? 's' : '');
+  }
 
   const tbody = document.getElementById('rep-tbody');
   const tfoot = document.getElementById('rep-tfoot');
