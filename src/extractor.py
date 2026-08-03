@@ -14,7 +14,7 @@ Configuración:
 from __future__ import annotations
 import os, re, json, math
 from datetime import date, datetime, timedelta
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 import openpyxl
 import pandas as pd
@@ -59,6 +59,7 @@ ROOT = os.path.dirname(DIR)
 _BASE_NAME = "CONTRATOS -FACTURACION -SATISFACCION -VISITAS"
 XLSX  = os.path.join(ROOT, "data", _BASE_NAME + ".xlsx")
 XLSB  = os.path.join(ROOT, "data", _BASE_NAME + ".xlsb")
+XLSX_REPUESTOS = os.path.join(ROOT, "data", "Detalle de repuestos vendidos 2025 y 2026.xlsx")
 TMPL  = os.path.join(DIR, "template.html")
 OUT   = os.path.join(DIR, "dashboard_contratos_v16.2.html")
 
@@ -1450,6 +1451,166 @@ def read_casos(wb):
     return {"casos": casos, "equipos": equipos}
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# HOJA: DETALLE DE REPUESTOS VENDIDOS (Excel separado)
+#    Cruza cada línea vendida con el equipo/familia al que pertenece:
+#    1) reconoce marca+modelo directamente en "Nombre de la oportunidad"
+#    2) si solo hay marca (columna Marca), usa "<MARCA> - Sin modelo específico"
+#    3) si no hay nada, cruza por nombre de cliente contra
+#       CASOS_DATA.equipos (Casos Relevantes → Equipos Detenidos)
+#    4) si nada de lo anterior calza, "Sin Identificar"
+# ══════════════════════════════════════════════════════════════════════════════
+_REP_MARCA_NORM = {
+    'STELLCO': 'STEELCO', 'DDC': 'DDC DOLPHIN', 'DOLPHIN': 'DDC DOLPHIN',
+    'CLINICLAVE': 'MELAG',
+}
+
+_REP_MODEL_PATTERNS = [
+    ('STEELCO', 'DS610',      r'\bDS\s?610\b'),
+    ('STEELCO', 'DS5000',     r'\bDS\s?5000\w*\b'),
+    ('STEELCO', 'DS500',      r'\bDS\s?500\b'),
+    ('STEELCO', 'DS600',      r'\bDS\s?600\b'),
+    ('STEELCO', 'DS1000',     r'\bDS\s?1000\b'),
+    ('STEELCO', 'VS',         r'\bE?VS\s?\d{1,2}([,.]5)?\s?/?\s?\d{0,2}\b'),
+    ('STEELCO', 'AD 400/1',   r'\bAD\s?400\s?/?\s?1?\b'),
+    ('STEELCO', 'US100',      r'\bUS\s?100\b'),
+    ('STEELCO', 'US80',       r'\bUS\s?80\b'),
+    ('STEELCO', 'US200',      r'\bUS\s?200\b'),
+    ('STEELCO', 'LVS 2',      r'\bLVS\s?[12]\b'),
+    ('STEELCO', 'PL 130',     r'\bPL\s?130\w*\b'),
+    ('STEELCO', 'BP100',      r'\bBP\s?100\w*\b'),
+    ('STEELCO', 'SteelcoData PRO', r'\bSTEELCODATA\s?PRO\b'),
+    ('STEELCO', 'PURYTAS',    r'\bPURYTAS\b|\bPURRO\s?\d*\b'),
+    ('MELAG',   'C45',        r'\bC\s?45\w*\b'),
+    ('MELAG',   '45M',        r'\b45M\b'),
+    ('MELAG',   'CLINICLAVE', r'\bCLINICLAVE\s?\d*\b'),
+    ('MELAG',   'EUROKLAV',   r'\bEUROKLAV\s?\w*\b'),
+    ('MELAG',   'VACUKLAV',   r'\bVACUKLAV\s?\w*\b'),
+    ('MELAG',   'MELAQUICK',  r'\bMELAQUICK\s?\w*\b'),
+    ('MELAG',   'MELASEAL',   r'\bMELASEAL\s?\w*\b'),
+    ('MELAG',   'VACUCLAVE',  r'\bVACUCLAVE\s?\d*\b'),
+    ('BIEN AIR','CHIROPRO PLUS', r'\bCHIROPRO\s?PLUS\s?\w*\b'),
+    ('BIEN AIR','MX-i',       r'\bMX-?I\s?\w*\b'),
+    ('PENTAX',  'Endoscopio', r'\bE[A-Z]-?\d{1,3}\w*\b|\bFB-?\d+\w*\b'),
+    ('MIELE',   'Lavadora Miele', r'\bMIELE\b|\bPG\s?\d{4}\b|\bG\d{4}\b'),
+    ('TUTTNAUER','Autoclave Tuttnauer', r'\bTUTTNAUER\b'),
+    ('DURR',    'Compresor Durr', r'\bDURR\b'),
+    ('SCHULZ',  'Compresor Schulz', r'\bSCHULZ\b'),
+    ('FLIGHT DENTAL','A6',    r'\bA6\b'),
+    ('DDC DOLPHIN','PULMATIC',r'\bPULMATIC\b'),
+    ('DDC DOLPHIN','MACERADOR',r'\bMACERADOR\w*\b'),
+    ('AIR TECNIQUES','BASH',  r'\bBASH\s?\d*\b'),
+    ('DABI ATLANTE','NEW IDA',r'\bNEW\s?IDA\s?\w*\b'),
+    ('OWANDY',  'ELIOS',      r'\bELIOS\b'),
+    ('FAMOS',   'F108TX',     r'\bF108TX\b'),
+]
+
+def _rep_norm_cliente(s):
+    return re.sub(r'\s+', ' ', safe_str(s).strip().upper())
+
+def read_repuestos(casos_data):
+    if not os.path.exists(XLSX_REPUESTOS):
+        return None
+
+    # Cliente -> familias conocidas desde Casos Relevantes (equipos detenidos)
+    cli_equipos = defaultdict(set)
+    for e in (casos_data or {}).get("equipos", []):
+        cli = _rep_norm_cliente(e.get("nombre_cliente"))
+        if not cli or not e.get("modelo"):
+            continue
+        marca_raw = safe_str(e.get("marca")).strip().upper()
+        marca = _REP_MARCA_NORM.get(marca_raw, marca_raw or "Sin Marca")
+        cli_equipos[cli].add((marca, safe_str(e.get("modelo")).strip()))
+
+    def extraer_equipo(oport, marca_col, cliente):
+        text = safe_str(oport).upper()
+        for marca, fam, pat in _REP_MODEL_PATTERNS:
+            if re.search(pat, text):
+                return marca, fam, "modelo"
+        marca_col = safe_str(marca_col).strip().upper()
+        if marca_col:
+            marca_col = _REP_MARCA_NORM.get(marca_col, marca_col)
+            return marca_col, f"{marca_col} - Sin modelo específico", "marca"
+        # Fallback: cruce por cliente contra Casos Relevantes (equipos detenidos)
+        opciones = cli_equipos.get(_rep_norm_cliente(cliente))
+        if opciones and len(opciones) == 1:
+            marca, modelo = next(iter(opciones))
+            return marca, modelo, "cliente"
+        return "Sin Identificar", "Sin Identificar", "sin_match"
+
+    wb = openpyxl.load_workbook(XLSX_REPUESTOS, data_only=True, read_only=True)
+    ws = wb["Detalle de SKU vendidos"]
+
+    agg = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {"casos": 0, "monto": 0.0})))
+    tier_count = Counter()
+    total_filas = 0
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if len(row) < 19 or not row[3]:
+            continue
+        total_filas += 1
+        oport     = row[3]
+        cliente   = row[2]
+        producto  = safe_str(row[13]).strip() or "Sin especificar"
+        marca_col = row[14]
+        cantidad  = to_float(row[12]) or 1
+        precio    = to_float(row[15])
+        ano       = row[17]
+        monto     = (precio or 0) * cantidad
+
+        marca, familia, tier = extraer_equipo(oport, marca_col, cliente)
+        tier_count[tier] += 1
+
+        ano_s = str(int(ano)) if ano else "Sin año"
+        cell = agg[(marca, familia)][producto][ano_s]
+        cell["casos"] += 1
+        cell["monto"] += monto
+
+    wb.close()
+
+    ANIOS = ["2025", "2026"]
+    equipos_out = []
+    for (marca, familia), productos in agg.items():
+        tot_equipo_ano = {a: 0.0 for a in ANIOS}
+        for prod, anios in productos.items():
+            for a in ANIOS:
+                tot_equipo_ano[a] += anios.get(a, {}).get("monto", 0.0)
+
+        productos_out = []
+        tot_eq_casos, tot_eq_monto = 0, 0.0
+        prod_items = sorted(productos.items(), key=lambda kv: sum(v.get("monto", 0.0) for v in kv[1].values()), reverse=True)
+        for prod, anios in prod_items:
+            anios_out = {}
+            p_casos, p_monto = 0, 0.0
+            for a in ANIOS:
+                c = anios.get(a, {"casos": 0, "monto": 0.0})
+                pct = round(c["monto"] / tot_equipo_ano[a] * 100, 1) if tot_equipo_ano[a] > 0 else 0
+                anios_out[a] = {"casos": c["casos"], "monto": round(c["monto"]), "pct": pct}
+                p_casos += c["casos"]; p_monto += c["monto"]
+            productos_out.append({"repuesto": prod, "anios": anios_out, "total_casos": p_casos, "total_monto": round(p_monto)})
+            tot_eq_casos += p_casos; tot_eq_monto += p_monto
+
+        equipos_out.append({
+            "marca": marca, "familia": familia,
+            "productos": productos_out,
+            "total_casos": tot_eq_casos, "total_monto": round(tot_eq_monto),
+            "anios_total": {a: round(tot_equipo_ano[a]) for a in ANIOS},
+        })
+
+    equipos_out.sort(key=lambda e: e["total_monto"], reverse=True)
+
+    return {
+        "equipos": equipos_out,
+        "match_stats": {
+            "total_filas": total_filas,
+            "con_modelo": tier_count.get("modelo", 0),
+            "con_marca": tier_count.get("marca", 0),
+            "con_cliente": tier_count.get("cliente", 0),
+            "sin_identificar": tier_count.get("sin_match", 0),
+        },
+    }
+
+
 def read_ratios2(wb):
     ws = None
     for name in wb.sheetnames:
@@ -2214,7 +2375,7 @@ def build_alerta_data(contratos, panel_raw, mes_corte):
 # ══════════════════════════════════════════════════════════════════════════════
 # 8. PARCHEAR BLOQUE DATA/APP_DATA EN EL HTML TEMPLATE
 # ══════════════════════════════════════════════════════════════════════════════
-def patch_html(html, data, app_data, mapa_data=None, casos_data=None, alerta_data=None):
+def patch_html(html, data, app_data, mapa_data=None, casos_data=None, alerta_data=None, repuestos_data=None):
     """Reemplaza el bloque <script>...const DATA=...;window.APP_DATA=...;</script>"""
     # Buscar "const DATA=" (con o sin espacio) y su bloque <script> contenedor
     data_idx = html.find("const DATA=")
@@ -2248,8 +2409,9 @@ def patch_html(html, data, app_data, mapa_data=None, casos_data=None, alerta_dat
     ano = app_data.get("hoy", "")[:4]
 
     mapa_json   = json.dumps(mapa_data   or [], ensure_ascii=False)
-    casos_json  = json.dumps(casos_data  or {"casos": [], "equipos": []}, ensure_ascii=False)
-    alerta_json = json.dumps(alerta_data or [], ensure_ascii=False)
+    casos_json      = json.dumps(casos_data      or {"casos": [], "equipos": []}, ensure_ascii=False)
+    alerta_json     = json.dumps(alerta_data     or [], ensure_ascii=False)
+    repuestos_json  = json.dumps(repuestos_data  or {"equipos": [], "match_stats": {}}, ensure_ascii=False)
     new_block = (
         "<script>\n"
         f"const DATA = {json.dumps(data, ensure_ascii=False)};\n\n"
@@ -2258,6 +2420,7 @@ def patch_html(html, data, app_data, mapa_data=None, casos_data=None, alerta_dat
         f"window.MAPA_DATA = {mapa_json};\n"
         f"window.CASOS_DATA = {casos_json};\n"
         f"window.ALERTA_DATA = {alerta_json};\n"
+        f"window.REPUESTOS_DATA = {repuestos_json};\n"
         "</script>"
     )
     return html[:script_start] + new_block + html[script_end + 9:]
@@ -2420,11 +2583,19 @@ def main():
     print(f"       MAPA_DATA: {len(mapa_data)} clientes | {cc_count} con contrato")
     print(f"       CASOS: {len(casos_data['casos'])} casos relevantes | {len(casos_data['equipos'])} equipos detenidos")
 
+    repuestos_data = read_repuestos(casos_data)
+    if repuestos_data:
+        ms = repuestos_data["match_stats"]
+        pct_id = round((ms["con_modelo"] + ms["con_marca"] + ms["con_cliente"]) / ms["total_filas"] * 100, 1) if ms["total_filas"] else 0
+        print(f"       REPUESTOS: {ms['total_filas']} filas | {len(repuestos_data['equipos'])} equipos | {pct_id}% identificados (modelo={ms['con_modelo']} marca={ms['con_marca']} cliente={ms['con_cliente']} sin_id={ms['sin_identificar']})")
+    else:
+        print("       REPUESTOS: Excel no encontrado, se omite")
+
     # ── Parchear template.html (fuente de build.ps1) ─────────────────────────
     print("\nParcheando template.html...")
     with open(TMPL, encoding="utf-8") as f:
         html = f.read()
-    html = patch_html(html, data, app_data, mapa_data, casos_data, alerta_data)
+    html = patch_html(html, data, app_data, mapa_data, casos_data, alerta_data, repuestos_data)
     with open(TMPL, "w", encoding="utf-8") as f:
         f.write(html)
     print("  Actualizado: template.html")
