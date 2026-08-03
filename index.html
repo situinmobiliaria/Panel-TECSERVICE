@@ -9681,9 +9681,9 @@ async function eerrExportPDF() {
       n.style.maxWidth  = 'none';
     });
     c.querySelectorAll('td,th').forEach(n => {
-      n.style.fontSize   = '7px';
-      n.style.padding    = '2px 3px';
-      n.style.lineHeight = '1.15';
+      n.style.fontSize   = '9px';
+      n.style.padding    = '3px 5px';
+      n.style.lineHeight = '1.3';
       n.style.whiteSpace = 'nowrap';
     });
     c.querySelectorAll('table').forEach(t => {
@@ -9694,69 +9694,69 @@ async function eerrExportPDF() {
     return c;
   }
 
-  // 1. Measure natural scroll widths of each table so we know how wide the container needs to be
-  const eerrW  = eerrTbl  ? eerrTbl.scrollWidth  : 0;
-  const ratioW = ratioTbl ? ratioTbl.scrollWidth : 0;
-  const contentW = Math.max(eerrW, ratioW, 900);
-
-  // 2. Build off-screen container at exact content width
+  // Build off-screen container at 99999px wide so nothing wraps
   const wrap = document.createElement('div');
-  wrap.style.cssText = `position:fixed;left:-${contentW + 200}px;top:0;background:#fff;` +
-    `padding:10px 16px 16px;font-family:Arial,sans-serif;color:#111;` +
-    `width:${contentW + 32}px;box-sizing:border-box`;
+  wrap.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;' +
+    'padding:14px 20px 20px;font-family:Arial,sans-serif;color:#111;' +
+    'width:99999px;box-sizing:border-box';
 
   // Header
   const hdr = document.createElement('div');
-  hdr.style.cssText = 'margin-bottom:7px;border-bottom:2px solid #002D73;padding-bottom:4px;display:flex;align-items:baseline;gap:12px';
-  hdr.innerHTML = `<span style="font-size:10px;font-weight:700;color:#002D73">TECSERVICE — Estado de Resultado y Análisis de Ratios</span>` +
-    `<span style="font-size:8px;color:#666">Período: ${mesLbl} &nbsp;·&nbsp; Cifras en MM$</span>`;
+  hdr.style.cssText = 'margin-bottom:10px;border-bottom:2.5px solid #002D73;padding-bottom:6px;display:flex;align-items:baseline;gap:16px';
+  hdr.innerHTML = `<span style="font-size:12px;font-weight:700;color:#002D73">TECSERVICE — Estado de Resultado y Análisis de Ratios</span>` +
+    `<span style="font-size:10px;color:#555">Período: ${mesLbl} &nbsp;·&nbsp; Cifras en MM$</span>`;
   wrap.appendChild(hdr);
 
   function makeSection(label, srcEl) {
     const sec = document.createElement('div');
-    sec.style.cssText = 'margin-bottom:10px';
+    sec.style.cssText = 'margin-bottom:14px';
     const lbl = document.createElement('div');
-    lbl.style.cssText = 'font-size:7.5px;font-weight:700;color:#002D73;letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px';
+    lbl.style.cssText = 'font-size:9px;font-weight:700;color:#002D73;letter-spacing:.07em;text-transform:uppercase;margin-bottom:4px';
     lbl.textContent = label;
     sec.appendChild(lbl);
     sec.appendChild(cleanClone(srcEl));
     return sec;
   }
 
-  if (eerrTbl)  wrap.appendChild(makeSection('Estado de Resultado',  eerrTbl));
-  if (ratioTbl) wrap.appendChild(makeSection('Análisis de Ratios',   ratioTbl));
+  if (eerrTbl)  wrap.appendChild(makeSection('Estado de Resultado', eerrTbl));
+  if (ratioTbl) wrap.appendChild(makeSection('Análisis de Ratios',  ratioTbl));
 
   document.body.appendChild(wrap);
   try {
-    // 3. Capture the full content at scale 1.5 (enough DPI without giant file)
+    // Shrink container to actual content size before capture
+    const realW = wrap.scrollWidth;
+    const realH = wrap.scrollHeight;
+    wrap.style.width = realW + 'px';
+
+    const SCALE = 2;
     const canvas = await html2canvas(wrap, {
-      scale: 1.5,
+      scale: SCALE,
       backgroundColor: '#ffffff',
       useCORS: true,
       logging: false,
-      width:  wrap.scrollWidth,
-      height: wrap.scrollHeight,
-      windowWidth:  wrap.scrollWidth,
-      windowHeight: wrap.scrollHeight,
+      width:  realW,
+      height: realH,
+      windowWidth:  realW,
+      windowHeight: realH,
     });
 
     const imgData = canvas.toDataURL('image/png');
     const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
-    // 4. Scale to fit A4 landscape (297 × 210 mm) with 6 mm margins
-    const margin  = 6;
-    const usableW = 297 - margin * 2;
-    const usableH = 210 - margin * 2;
-    const px2mm   = 25.4 / (96 * 1.5);
-    const imgW_mm = canvas.width  * px2mm;
-    const imgH_mm = canvas.height * px2mm;
-    const sc      = Math.min(usableW / imgW_mm, usableH / imgH_mm);
-    const finalW  = imgW_mm * sc;
-    const finalH  = imgH_mm * sc;
+    // Create a PDF whose page dimensions match the content exactly at 96 DPI
+    // → content always fills the full page, never scaled down
+    const MM_PER_PX = 25.4 / 96;
+    const pageW_mm  = realW  * MM_PER_PX;
+    const pageH_mm  = realH  * MM_PER_PX;
 
-    pdf.addImage(imgData, 'PNG', (297 - finalW) / 2, (210 - finalH) / 2, finalW, finalH);
-    pdf.save(`EERR_TS_${mesLbl.replace(/[\s/]+/g,'_')}_${ANO}.pdf`);
+    const pdf = new jsPDF({
+      orientation: pageW_mm > pageH_mm ? 'landscape' : 'portrait',
+      unit: 'mm',
+      format: [pageW_mm, pageH_mm],
+    });
+
+    pdf.addImage(imgData, 'PNG', 0, 0, pageW_mm, pageH_mm);
+    pdf.save(`EERR_TS_${mesLbl.replace(/[\s/]+/g, '_')}_${ANO}.pdf`);
   } finally {
     document.body.removeChild(wrap);
     if (btn) {
