@@ -2434,7 +2434,10 @@ window.ALERTA_DATA = [{"cliente": "HOSPITAL EXEQUIEL GONZALEZ CORTES", "coord": 
   <div class="card" style="margin-bottom:.9rem">
     <div class="ch" style="display:flex;align-items:center;flex-wrap:wrap;gap:.5rem">
       <span class="ct">Estado de Resultado · Servicio Técnico S&amp;S</span>
-      <div id="eerr-mes-seg" style="display:flex;flex-wrap:wrap;gap:.25rem;margin-left:auto"></div>
+      <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto;flex-wrap:wrap">
+        <div id="eerr-mes-seg" style="display:flex;flex-wrap:wrap;gap:.25rem"></div>
+        <button id="eerr-pdf-btn" onclick="eerrExportPDF()" style="font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar PDF</button>
+      </div>
     </div>
     <div class="cb">
       <div id="eerr-table"></div>
