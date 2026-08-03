@@ -176,6 +176,28 @@ function _casosHTML() {
     <div style="padding:.4rem .9rem;background:var(--gy);border-top:1px solid var(--brd);font-size:.58rem;color:var(--mut)">
       $ por Cliente = Facturación Neta Mes · $ Contrato = Facturación Anual Esperada · % del Contrato = Facturación a la Fecha / Facturación Anual Esperada
     </div>
+  </div>
+
+  <!-- Tabla 6: Resumen por Cliente -->
+  <div class="card" style="margin-top:.9rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(51,68,141,.18),rgba(51,68,141,.06));flex-wrap:wrap;gap:.4rem">
+      <span class="ct" style="color:var(--az2)">Resumen por Cliente</span>
+      <span style="font-size:.58rem;color:var(--mut)" id="cas-t6-count">—</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="cas-table6" style="min-width:900px">
+        <thead><tr>
+          <th style="min-width:260px">Cliente</th>
+          <th style="min-width:100px">N° Equipos</th>
+          <th style="min-width:180px">Familias de Equipo</th>
+          <th style="min-width:120px">$ por Cliente</th>
+          <th style="min-width:120px">$ Contrato</th>
+          <th style="min-width:90px">% del Total</th>
+        </tr></thead>
+        <tbody id="cas-tbody6"></tbody>
+        <tfoot id="cas-tfoot6"></tfoot>
+      </table>
+    </div>
   </div>`;
 }
 
@@ -602,6 +624,63 @@ function renderCasos() {
       const t5count = document.getElementById('cas-t5-count');
       if (t5count) t5count.textContent = eqFilt.length + ' equipo' + (eqFilt.length !== 1 ? 's' : '');
     }
+  }
+
+  // ── Tabla 6: Resumen por Cliente ─────────────────────────────────
+  const tbody6 = document.getElementById('cas-tbody6');
+  const tfoot6 = document.getElementById('cas-tfoot6');
+  if (tbody6) {
+    const _fmtM6 = v => v > 0 ? 'MM$' + fN1(v / 1e6) : '—';
+
+    const porCliente = {};
+    eqFilt.forEach(e => {
+      const cliente = e.nombre_cliente || 'Sin Cliente Asociado';
+      const marca   = _normMarca(e.marca);
+      const familia = _familiaModelo(marca, e.modelo);
+      if (!porCliente[cliente]) porCliente[cliente] = { cant: 0, familias: new Set(), sumCliente: 0, sumContrato: 0 };
+      const g = porCliente[cliente];
+      g.cant++;
+      g.familias.add(familia);
+      if (e.nombre_cliente) {
+        g.sumCliente  += (e.neta_mes  || 0);
+        g.sumContrato += (e.fac_anual || 0);
+      }
+    });
+
+    const clientes = Object.keys(porCliente).sort((a, b) => porCliente[b].sumContrato - porCliente[a].sumContrato);
+    const totContratoGlobal6 = clientes.reduce((s, c) => s + porCliente[c].sumContrato, 0);
+    const gran6Cant     = clientes.reduce((s, c) => s + porCliente[c].cant, 0);
+    const gran6Cliente  = clientes.reduce((s, c) => s + porCliente[c].sumCliente, 0);
+    const gran6Contrato = clientes.reduce((s, c) => s + porCliente[c].sumContrato, 0);
+
+    tbody6.innerHTML = clientes.map(cli => {
+      const g = porCliente[cli];
+      const pct = totContratoGlobal6 > 0 ? (g.sumContrato / totContratoGlobal6 * 100) : 0;
+      const esSinCliente = cli === 'Sin Cliente Asociado';
+      return `<tr>
+        <td>${esSinCliente
+          ? `<span style="font-size:.6rem;color:var(--mut);font-style:italic">${_escH(cli)}</span>`
+          : `<strong style="font-size:.62rem">${_escH(cli)}</strong>`}</td>
+        <td style="text-align:center;font-size:.63rem;font-weight:700">${g.cant}</td>
+        <td><span style="font-size:.58rem;color:var(--am)">${[...g.familias].map(_escH).join(', ')}</span></td>
+        <td style="text-align:right;font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM6(g.sumCliente)}</td>
+        <td style="text-align:right;font-size:.63rem;font-weight:700;color:var(--az2)">${_fmtM6(g.sumContrato)}</td>
+        <td style="text-align:right;font-size:.63rem;color:var(--mut)">${g.sumContrato > 0 ? fN1(pct) + '%' : '—'}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" style="text-align:center;padding:1.2rem;color:var(--mut)">Sin equipos para los filtros seleccionados</td></tr>';
+
+    if (tfoot6) {
+      tfoot6.innerHTML = clientes.length ? `<tr>
+        <td style="padding:.4rem .7rem;font-size:.62rem">Total General · ${clientes.length} cliente${clientes.length !== 1 ? 's' : ''}</td>
+        <td style="text-align:center;font-size:.65rem">${gran6Cant}</td>
+        <td></td>
+        <td style="text-align:right;font-size:.65rem">${_fmtM6(gran6Cliente)}</td>
+        <td style="text-align:right;font-size:.65rem">${_fmtM6(gran6Contrato)}</td>
+        <td style="text-align:right;font-size:.65rem">100,0%</td>
+      </tr>` : '';
+    }
+    const t6count = document.getElementById('cas-t6-count');
+    if (t6count) t6count.textContent = clientes.length + ' cliente' + (clientes.length !== 1 ? 's' : '') + ' · ' + eqFilt.length + ' equipo' + (eqFilt.length !== 1 ? 's' : '');
   }
 
   // KPIs
