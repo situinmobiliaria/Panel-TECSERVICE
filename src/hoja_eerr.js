@@ -388,63 +388,80 @@ async function eerrExportPDF() {
   const ratioTbl = document.getElementById('eerr-ratio-table');
   if (!eerrTbl && !ratioTbl) return;
 
+  const btn = document.getElementById('eerr-pdf-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+
   const mesLbl = (document.getElementById('eerr-mes-lbl') || {}).textContent || '';
   const ANO = (window.APP_DATA || {}).ano_actual || new Date().getFullYear();
 
   function cleanClone(el) {
     const c = el.cloneNode(true);
     c.querySelectorAll('*').forEach(n => {
-      if (getComputedStyle(n).position === 'sticky') n.style.position = 'relative';
-      n.style.removeProperty('position');
+      n.style.position = 'static';
+      n.style.maxHeight = 'none';
+      n.style.overflow  = 'visible';
+    });
+    c.querySelectorAll('td,th').forEach(n => {
+      n.style.fontSize  = '7.5px';
+      n.style.padding   = '2px 4px';
+      n.style.lineHeight = '1.2';
+      n.style.whiteSpace = 'normal';
     });
     return c;
   }
 
+  // Outer container — wide enough so columns don't wrap
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'background:#fff;padding:16px 24px;font-family:sans-serif;color:#111;width:1100px';
+  wrap.style.cssText = 'position:fixed;left:-9999px;top:0;background:#fff;padding:10px 16px 14px;font-family:Arial,sans-serif;color:#111;width:1500px;box-sizing:border-box';
 
+  // Header
   const hdr = document.createElement('div');
-  hdr.style.cssText = 'margin-bottom:12px';
-  hdr.innerHTML = `<div style="font-size:14px;font-weight:700;color:#002D73">TECSERVICE — Estado de Resultado y Análisis de Ratios</div>
-    <div style="font-size:11px;color:#555;margin-top:2px">Período: ${mesLbl} &nbsp;·&nbsp; Cifras en MM$</div>`;
+  hdr.style.cssText = 'margin-bottom:8px;border-bottom:2px solid #002D73;padding-bottom:5px';
+  hdr.innerHTML = `<span style="font-size:11px;font-weight:700;color:#002D73">TECSERVICE — Estado de Resultado y Análisis de Ratios</span>
+    <span style="font-size:9px;color:#666;margin-left:14px">Período: ${mesLbl} &nbsp;·&nbsp; Cifras en MM$</span>`;
   wrap.appendChild(hdr);
 
-  if (eerrTbl) {
-    const s = document.createElement('div');
-    s.style.cssText = 'font-size:10px;font-weight:700;color:#002D73;margin-bottom:4px;margin-top:8px;text-transform:uppercase;letter-spacing:.05em';
-    s.textContent = 'Estado de Resultado';
-    wrap.appendChild(s);
-    const cloned = cleanClone(eerrTbl);
-    cloned.querySelectorAll('table').forEach(t => { t.style.width = '100%'; t.style.fontSize = '9px'; });
-    wrap.appendChild(cloned);
+  // Two-column body
+  const body = document.createElement('div');
+  body.style.cssText = 'display:flex;gap:12px;align-items:flex-start';
+
+  function makeCol(label, srcEl) {
+    const col = document.createElement('div');
+    col.style.cssText = 'flex:1;min-width:0';
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'font-size:8px;font-weight:700;color:#002D73;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px';
+    lbl.textContent = label;
+    col.appendChild(lbl);
+    const cloned = cleanClone(srcEl);
+    cloned.querySelectorAll('table').forEach(t => { t.style.width = '100%'; t.style.borderCollapse = 'collapse'; });
+    col.appendChild(cloned);
+    return col;
   }
 
-  if (ratioTbl) {
-    const s = document.createElement('div');
-    s.style.cssText = 'font-size:10px;font-weight:700;color:#002D73;margin-bottom:4px;margin-top:14px;text-transform:uppercase;letter-spacing:.05em';
-    s.textContent = 'Análisis de Ratios';
-    wrap.appendChild(s);
-    const cloned = cleanClone(ratioTbl);
-    cloned.querySelectorAll('table').forEach(t => { t.style.width = '100%'; t.style.fontSize = '9px'; });
-    wrap.appendChild(cloned);
-  }
+  if (eerrTbl)  body.appendChild(makeCol('Estado de Resultado', eerrTbl));
+  if (ratioTbl) body.appendChild(makeCol('Análisis de Ratios',  ratioTbl));
+  wrap.appendChild(body);
 
   document.body.appendChild(wrap);
   try {
-    const canvas = await html2canvas(wrap, { scale: 1.8, backgroundColor: '#ffffff', useCORS: true });
+    const canvas = await html2canvas(wrap, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
     const imgData = canvas.toDataURL('image/png');
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const usableW = 287 - 14;
-    const usableH = 200 - 14;
-    const imgW_mm = canvas.width  / (96 * 1.8 / 25.4);
-    const imgH_mm = canvas.height / (96 * 1.8 / 25.4);
-    const scale   = Math.min(usableW / imgW_mm, usableH / imgH_mm);
-    const finalW  = imgW_mm * scale;
-    const finalH  = imgH_mm * scale;
-    pdf.addImage(imgData, 'PNG', (287 - finalW) / 2, 7, finalW, finalH);
-    pdf.save(`EERR_TS_${mesLbl.replace(/\s+/g,'_')}_${ANO}.pdf`);
+    // A4 landscape: 297 × 210 mm, 7 mm margins all sides
+    const margin = 7;
+    const usableW = 297 - margin * 2;
+    const usableH = 210 - margin * 2;
+    const DPI    = 96 * 2;
+    const imgW_mm = canvas.width  / (DPI / 25.4);
+    const imgH_mm = canvas.height / (DPI / 25.4);
+    const sc     = Math.min(usableW / imgW_mm, usableH / imgH_mm);
+    const finalW = imgW_mm * sc;
+    const finalH = imgH_mm * sc;
+    pdf.addImage(imgData, 'PNG', (297 - finalW) / 2, (210 - finalH) / 2, finalW, finalH);
+    pdf.save(`EERR_TS_${mesLbl.replace(/[\s/]+/g,'_')}_${ANO}.pdf`);
   } finally {
     document.body.removeChild(wrap);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar PDF'; }
   }
 }
