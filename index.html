@@ -444,7 +444,6 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
     <button class="nb" onclick="sv('alertas',this)">Bajo<br>Contrato</button>
     <button class="nb" onclick="sv('eerr',this)">EERR y<br>Ratios</button>
     <button class="nb" onclick="sv('desglose',this)">Desglose de<br>Ingresos</button>
-    <button class="nb" onclick="sv('inventario',this)">Inventario<br>TS</button>
   </div>
   <div class="tright"></div>
 </div>
@@ -2539,8 +2538,7 @@ function sv(name,btn){
     base:initBaseInstalada,
     satisfaccion:initSatisfaccion,
     visitas:initVisitas,
-    alertas:initAlertas,
-    inventario:()=>{ if(window.initInventario) window.initInventario(); }
+    alertas:initAlertas
   };
   const k='_i_'+name;
   if(inits[name]&&!window[k]){inits[name]();window[k]=true;}
@@ -9277,22 +9275,6 @@ function renderAlertas(){
   </div>
 </div>
 
-<div class="view" id="view-inventario">
-  <div class="sh">
-    <h2>Inventario TS</h2>
-    <div class="sh-line"></div>
-    <span class="sh-tag">Inventario de Tecservice · <strong id="inv-fecha-lbl">—</strong></span>
-  </div>
-
-  <!-- Tabla expandible Marca → Meses -->
-  <div class="card">
-    <div class="ch"><span class="ct">Inventario por Marca</span></div>
-    <div class="cb">
-      <div id="inv-table"></div>
-    </div>
-  </div>
-</div>
-
 <script>
 // ═══════════════════════════════════════════════════════════════
 // hoja_eerr.js — EERR S&S y Análisis de Ratios
@@ -10185,7 +10167,6 @@ async function eerrExportPDF() {
   }
 })();
 </script>
-<script src="hoja_inventario.js"></script>
 <script>
 // hoja_pdf.js — Generador de Reporte PDF · Panel TECSERVICE
 // Genera páginas estructuradas con los gráficos clave + indicadores + texto por sección.

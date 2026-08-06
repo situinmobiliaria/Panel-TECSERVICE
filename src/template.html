@@ -444,7 +444,6 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
     <button class="nb" onclick="sv('alertas',this)">Bajo<br>Contrato</button>
     <button class="nb" onclick="sv('eerr',this)">EERR y<br>Ratios</button>
     <button class="nb" onclick="sv('desglose',this)">Desglose de<br>Ingresos</button>
-    <button class="nb" onclick="sv('inventario',this)">Inventario<br>TS</button>
   </div>
   <div class="tright"></div>
 </div>
@@ -2535,25 +2534,8 @@ window.ALERTA_DATA = [{"cliente": "HOSPITAL EXEQUIEL GONZALEZ CORTES", "coord": 
   </div>
 </div>
 
-<div class="view" id="view-inventario">
-  <div class="sh">
-    <h2>Inventario TS</h2>
-    <div class="sh-line"></div>
-    <span class="sh-tag">Inventario de Tecservice · <strong id="inv-fecha-lbl">—</strong></span>
-  </div>
-
-  <!-- Tabla expandible Marca → Meses -->
-  <div class="card">
-    <div class="ch"><span class="ct">Inventario por Marca</span></div>
-    <div class="cb">
-      <div id="inv-table"></div>
-    </div>
-  </div>
-</div>
-
 <script src="hoja_eerr.js"></script>
 <script src="hoja_desglose.js"></script>
-<script src="hoja_inventario.js"></script>
 <script src="hoja_pdf.js"></script>
 <script src="hoja_login.js"></script>
 

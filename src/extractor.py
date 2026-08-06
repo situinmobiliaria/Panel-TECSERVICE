@@ -22,24 +22,28 @@ import pandas as pd
 def _xlsb_to_xlsx(xlsb_path):
     """Convierte .xlsb a .xlsx temporal usando Excel COM. Retorna la ruta del xlsx generado."""
     import win32com.client, shutil, tempfile
-    # Guardar en directorio temporal para evitar conflictos con archivo existente
+    # Nombre único por corrida: evita PermissionError si una corrida previa
+    # dejó el archivo bloqueado por un proceso Excel colgado.
     tmp_dir  = tempfile.gettempdir()
-    tmp_path = os.path.join(tmp_dir, "panel_ts_converted.xlsx")
+    tmp_path = os.path.join(tmp_dir, f"panel_ts_conv_{os.getpid()}.xlsx")
+    # Limpiar conversiones viejas que ya no estén bloqueadas
+    for f in os.listdir(tmp_dir):
+        if f.startswith("panel_ts_conv") and f.endswith(".xlsx"):
+            try: os.remove(os.path.join(tmp_dir, f))
+            except OSError: pass
     print(f"  Convirtiendo {os.path.basename(xlsb_path)} con Excel COM ...")
     excel = None
     wb_com = None
     try:
         excel = win32com.client.Dispatch("Excel.Application")
-        excel.Visible = False
+        try: excel.Visible = False
+        except Exception: pass
         excel.DisplayAlerts = False
         excel.AskToUpdateLinks = False
         wb_com = excel.Workbooks.Open(
             os.path.abspath(xlsb_path),
             UpdateLinks=0, ReadOnly=True
         )
-        # Si ya existe el tmp, borrarlo primero
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
         wb_com.SaveAs(tmp_path, FileFormat=51)  # 51 = xlOpenXMLWorkbook
         print(f"  Conversion completada -> {tmp_path}")
         return tmp_path
@@ -70,7 +74,7 @@ JS_FILES = [
     "utils.js", "datos.js", "hoja_resumen.js", "hoja_tipos.js", "hoja_nuevos.js",
     "hoja_vencimientos.js", "hoja_vision.js", "hoja_presupuesto.js",
     "hoja_facturacion.js", "hoja_panelfact.js", "hoja_satisfaccion.js", "hoja_visitas.js",
-    "hoja_alerta.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inventario.js",
+    "hoja_alerta.js", "hoja_eerr.js", "hoja_desglose.js",
 ]
 
 ANO   = date.today().year
@@ -1450,137 +1454,6 @@ def read_casos(wb):
     return {"casos": casos, "equipos": equipos}
 
 
-def read_td_inventarios(wb):
-    SHEET = 'TD'
-    ws = None
-    for name in wb.sheetnames:
-        if name.strip().upper() == SHEET.upper():
-            ws = wb[name]; break
-    if ws is None:
-        return {}
-
-    # Estructura fija: fila 3 = meses (6..12 2025, 1..7 2026)
-    # Col A = marcas, filas 4+ = datos
-    # Última fila = "Total general"
-    td_data = {}
-
-    # Leer encabezados de meses (fila 3)
-    meses_headers = []
-    for c in range(2, ws.max_column + 1):
-        v = ws.cell(3, c).value
-        if v and v != '_':
-            meses_headers.append((c, str(v).strip()))
-
-    # Leer marcas y valores
-    for r in range(4, ws.max_row):
-        marca = ws.cell(r, 1).value
-        if not marca or marca.upper() == 'TOTAL GENERAL':
-            continue
-        marca = str(marca).strip()
-
-        total = 0
-        meses_data = {}
-        for col, mes_str in meses_headers:
-            v = ws.cell(r, col).value
-            if v is not None and v != '_':
-                try:
-                    val = float(v)
-                    meses_data[mes_str] = round(val)
-                    total += val
-                except:
-                    pass
-
-        if total > 0:
-            td_data[marca] = {
-                'total': round(total),
-                'meses': meses_data,
-            }
-
-    return td_data
-
-
-def read_inventario(wb):
-    SHEET = 'Inventario Bodega'
-    ws = None
-    for name in wb.sheetnames:
-        if name.strip().lower() == SHEET.lower():
-            ws = wb[name]; break
-    if ws is None:
-        return {}
-
-    por_rot    = {}
-    por_bodega = {}
-    # por_marca: {marca: {costo_total, stock, n_items, items:[{sku,desc,rot,bodega,stock,cu,ct}]}}
-    por_marca  = {}
-
-    total_val   = 0
-    total_items = 0
-    total_stock = 0
-    sin_rot_val = 0
-
-    for r in range(2, ws.max_row + 1):
-        empresa = ws.cell(r, 2).value
-        if not empresa:
-            continue
-        sku         = str(ws.cell(r, 3).value or '').strip()
-        rotacion    = str(ws.cell(r, 4).value or 'Sin dato').strip()
-        desc        = str(ws.cell(r, 5).value or '').strip()
-        marca       = str(ws.cell(r, 8).value or 'SIN MARCA').strip()
-        bodega      = str(ws.cell(r, 11).value or '').strip()
-        stock_v     = ws.cell(r, 12).value
-        cu_v        = ws.cell(r, 13).value
-        ct_v        = ws.cell(r, 14).value
-        stock  = float(stock_v)  if isinstance(stock_v,  (int, float)) else 0
-        cu     = float(cu_v)     if isinstance(cu_v,     (int, float)) else 0
-        ct     = float(ct_v)     if isinstance(ct_v,     (int, float)) else 0
-
-        total_val   += ct
-        total_items += 1
-        total_stock += stock
-        if 'sin' in rotacion.lower():
-            sin_rot_val += ct
-
-        por_rot[rotacion]  = por_rot.get(rotacion, 0) + ct
-        if bodega:
-            por_bodega[bodega] = por_bodega.get(bodega, 0) + ct
-
-        if marca not in por_marca:
-            por_marca[marca] = {'costo_total': 0, 'stock': 0, 'n_items': 0, 'items': []}
-        por_marca[marca]['costo_total'] += ct
-        por_marca[marca]['stock']       += stock
-        por_marca[marca]['n_items']     += 1
-        por_marca[marca]['items'].append({
-            'sku': sku, 'desc': desc, 'rot': rotacion, 'bod': bodega,
-            'stock': round(stock), 'cu': round(cu), 'ct': round(ct),
-        })
-
-    # Ordenar items por costo total desc dentro de cada marca
-    for m in por_marca:
-        por_marca[m]['items'].sort(key=lambda x: -x['ct'])
-
-    top_bodegas = [[k, round(v)] for k, v in sorted(por_bodega.items(), key=lambda x: -x[1])[:12]]
-
-    # Serializar por_marca ordenado por costo_total desc
-    por_marca_sorted = {
-        k: {
-            'costo_total': round(v['costo_total']),
-            'stock':       round(v['stock']),
-            'n_items':     v['n_items'],
-            'items':       v['items'],      # lista completa de SKUs
-        }
-        for k, v in sorted(por_marca.items(), key=lambda x: -x[1]['costo_total'])
-    }
-
-    return {
-        'total_valorizado': round(total_val),
-        'total_items':      total_items,
-        'total_stock':      round(total_stock),
-        'sin_rotacion':     round(sin_rot_val),
-        'por_rotacion':     {k: round(v) for k, v in sorted(por_rot.items(), key=lambda x: -x[1])},
-        'top_bodegas':      top_bodegas,
-        'por_marca':        por_marca_sorted,
-    }
-
 
 def read_ratios2(wb):
     ws = None
@@ -2501,8 +2374,6 @@ def main():
     casos_data = read_casos(wb2)
     ratios2 = read_ratios2(wb2)
     resumen_programas = read_resumen_tipos_programas(wb2)
-    inventario = read_inventario(wb2)
-    td_inv = read_td_inventarios(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -2517,10 +2388,6 @@ def main():
     app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada, mapa_data=mapa_data)
     app_data["ratios2"] = ratios2
     app_data["resumen_programas"] = resumen_programas
-    app_data["inventario"] = inventario
-    app_data["td_inv"] = td_inv
-    if td_inv:
-        print(f"       TD INVENTARIOS: {len(td_inv)} marcas")
     # Hora fija 02:50 am (el proceso real de actualización se considera
     # completo a esa hora todos los días; el aviso por correo sale 10 min
     # después, a las 03:00 am). Si esta corrida pasa de las 02:50 am del día
