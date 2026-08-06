@@ -154,13 +154,38 @@ equipo a mano) y la realidad de CONTRATOS TODOS:
 
   a) Contrato ACTIVO pero con estado_relacion = "Perdido": ocurre cuando el
      cliente fue marcado "no continuó" en algún momento pero luego SÍ
-     renovó con OTRO contrato que sigue activo. CORRECCIÓN: un contrato
-     activo nunca puede mostrarse como "Perdido"; se reclasifica
-     automáticamente a "Renovado". Afectó a 5 clientes en la corrida
-     actual: Hospital Militar de Santiago, Corp Municipal de Educación y
-     Servicios Ramón Freire, Hospital Clínico San Borja-Arriarán,
-     I. Municipalidad de Constitución, Ejército de Chile Central
-     Odontológica.
+     renovó con OTRO contrato que sigue activo.
+
+     CORRECCIÓN (revisada 06/08/2026): un contrato sólo cuenta como vigente
+     si Estado="Activado" Y su fecha de término todavía no pasa. Recién ahí
+     se reclasifica "Perdido" -> "Renovado".
+
+     La regla anterior sólo miraba Estado="Activado" y era incorrecta: la
+     columna Estado de CONTRATOS TODOS se llena a mano y queda atrasada, así
+     que había contratos marcados "Activado" con fecha vencida hace semanas.
+     De los 5 clientes afectados, 4 tenían el contrato ya vencido y se
+     estaban contando como "Renovado" siendo que efectivamente se perdieron:
+
+       Hospital Militar de Santiago         #103  venció 02/06/2026  (-62 d)
+       I. Municipalidad de Constitución     #242  venció 31/05/2026  (-64 d)
+       Soc. Concesionaria Metrop. de Salud  #144  venció 31/07/2026  ( -3 d)
+       Hospital de Illapel                  #209  venció 31/07/2026  ( -3 d)
+
+     El único caso real de flag manual atrasado es Clínica Intermedical
+     (#200, Endoscopía, vigente hasta 31/07/2027): ahí sí renovó y la marca
+     de FACTURACIÓN no se actualizó.
+
+     ÁMBITO: la corrección se aplica UNA sola vez sobre panel_raw, en
+     corregir_estado_relacion(), antes de derivar APP_DATA.panel y DATA.
+     Antes se aplicaba sólo al construir DATA, así que la tabla de detalle
+     por estado de relación (que lee FAC_DATA <- APP_DATA.panel, flag crudo)
+     y las hojas Vencimientos / Visión General (que leen DATA, flag
+     corregido) mostraban ESTADOS DISTINTOS PARA EL MISMO CLIENTE.
+
+     DEFINICIÓN de los tres estados, según el Excel de FACTURACIÓN:
+       Nuevo    = el cliente tiene contrato por primera vez
+       Renovado = el cliente tiene más de un contrato
+       Perdido  = tenía contrato, se venció y no renovó
 
   b) Cliente en la lista de "Perdidos" (PERDIDOS_VG, la que se usa en el
      filtro "📉 Perdidos" de Visión General) cuyo contrato más reciente

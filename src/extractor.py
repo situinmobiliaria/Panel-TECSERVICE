@@ -2082,12 +2082,53 @@ def _tiene_sucesor_reciente(contratos_cliente, ventana_dias=30):
     return False
 
 
+def clientes_con_contrato_vigente(contratos):
+    """Clientes con contrato REALMENTE vigente: Estado="Activado" en el Excel Y
+    fecha de término aún no pasada.
+
+    La columna Estado de CONTRATOS TODOS se actualiza a mano y queda atrasada:
+    hay contratos marcados "Activado" cuya fecha venció hace semanas. Si sólo se
+    mira Estado, un cliente que de verdad no continuó se cuenta como Renovado.
+    Ver SUPUESTOS.txt punto 7a."""
+    return {
+        c["cliente"] for c in contratos
+        if c["estado"] == "Activado" and c["dias_vence"] >= 0
+    }
+
+
+def corregir_estado_relacion(panel_raw, contratos):
+    """Reconcilia el flag manual "No Continuó" de FACTURACIÓN con los contratos.
+
+    Se aplica UNA sola vez sobre panel_raw, antes de construir APP_DATA.panel y
+    DATA, para que todas las hojas muestren el mismo estado para un mismo
+    cliente. Antes había dos fuentes divergentes: la tabla de detalle leía el
+    flag crudo (Perdido) y Vencimientos/Visión General leían el corregido
+    (Renovado), así que el mismo cliente aparecía distinto según la hoja."""
+    vigentes = clientes_con_contrato_vigente(contratos)
+    corregidos = []
+    for p in panel_raw:
+        if p.get("estado_relacion") == "Perdido" and p["cliente"] in vigentes:
+            # El flag manual quedó atrasado: el cliente sí renovó y tiene un
+            # contrato con fecha vigente.
+            p["estado_relacion"] = "Renovado"
+            p["_no_continuo"]    = False
+            p["tiene_contrato"]  = True
+            corregidos.append(p["cliente"])
+    if corregidos:
+        print(f"       Estado relacion corregido (No Continuo -> Renovado, tienen contrato vigente): {len(corregidos)}")
+        for cli in corregidos:
+            print(f"         - {cli}")
+    return panel_raw
+
+
 def build_data_arrays(contratos, panel_raw):
-    # Lookup de estado_relacion por cliente desde FACTURACIÓN
+    # Lookup de estado_relacion por cliente desde FACTURACIÓN. Ya viene
+    # reconciliado por corregir_estado_relacion(), así que se usa tal cual.
     panel_rel_map = {p["cliente"]: p.get("estado_relacion", "Nuevo") for p in panel_raw}
     contratos_by_cliente = defaultdict(list)
     for c in contratos:
         contratos_by_cliente[c["cliente"]].append(c)
+    clientes_vigentes = clientes_con_contrato_vigente(contratos)
 
     # DATA: only active contracts
     data = []
@@ -2095,32 +2136,27 @@ def build_data_arrays(contratos, panel_raw):
         if c["estado"] != "Activado":
             continue
         d = {k: v for k, v in c.items() if k not in _DATA_EXCLUDE}
-        rel = panel_rel_map.get(c["cliente"], "Nuevo")
-        # Un contrato ACTIVO no puede estar "Perdido": el flag "no continuó" de
-        # FACTURACIÓN quedó desactualizado porque el cliente sí renovó.
-        if rel == "Perdido":
-            rel = "Renovado"
-        d["estado_relacion"] = rel
+        d["estado_relacion"] = panel_rel_map.get(c["cliente"], "Nuevo")
         data.append(d)
 
     # NC_DATA: new active contracts (started ≤90 days ago), all types
     nc_data = [d for d in data if d["es_nuevo"]]
 
     # PERDIDOS_VG: clients marked as no_continuo with no active contract
-    active_clientes = {c["cliente"] for c in contratos if c["estado"] == "Activado"}
     perdidos = []
     for p in panel_raw:
         if not p.get("_no_continuo"):
             continue
         cli = p["cliente"]
-        if cli in active_clientes:
-            continue  # Cliente renovó con otro contrato
+        if cli in clientes_vigentes:
+            continue  # Cliente renovó con otro contrato aún vigente
         if _tiene_sucesor_reciente(contratos_by_cliente.get(cli, [])):
             continue  # Renovó dentro de la ventana de 30 días; no está realmente perdido
 
-        # Find the last expired contract for this client
-        expired = [c for c in contratos if c["cliente"] == cli and c["estado"] != "Activado"]
-        last_c  = max(expired, key=lambda c: c["fin"], default={}) if expired else {}
+        # Último contrato del cliente: el de término más reciente, sin importar
+        # que el Excel lo siga marcando "Activado" (su fecha ya pasó).
+        anteriores = [c for c in contratos if c["cliente"] == cli]
+        last_c = max(anteriores, key=lambda c: c["fin"], default={}) if anteriores else {}
 
         perdidos.append({
             "n":              "—",
@@ -2385,6 +2421,9 @@ def main():
 
     # ── Construir estructuras de datos ───────────────────────────────────────
     print("[6/6] Construyendo estructuras de datos...")
+    # Reconciliar el flag manual "No Continuó" con los contratos ANTES de
+    # derivar APP_DATA.panel y DATA, para que ambas fuentes coincidan.
+    panel_raw = corregir_estado_relacion(panel_raw, contratos)
     app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada, mapa_data=mapa_data)
     app_data["ratios2"] = ratios2
     app_data["resumen_programas"] = resumen_programas
