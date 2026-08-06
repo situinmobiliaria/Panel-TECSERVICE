@@ -2537,38 +2537,37 @@ window.ALERTA_DATA = [{"cliente": "HOSPITAL EXEQUIEL GONZALEZ CORTES", "coord": 
 
 <div class="view" id="view-inventario">
   <div class="sh">
-    <h2>Inventario TS</h2>
+    <h2>Inventario TS · Repuestos</h2>
     <div class="sh-line"></div>
-    <span class="sh-tag">Inventario valorizado en bodega · <strong id="inv-fecha-lbl">—</strong></span>
+    <span class="sh-tag">Inventario valorizado de repuestos en bodega · <strong id="inv-fecha-lbl">—</strong></span>
   </div>
 
   <!-- KPI row -->
   <div id="inv-kpi-row" style="display:flex;gap:.7rem;flex-wrap:wrap;margin-bottom:.9rem"></div>
 
   <!-- Charts row -->
-  <div style="display:grid;grid-template-columns:1fr 1.4fr 1fr;gap:.8rem;margin-bottom:.9rem">
+  <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:.8rem;margin-bottom:.9rem">
     <div class="card">
-      <div class="ch"><span class="ct">Por Categoría</span></div>
-      <div class="cb" style="position:relative;height:220px"><canvas id="cInvCat"></canvas></div>
+      <div class="ch"><span class="ct">Top 12 Marcas · Costo Total Valorizado</span></div>
+      <div class="cb" style="position:relative;height:260px"><canvas id="cInvMarcas"></canvas></div>
     </div>
-    <div class="card">
-      <div class="ch"><span class="ct">Top Marcas · Costo Total</span></div>
-      <div class="cb" style="position:relative;height:220px"><canvas id="cInvMarcas"></canvas></div>
-    </div>
-    <div class="card">
-      <div class="ch"><span class="ct">Por Rotación</span></div>
-      <div class="cb" style="position:relative;height:220px"><canvas id="cInvRot"></canvas></div>
+    <div style="display:grid;grid-template-rows:1fr 1fr;gap:.8rem">
+      <div class="card">
+        <div class="ch"><span class="ct">Por Rotación</span></div>
+        <div class="cb" style="position:relative;height:100px"><canvas id="cInvRot"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="ch"><span class="ct">Top Bodegas</span></div>
+        <div class="cb" style="position:relative;height:100px"><canvas id="cInvBod"></canvas></div>
+      </div>
     </div>
   </div>
 
-  <!-- Tabla Repuestos por Marca -->
+  <!-- Tabla expandible Marca → SKU -->
   <div class="card">
-    <div class="ch" style="display:flex;align-items:center;flex-wrap:wrap;gap:.5rem">
-      <span class="ct">Detalle Inventario por Marca</span>
-      <div id="inv-cat-seg" style="display:flex;flex-wrap:wrap;gap:.25rem;margin-left:auto"></div>
-    </div>
+    <div class="ch"><span class="ct">Detalle por Marca y SKU</span></div>
     <div class="cb">
-      <div id="inv-table" style="overflow-x:auto"></div>
+      <div id="inv-table"></div>
     </div>
   </div>
 </div>

@@ -1,101 +1,80 @@
-// hoja_inventario.js — Inventario TS
+// hoja_inventario.js — Inventario TS (Repuestos)
 // Depende de: datos.js, utils.js
 (function () {
-
   const INV = (window.APP_DATA || {}).inventario || {};
 
   const fmtM  = v => 'MM$' + (v / 1e6).toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const fmtMM = v => 'MM$' + Math.round(v / 1e6).toLocaleString('es-CL');
+  const fmtCLP = v => '$' + Math.round(v).toLocaleString('es-CL');
   const fmtN  = v => Math.round(v).toLocaleString('es-CL');
   const pct   = (a, b) => b ? ((a / b) * 100).toFixed(1) + '%' : '—';
 
-  const PALETTE = {
-    EQUIPOS:      '#002D73',
-    CONSUMIBLES:  '#33448D',
-    REPUESTOS:    '#28D2C3',
-    ACCESORIOS:   '#FFC000',
-    IMPLANTES:    '#7A1FAA',
-    INSTRUMENTAL: '#D46000',
-    OTROS:        '#B8C1D8',
-  };
   const ROT_COLOR = {
     'Alta Rotacion':    '#00832F',
     'Mediana Rotacion': '#FFC000',
     'Baja Rotacion':    '#D46000',
     'Sin Rotacion':     '#C00000',
+    'Sin dato':         '#B8C1D8',
   };
-  const CHART_COLORS = ['#002D73','#33448D','#28D2C3','#FFC000','#7A1FAA','#D46000','#00832F','#C00000','#4C9BE8','#E8B24C','#4CE8A0','#E84C9B'];
+  const BAR_COLORS = ['#002D73','#33448D','#4C7FBF','#28D2C3','#1AA8A0','#7A1FAA','#FFC000','#D46000','#00832F','#C00000','#4C9BE8','#E8B24C','#9B59B6','#E84C9B','#4CE8A0'];
 
   // ── KPIs ────────────────────────────────────────────────────────────────────
   function renderKPIs() {
-    const tot   = INV.total_valorizado || 0;
-    const items = INV.total_items || 0;
-    const rep   = INV.total_repuestos || 0;
-    const sinR  = INV.sin_rotacion || 0;
+    const tot  = INV.total_valorizado || 0;
+    const sinR = INV.sin_rotacion || 0;
+    const rot  = INV.por_rotacion || {};
+    const alta = rot['Alta Rotacion'] || 0;
 
     const tile = (lbl, val, sub, color) =>
-      `<div style="background:var(--bg2);border-radius:8px;padding:.7rem 1rem;border-top:3px solid ${color};flex:1;min-width:140px">
+      `<div style="background:var(--bg2);border-radius:8px;padding:.7rem 1rem;border-top:3px solid ${color};flex:1;min-width:130px">
         <div style="font-size:.57rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:.3rem">${lbl}</div>
-        <div style="font-size:1.25rem;font-weight:800;color:${color};font-variant-numeric:tabular-nums;line-height:1">${val}</div>
+        <div style="font-size:1.2rem;font-weight:800;color:${color};font-variant-numeric:tabular-nums;line-height:1">${val}</div>
         <div style="font-size:.6rem;color:var(--mut);margin-top:.25rem">${sub}</div>
       </div>`;
 
     document.getElementById('inv-kpi-row').innerHTML =
-      tile('Total Valorizado', fmtM(tot), `${fmtN(items)} ítems`, '#002D73') +
-      tile('Repuestos', fmtM(rep), pct(rep, tot) + ' del total', '#28D2C3') +
-      tile('Sin Rotación', fmtM(sinR), 'Inventario en riesgo', '#C00000') +
-      tile('Alta Rotación', fmtM((INV.por_rotacion || {})['Alta Rotacion'] || 0),
-        pct((INV.por_rotacion || {})['Alta Rotacion'] || 0, tot), '#00832F');
+      tile('Total Valorizado', fmtM(tot), `${fmtN(INV.total_items || 0)} SKUs · ${fmtN(INV.total_stock || 0)} unidades`, '#002D73') +
+      tile('Alta Rotación', fmtM(alta), pct(alta, tot) + ' del total', '#00832F') +
+      tile('Sin Rotación', fmtM(sinR), pct(sinR, tot) + ' · riesgo obsolescencia', '#C00000') +
+      tile('Marcas', Object.keys(INV.por_marca || {}).length, 'proveedores con repuestos', '#33448D');
   }
 
-  // ── Donut Categoría ──────────────────────────────────────────────────────────
-  let _chartCat = null;
-  function renderChartCat() {
-    const ctx = document.getElementById('cInvCat');
-    if (!ctx) return;
-    if (_chartCat) { _chartCat.destroy(); _chartCat = null; }
-    const cats = INV.por_categoria || {};
-    const labels = Object.keys(cats);
-    const data   = Object.values(cats);
-    const colors = labels.map(l => PALETTE[l.toUpperCase()] || '#B8C1D8');
+  // ── Gráfico Rotación (donut) ─────────────────────────────────────────────────
+  let _chartRot = null;
+  function renderChartRot() {
+    const ctx = document.getElementById('cInvRot');
+    if (!ctx || !window.Chart) return;
+    if (_chartRot) { _chartRot.destroy(); _chartRot = null; }
+    const rot = INV.por_rotacion || {};
+    const ORDER = ['Alta Rotacion', 'Mediana Rotacion', 'Baja Rotacion', 'Sin Rotacion'];
+    const labels = ORDER.filter(k => rot[k]);
+    const data   = labels.map(l => rot[l]);
+    const colors = labels.map(l => ROT_COLOR[l]);
+    const tot    = INV.total_valorizado || 1;
 
-    _chartCat = new Chart(ctx.getContext('2d'), {
+    _chartRot = new Chart(ctx.getContext('2d'), {
       type: 'doughnut',
       data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 2, borderColor: 'var(--bg)' }] },
       options: {
-        responsive: true, maintainAspectRatio: false, cutout: '58%',
+        responsive: true, maintainAspectRatio: false, cutout: '60%',
         plugins: {
           legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 }, padding: 8 } },
-          tooltip: { callbacks: { label: c => ` ${c.label}: ${fmtMM(c.raw)} (${pct(c.raw, INV.total_valorizado)})` } },
+          tooltip: { callbacks: { label: c => ` ${c.label}: ${fmtMM(c.raw)} (${pct(c.raw, tot)})` } },
         },
       },
     });
   }
 
-  // ── Horizontal bar Top Marcas ────────────────────────────────────────────────
+  // ── Gráfico Top Marcas (horizontal bar) ─────────────────────────────────────
   let _chartMarcas = null;
-  function renderChartMarcas(catFilter) {
+  function renderChartMarcas() {
     const ctx = document.getElementById('cInvMarcas');
-    if (!ctx) return;
+    if (!ctx || !window.Chart) return;
     if (_chartMarcas) { _chartMarcas.destroy(); _chartMarcas = null; }
-
-    let source;
-    if (!catFilter || catFilter === 'TODOS') {
-      source = INV.top_marcas || {};
-    } else {
-      // Usar marca_por_categoria
-      const mpc = INV.marca_por_categoria || {};
-      source = {};
-      for (const [m, cats] of Object.entries(mpc)) {
-        const v = (cats[catFilter] || 0);
-        if (v > 0) source[m] = v;
-      }
-      source = Object.fromEntries(Object.entries(source).sort((a, b) => b[1] - a[1]).slice(0, 15));
-    }
-
-    const labels = Object.keys(source).slice(0, 15);
-    const data   = labels.map(l => source[l]);
-    const maxV   = Math.max(...data, 1);
+    const marcas = INV.por_marca || {};
+    const labels = Object.keys(marcas).slice(0, 12);
+    const data   = labels.map(m => marcas[m].costo_total);
+    const tot    = INV.total_valorizado || 1;
 
     _chartMarcas = new Chart(ctx.getContext('2d'), {
       type: 'bar',
@@ -103,8 +82,8 @@
         labels,
         datasets: [{
           data,
-          backgroundColor: data.map((v, i) => CHART_COLORS[i % CHART_COLORS.length] + 'CC'),
-          borderColor:     data.map((v, i) => CHART_COLORS[i % CHART_COLORS.length]),
+          backgroundColor: BAR_COLORS.map(c => c + 'CC'),
+          borderColor:     BAR_COLORS,
           borderWidth: 1, borderRadius: 3,
         }],
       },
@@ -113,172 +92,200 @@
         responsive: true, maintainAspectRatio: false,
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: c => ` ${fmtMM(c.raw)} (${pct(c.raw, INV.total_valorizado)})` } },
+          tooltip: { callbacks: { label: c => ` ${fmtMM(c.raw)} (${pct(c.raw, tot)})` } },
         },
         scales: {
-          x: { grid: { color: '#E2E6F022' }, ticks: { font: { size: 8 }, callback: v => 'MM$' + Math.round(v / 1e6).toLocaleString('es-CL') } },
+          x: { grid: { color: '#E2E6F022' }, ticks: { font: { size: 8 }, callback: v => 'MM$' + Math.round(v / 1e6) } },
           y: { grid: { display: false }, ticks: { font: { size: 8 } } },
         },
       },
     });
   }
 
-  // ── Donut Rotación ───────────────────────────────────────────────────────────
-  let _chartRot = null;
-  function renderChartRot() {
-    const ctx = document.getElementById('cInvRot');
-    if (!ctx) return;
-    if (_chartRot) { _chartRot.destroy(); _chartRot = null; }
-    const rot = INV.por_rotacion || {};
-    const ORDER = ['Alta Rotacion', 'Mediana Rotacion', 'Baja Rotacion', 'Sin Rotacion'];
-    const labels = ORDER.filter(k => rot[k] !== undefined);
-    const data   = labels.map(l => rot[l] || 0);
-    const colors = labels.map(l => ROT_COLOR[l] || '#B8C1D8');
+  // ── Gráfico Top Bodegas (bar) ────────────────────────────────────────────────
+  let _chartBod = null;
+  function renderChartBod() {
+    const ctx = document.getElementById('cInvBod');
+    if (!ctx || !window.Chart) return;
+    if (_chartBod) { _chartBod.destroy(); _chartBod = null; }
+    const bods = (INV.top_bodegas || []).slice(0, 8);
+    const labels = bods.map(b => b[0]);
+    const data   = bods.map(b => b[1]);
+    const tot    = INV.total_valorizado || 1;
 
-    _chartRot = new Chart(ctx.getContext('2d'), {
-      type: 'doughnut',
-      data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 2, borderColor: 'var(--bg)' }] },
+    _chartBod = new Chart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{ data, backgroundColor: '#33448DCC', borderColor: '#33448D', borderWidth: 1, borderRadius: 3 }],
+      },
       options: {
-        responsive: true, maintainAspectRatio: false, cutout: '58%',
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
         plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 }, padding: 8 } },
-          tooltip: { callbacks: { label: c => ` ${c.label}: ${fmtMM(c.raw)} (${pct(c.raw, INV.total_valorizado)})` } },
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => ` ${fmtMM(c.raw)} (${pct(c.raw, tot)})` } },
+        },
+        scales: {
+          x: { grid: { color: '#E2E6F022' }, ticks: { font: { size: 8 }, callback: v => 'MM$' + Math.round(v / 1e6) } },
+          y: { grid: { display: false }, ticks: { font: { size: 8 } } },
         },
       },
     });
   }
 
-  // ── Tabla por Marca (filtrable por categoría) ────────────────────────────────
-  let _selCat = 'REPUESTOS'; // default: repuestos
+  // ── Tabla expandible Marca → SKUs ────────────────────────────────────────────
+  let _searchQ = '';
+  const _expanded = new Set();
 
-  function renderCatSeg() {
-    const seg = document.getElementById('inv-cat-seg');
-    if (!seg) return;
-    const cats = ['TODOS', ...(INV.categorias || [])];
-    seg.innerHTML = cats.map(c =>
-      `<button onclick="window._invSetCat('${c}')" id="inv-seg-${c.replace(/\s/g,'_')}"
-        style="font-size:.58rem;padding:.18rem .55rem;border-radius:3px;border:1px solid var(--brd);
-        background:${_selCat===c?'#002D73':'var(--bg2)'};color:${_selCat===c?'#fff':'var(--txt)'};cursor:pointer">${c}</button>`
-    ).join('');
-  }
-
-  function renderTable(cat) {
+  function renderTable() {
     const tbl = document.getElementById('inv-table');
     if (!tbl) return;
+    const marcas  = INV.por_marca || {};
+    const tot     = INV.total_valorizado || 1;
+    const q       = _searchQ.toLowerCase();
 
-    let rows = [];
-    if (cat === 'TODOS' || !cat) {
-      // Tabla: marca | costo total | % total | top categoría
-      const top = INV.top_marcas || {};
-      rows = Object.entries(top).map(([marca, val]) => {
-        const mpc = (INV.marca_por_categoria || {})[marca] || {};
-        const topCat = Object.entries(mpc).sort((a,b)=>b[1]-a[1])[0];
-        return { marca, val, topCat: topCat ? topCat[0] : '—', topCatVal: topCat ? topCat[1] : 0 };
-      }).sort((a,b)=>b.val-a.val);
+    // Filtrar marcas/SKUs que coincidan con búsqueda
+    const marcaKeys = Object.keys(marcas).filter(m => {
+      if (!q) return true;
+      if (m.toLowerCase().includes(q)) return true;
+      return (marcas[m].items || []).some(i => i.sku.toLowerCase().includes(q) || i.desc.toLowerCase().includes(q));
+    });
 
-      const total = rows.reduce((s,r)=>s+r.val, 0);
-      tbl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.72rem">
-        <thead>
-          <tr style="background:var(--az1);color:#fff">
-            <th style="text-align:left;padding:.4rem .6rem;font-size:.6rem;letter-spacing:.04em">MARCA</th>
-            <th style="text-align:right;padding:.4rem .6rem;font-size:.6rem">COSTO TOTAL</th>
-            <th style="text-align:right;padding:.4rem .6rem;font-size:.6rem">% DEL TOTAL</th>
-            <th style="text-align:left;padding:.4rem .6rem;font-size:.6rem">PRINCIPAL CATEGORÍA</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((r, i) => `
-            <tr style="background:${i%2===0?'var(--bg2)':'var(--bg)'}">
-              <td style="padding:.35rem .6rem;font-weight:600">${r.marca}</td>
-              <td style="text-align:right;padding:.35rem .6rem;font-variant-numeric:tabular-nums">${fmtMM(r.val)}</td>
-              <td style="text-align:right;padding:.35rem .6rem;color:var(--mut)">${pct(r.val, total)}</td>
-              <td style="padding:.35rem .6rem">
-                <span style="background:${PALETTE[r.topCat] || '#B8C1D8'}22;color:${PALETTE[r.topCat] || '#555'};
-                  padding:.1rem .4rem;border-radius:3px;font-size:.6rem;border:1px solid ${PALETTE[r.topCat] || '#B8C1D8'}55">
-                  ${r.topCat}
-                </span>
+    const TH = (t, al='left', w='') =>
+      `<th style="position:sticky;top:0;background:var(--az1);color:#fff;padding:.38rem .6rem;font-size:.6rem;letter-spacing:.04em;text-align:${al};white-space:nowrap${w?';width:'+w:''}">` + t + '</th>';
+
+    let rows = '';
+    marcaKeys.forEach((marca, mi) => {
+      const md      = marcas[marca];
+      const isOpen  = _expanded.has(marca);
+      const color   = BAR_COLORS[mi % BAR_COLORS.length];
+
+      // Filtrar items si hay búsqueda
+      let items = md.items || [];
+      if (q && !marca.toLowerCase().includes(q)) {
+        items = items.filter(i => i.sku.toLowerCase().includes(q) || i.desc.toLowerCase().includes(q));
+      }
+
+      rows += `
+        <tr style="background:var(--bg2);cursor:pointer;border-left:3px solid ${color}"
+            onclick="window._invToggle('${marca.replace(/'/g, "\\'")}')">
+          <td style="padding:.38rem .6rem;font-size:.75rem">
+            <span style="font-size:.7rem;margin-right:.4rem;display:inline-block;transition:transform .15s;transform:rotate(${isOpen ? 90 : 0}deg)">▶</span>
+            <strong>${marca}</strong>
+            <span style="font-size:.6rem;color:var(--mut);margin-left:.4rem">${md.n_items} SKUs</span>
+          </td>
+          <td style="text-align:right;padding:.38rem .6rem;font-size:.75rem;font-variant-numeric:tabular-nums;font-weight:700">${fmtMM(md.costo_total)}</td>
+          <td style="text-align:right;padding:.38rem .6rem;font-size:.7rem;color:var(--mut)">${pct(md.costo_total, tot)}</td>
+          <td style="text-align:right;padding:.38rem .6rem;font-size:.7rem;font-variant-numeric:tabular-nums">${fmtN(md.stock)}</td>
+          <td></td><td></td>
+        </tr>`;
+
+      if (isOpen) {
+        items.forEach(item => {
+          const rotC = ROT_COLOR[item.rot] || '#B8C1D8';
+          rows += `
+            <tr style="background:var(--bg)">
+              <td style="padding:.28rem .6rem .28rem 2.2rem;font-size:.68rem;color:var(--mut)">
+                <span style="font-family:monospace;font-size:.66rem;background:var(--bg2);padding:.08rem .3rem;border-radius:3px;margin-right:.4rem">${item.sku}</span>
+                ${item.desc}
               </td>
-            </tr>`).join('')}
-          <tr style="background:var(--az3);font-weight:700;color:#fff">
-            <td style="padding:.4rem .6rem">TOTAL (Top 20 Marcas)</td>
-            <td style="text-align:right;padding:.4rem .6rem;font-variant-numeric:tabular-nums">${fmtMM(total)}</td>
-            <td style="text-align:right;padding:.4rem .6rem">100%</td>
-            <td></td>
-          </tr>
-        </tbody>
-      </table>`;
-
-    } else {
-      // Filtro por categoría específica
-      const mpc = INV.marca_por_categoria || {};
-      const filtrados = Object.entries(mpc)
-        .map(([marca, cats]) => ({ marca, val: cats[cat] || 0 }))
-        .filter(r => r.val > 0)
-        .sort((a,b) => b.val - a.val);
-
-      // Para REPUESTOS usar datos más ricos
-      const repData = cat === 'REPUESTOS' ? (INV.repuestos_por_marca || {}) : {};
-
-      const total = filtrados.reduce((s,r)=>s+r.val, 0);
-      const hasStock = cat === 'REPUESTOS';
-
-      tbl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.72rem">
-        <thead>
-          <tr style="background:${PALETTE[cat] || '#002D73'};color:#fff">
-            <th style="text-align:left;padding:.4rem .6rem;font-size:.6rem;letter-spacing:.04em">MARCA</th>
-            <th style="text-align:right;padding:.4rem .6rem;font-size:.6rem">COSTO TOTAL</th>
-            <th style="text-align:right;padding:.4rem .6rem;font-size:.6rem">% CATEGORÍA</th>
-            ${hasStock ? '<th style="text-align:right;padding:.4rem .6rem;font-size:.6rem">STOCK (UN)</th><th style="text-align:right;padding:.4rem .6rem;font-size:.6rem">Nº ÍTEMS</th>' : ''}
-          </tr>
-        </thead>
-        <tbody>
-          ${filtrados.map((r, i) => {
-            const rd = repData[r.marca] || {};
-            return `<tr style="background:${i%2===0?'var(--bg2)':'var(--bg)'}">
-              <td style="padding:.35rem .6rem;font-weight:600">${r.marca}</td>
-              <td style="text-align:right;padding:.35rem .6rem;font-variant-numeric:tabular-nums">${fmtMM(r.val)}</td>
-              <td style="text-align:right;padding:.35rem .6rem;color:var(--mut)">${pct(r.val, total)}</td>
-              ${hasStock ? `<td style="text-align:right;padding:.35rem .6rem;color:var(--mut)">${fmtN(rd.stock||0)}</td>
-                <td style="text-align:right;padding:.35rem .6rem;color:var(--mut)">${rd.n_items||0}</td>` : ''}
+              <td style="text-align:right;padding:.28rem .6rem;font-size:.68rem;font-variant-numeric:tabular-nums">${fmtMM(item.ct)}</td>
+              <td style="text-align:right;padding:.28rem .6rem;font-size:.68rem;color:var(--mut)">${pct(item.ct, tot)}</td>
+              <td style="text-align:right;padding:.28rem .6rem;font-size:.68rem;font-variant-numeric:tabular-nums">${fmtN(item.stock)}</td>
+              <td style="text-align:right;padding:.28rem .6rem;font-size:.68rem;font-variant-numeric:tabular-nums;color:var(--mut)">${fmtCLP(item.cu)}</td>
+              <td style="padding:.28rem .6rem">
+                <span style="font-size:.58rem;padding:.1rem .35rem;border-radius:3px;background:${rotC}22;color:${rotC};border:1px solid ${rotC}44;white-space:nowrap">${item.rot}</span>
+              </td>
             </tr>`;
-          }).join('')}
-          <tr style="background:${PALETTE[cat]||'#002D73'};font-weight:700;color:#fff">
-            <td style="padding:.4rem .6rem">TOTAL ${cat}</td>
-            <td style="text-align:right;padding:.4rem .6rem;font-variant-numeric:tabular-nums">${fmtMM(total)}</td>
-            <td style="text-align:right;padding:.4rem .6rem">100%</td>
-            ${hasStock ? '<td></td><td></td>' : ''}
-          </tr>
-        </tbody>
-      </table>`;
-    }
+        });
+      }
+    });
+
+    // Total footer
+    const totVal = marcaKeys.reduce((s, m) => s + marcas[m].costo_total, 0);
+    const totSt  = marcaKeys.reduce((s, m) => s + marcas[m].stock, 0);
+
+    tbl.innerHTML = `
+      <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.6rem;flex-wrap:wrap">
+        <input id="inv-search" type="text" placeholder="Buscar marca o SKU…"
+          value="${_searchQ}"
+          oninput="window._invSearch(this.value)"
+          style="font-size:.72rem;padding:.3rem .6rem;border:1px solid var(--brd);border-radius:4px;background:var(--bg2);color:var(--txt);width:220px">
+        <span style="font-size:.65rem;color:var(--mut)">${marcaKeys.length} marcas · ${marcaKeys.reduce((s,m)=>s+(marcas[m].items||[]).length,0)} SKUs</span>
+        <button onclick="window._invExpandAll(true)"
+          style="font-size:.62rem;padding:.2rem .5rem;border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt);cursor:pointer">Expandir todo</button>
+        <button onclick="window._invExpandAll(false)"
+          style="font-size:.62rem;padding:.2rem .5rem;border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt);cursor:pointer">Colapsar todo</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr>
+              ${TH('MARCA / SKU · DESCRIPCIÓN','left','40%')}
+              ${TH('COSTO TOTAL','right','12%')}
+              ${TH('% TOTAL','right','8%')}
+              ${TH('STOCK (UN)','right','10%')}
+              ${TH('COSTO UNIT.','right','12%')}
+              ${TH('ROTACIÓN','left','14%')}
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+          <tfoot>
+            <tr style="background:var(--az3);color:#fff;font-weight:700">
+              <td style="padding:.4rem .6rem;font-size:.72rem">TOTAL (${marcaKeys.length} marcas)</td>
+              <td style="text-align:right;padding:.4rem .6rem;font-size:.72rem;font-variant-numeric:tabular-nums">${fmtMM(totVal)}</td>
+              <td style="text-align:right;padding:.4rem .6rem;font-size:.7rem">100%</td>
+              <td style="text-align:right;padding:.4rem .6rem;font-size:.72rem;font-variant-numeric:tabular-nums">${fmtN(totSt)}</td>
+              <td></td><td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>`;
   }
 
-  window._invSetCat = function(cat) {
-    _selCat = cat;
-    renderCatSeg();
-    renderTable(cat);
-    renderChartMarcas(cat === 'TODOS' ? null : cat);
+  window._invToggle = function(marca) {
+    if (_expanded.has(marca)) _expanded.delete(marca);
+    else _expanded.add(marca);
+    renderTable();
+  };
+
+  window._invSearch = function(q) {
+    _searchQ = q;
+    if (q) {
+      // Auto-expandir marcas con matches
+      const marcas = INV.por_marca || {};
+      Object.keys(marcas).forEach(m => {
+        const hits = (marcas[m].items || []).some(i =>
+          i.sku.toLowerCase().includes(q.toLowerCase()) || i.desc.toLowerCase().includes(q.toLowerCase())
+        );
+        if (hits && !m.toLowerCase().includes(q.toLowerCase())) _expanded.add(m);
+      });
+    }
+    renderTable();
+  };
+
+  window._invExpandAll = function(open) {
+    const marcas = INV.por_marca || {};
+    _expanded.clear();
+    if (open) Object.keys(marcas).forEach(m => _expanded.add(m));
+    renderTable();
   };
 
   // ── Init ─────────────────────────────────────────────────────────────────────
   window.initInventario = function () {
-    const el = document.getElementById('view-inventario');
-    if (!el) return;
-
     if (!INV.total_valorizado) {
       const kr = document.getElementById('inv-kpi-row');
       if (kr) kr.innerHTML = '<p style="padding:1.5rem;color:var(--mut);font-style:italic">Sin datos de inventario disponibles.</p>';
       return;
     }
-
     const lbl = document.getElementById('inv-fecha-lbl');
     if (lbl) lbl.textContent = (window.APP_DATA || {}).hoy || new Date().toLocaleDateString('es-CL');
 
     renderKPIs();
-    renderChartCat();
-    renderChartMarcas(null);
+    renderChartMarcas();
     renderChartRot();
-    renderCatSeg();
-    renderTable(_selCat);
+    renderChartBod();
+    renderTable();
   };
 })();
