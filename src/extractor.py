@@ -70,7 +70,7 @@ JS_FILES = [
     "utils.js", "datos.js", "hoja_resumen.js", "hoja_tipos.js", "hoja_nuevos.js",
     "hoja_vencimientos.js", "hoja_vision.js", "hoja_presupuesto.js",
     "hoja_facturacion.js", "hoja_panelfact.js", "hoja_satisfaccion.js", "hoja_visitas.js",
-    "hoja_alerta.js", "hoja_eerr.js", "hoja_desglose.js",
+    "hoja_alerta.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inventario.js",
 ]
 
 ANO   = date.today().year
@@ -1450,6 +1450,95 @@ def read_casos(wb):
     return {"casos": casos, "equipos": equipos}
 
 
+def read_inventario(wb):
+    SHEET = 'Inventario Bodega'
+    ws = None
+    for name in wb.sheetnames:
+        if name.strip().lower() == SHEET.lower():
+            ws = wb[name]; break
+    if ws is None:
+        return {}
+
+    por_cat     = {}
+    por_marca   = {}
+    por_rot     = {}
+    por_empresa = {}
+    por_bodega  = {}
+    # repuestos_por_marca: {marca: {costo_total, stock, n_items, por_cat:{cat:costo}}}
+    rep_marca   = {}
+    # all_por_marca_cat: para tabla cruzada marca×categoria
+    marca_cat   = {}
+
+    total_val = 0
+    total_items = 0
+    sin_rot_val = 0
+
+    for r in range(2, ws.max_row + 1):
+        empresa = ws.cell(r, 2).value
+        if not empresa:
+            continue
+        rotacion    = str(ws.cell(r, 4).value or 'Sin dato')
+        categoria   = str(ws.cell(r, 7).value or 'OTROS').strip().upper()
+        marca       = str(ws.cell(r, 8).value or 'SIN MARCA').strip()
+        bodega      = str(ws.cell(r, 11).value or '').strip()
+        stock_v     = ws.cell(r, 12).value
+        costo_tot_v = ws.cell(r, 14).value
+        stock       = float(stock_v)     if isinstance(stock_v,     (int, float)) else 0
+        costo_total = float(costo_tot_v) if isinstance(costo_tot_v, (int, float)) else 0
+        empresa_s   = str(empresa).strip()
+
+        total_val   += costo_total
+        total_items += 1
+        if 'sin' in rotacion.lower():
+            sin_rot_val += costo_total
+
+        por_cat[categoria]   = por_cat.get(categoria, 0) + costo_total
+        por_marca[marca]     = por_marca.get(marca, 0)   + costo_total
+        por_rot[rotacion]    = por_rot.get(rotacion, 0)  + costo_total
+        por_empresa[empresa_s] = por_empresa.get(empresa_s, 0) + costo_total
+        if bodega:
+            por_bodega[bodega] = por_bodega.get(bodega, 0) + costo_total
+
+        # Tabla cruzada marca × categoría (todas)
+        if marca not in marca_cat:
+            marca_cat[marca] = {}
+        marca_cat[marca][categoria] = marca_cat[marca].get(categoria, 0) + costo_total
+
+        # Repuestos detallado
+        if categoria == 'REPUESTOS':
+            if marca not in rep_marca:
+                rep_marca[marca] = {'costo_total': 0, 'stock': 0, 'n_items': 0}
+            rep_marca[marca]['costo_total'] += costo_total
+            rep_marca[marca]['stock']       += stock
+            rep_marca[marca]['n_items']     += 1
+
+    # Ordenar y limitar
+    cats_sorted   = [k for k, _ in sorted(por_cat.items(),   key=lambda x: -x[1])]
+    top_marcas_all = [k for k, _ in sorted(por_marca.items(), key=lambda x: -x[1])[:20]]
+    top_bodegas   = [[k, round(v)] for k, v in sorted(por_bodega.items(), key=lambda x: -x[1])[:12]]
+
+    return {
+        'total_valorizado': round(total_val),
+        'total_items':      total_items,
+        'sin_rotacion':     round(sin_rot_val),
+        'total_repuestos':  round(por_cat.get('REPUESTOS', 0)),
+        'categorias':       cats_sorted,
+        'por_categoria':    {k: round(v) for k, v in sorted(por_cat.items(), key=lambda x: -x[1])},
+        'por_rotacion':     {k: round(v) for k, v in sorted(por_rot.items(), key=lambda x: -x[1])},
+        'por_empresa':      {k: round(v) for k, v in sorted(por_empresa.items(), key=lambda x: -x[1])},
+        'top_marcas':       {k: round(por_marca[k]) for k in top_marcas_all},
+        'top_bodegas':      top_bodegas,
+        'repuestos_por_marca': {
+            k: {'costo_total': round(v['costo_total']), 'stock': round(v['stock']), 'n_items': v['n_items']}
+            for k, v in sorted(rep_marca.items(), key=lambda x: -x[1]['costo_total'])
+        },
+        'marca_por_categoria': {
+            m: {cat: round(marca_cat[m].get(cat, 0)) for cat in cats_sorted}
+            for m in top_marcas_all
+        },
+    }
+
+
 def read_ratios2(wb):
     ws = None
     for name in wb.sheetnames:
@@ -2369,6 +2458,7 @@ def main():
     casos_data = read_casos(wb2)
     ratios2 = read_ratios2(wb2)
     resumen_programas = read_resumen_tipos_programas(wb2)
+    inventario = read_inventario(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -2383,6 +2473,10 @@ def main():
     app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada, mapa_data=mapa_data)
     app_data["ratios2"] = ratios2
     app_data["resumen_programas"] = resumen_programas
+    app_data["inventario"] = inventario
+    if inventario:
+        inv_mm = inventario.get('total_valorizado', 0) / 1e6
+        print(f"       INVENTARIO: {inventario.get('total_items',0)} items | Total MM${inv_mm:.1f}")
     # Hora fija 02:50 am (el proceso real de actualización se considera
     # completo a esa hora todos los días; el aviso por correo sale 10 min
     # después, a las 03:00 am). Si esta corrida pasa de las 02:50 am del día
