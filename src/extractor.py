@@ -1450,6 +1450,55 @@ def read_casos(wb):
     return {"casos": casos, "equipos": equipos}
 
 
+def read_td_inventarios(wb):
+    SHEET = 'TD'
+    ws = None
+    for name in wb.sheetnames:
+        if name.strip().upper() == SHEET.upper():
+            ws = wb[name]; break
+    if ws is None:
+        return {}
+
+    # Estructura fija: fila 3 = meses (6..12 2025, 1..7 2026)
+    # Col A = marcas, filas 4+ = datos
+    # Última fila = "Total general"
+    td_data = {}
+
+    # Leer encabezados de meses (fila 3)
+    meses_headers = []
+    for c in range(2, ws.max_column + 1):
+        v = ws.cell(3, c).value
+        if v and v != '_':
+            meses_headers.append((c, str(v).strip()))
+
+    # Leer marcas y valores
+    for r in range(4, ws.max_row):
+        marca = ws.cell(r, 1).value
+        if not marca or marca.upper() == 'TOTAL GENERAL':
+            continue
+        marca = str(marca).strip()
+
+        total = 0
+        meses_data = {}
+        for col, mes_str in meses_headers:
+            v = ws.cell(r, col).value
+            if v is not None and v != '_':
+                try:
+                    val = float(v)
+                    meses_data[mes_str] = round(val)
+                    total += val
+                except:
+                    pass
+
+        if total > 0:
+            td_data[marca] = {
+                'total': round(total),
+                'meses': meses_data,
+            }
+
+    return td_data
+
+
 def read_inventario(wb):
     SHEET = 'Inventario Bodega'
     ws = None
@@ -2453,6 +2502,7 @@ def main():
     ratios2 = read_ratios2(wb2)
     resumen_programas = read_resumen_tipos_programas(wb2)
     inventario = read_inventario(wb2)
+    td_inv = read_td_inventarios(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -2468,9 +2518,9 @@ def main():
     app_data["ratios2"] = ratios2
     app_data["resumen_programas"] = resumen_programas
     app_data["inventario"] = inventario
-    if inventario:
-        inv_mm = inventario.get('total_valorizado', 0) / 1e6
-        print(f"       INVENTARIO: {inventario.get('total_items',0)} items | Total MM${inv_mm:.1f}")
+    app_data["td_inv"] = td_inv
+    if td_inv:
+        print(f"       TD INVENTARIOS: {len(td_inv)} marcas")
     # Hora fija 02:50 am (el proceso real de actualización se considera
     # completo a esa hora todos los días; el aviso por correo sale 10 min
     # después, a las 03:00 am). Si esta corrida pasa de las 02:50 am del día
