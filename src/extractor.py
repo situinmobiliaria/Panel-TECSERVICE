@@ -74,7 +74,7 @@ JS_FILES = [
     "utils.js", "datos.js", "hoja_resumen.js", "hoja_tipos.js", "hoja_nuevos.js",
     "hoja_vencimientos.js", "hoja_vision.js", "hoja_presupuesto.js",
     "hoja_facturacion.js", "hoja_panelfact.js", "hoja_satisfaccion.js", "hoja_visitas.js",
-    "hoja_alerta.js", "hoja_eerr.js", "hoja_desglose.js",
+    "hoja_alerta.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js",
 ]
 
 ANO   = date.today().year
@@ -1455,6 +1455,96 @@ def read_casos(wb):
 
 
 
+def read_inventario_ts(wb):
+    """Inventario de repuestos en bodega, agregado por marca y SKU.
+
+    Fuente: hoja "Inventario Bodega" (una fila por SKU y bodega). Replica la
+    tabla dinámica "TD Inventario TS": agrupa por (marca, SKU) sumando stock y
+    costo total, y promediando el costo unitario — 82 SKUs aparecen en más de
+    una bodega, por eso el promedio y no el valor de una fila cualquiera.
+
+    Columnas: C=SKU, E=Descripción, G=Categoría, H=FirmName (marca),
+              L=En stock, M=Costo del artículo, N=Costo Total.
+    """
+    ws = None
+    for name in wb.sheetnames:
+        if name.strip().lower() == "inventario bodega":
+            ws = wb[name]
+            break
+    if ws is None:
+        return {}
+
+    # {marca: {sku: {"d": desc, "st": stock, "cus": [costos unit], "ct": costo total}}}
+    marcas = defaultdict(lambda: defaultdict(lambda: {"d": "", "st": 0.0, "cus": [], "ct": 0.0}))
+    # Costos unitarios de TODAS las filas por marca. El "Promedio de Costo del
+    # artículo" de la dinámica promedia las filas de origen, no los SKU ya
+    # agrupados: con 82 SKU repetidos en varias bodegas, promediar sobre los
+    # SKU únicos da un valor distinto al del Excel.
+    cus_marca = defaultdict(list)
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 14:
+            continue
+        marca = safe_str(row[7]).strip()
+        if not marca:
+            continue
+        sku = safe_str(row[2]).strip() or "(sin SKU)"
+        it  = marcas[marca][sku]
+        if not it["d"]:
+            it["d"] = safe_str(row[4]).strip()
+        it["st"] += to_float(row[11])
+        it["ct"] += to_float(row[13])
+        cu = row[12]
+        if isinstance(cu, (int, float)):
+            it["cus"].append(float(cu))
+            cus_marca[marca].append(float(cu))
+
+    out       = {}
+    tot_stock = 0.0
+    tot_costo = 0.0
+    tot_skus  = 0
+    for marca, skus in marcas.items():
+        items = []
+        m_st  = 0.0
+        m_ct  = 0.0
+        for sku, it in skus.items():
+            cu = sum(it["cus"]) / len(it["cus"]) if it["cus"] else 0.0
+            items.append({
+                "sku": sku,
+                "d":   it["d"],
+                "st":  round(it["st"], 2),
+                "cu":  round(cu),
+                "ct":  round(it["ct"]),
+            })
+            m_st += it["st"]
+            m_ct += it["ct"]
+        items.sort(key=lambda x: -x["ct"])
+        # Promedio sobre las filas de origen, igual que "Promedio de Costo del
+        # artículo" en la dinámica (ver nota en cus_marca).
+        cl      = cus_marca.get(marca, [])
+        cu_prom = sum(cl) / len(cl) if cl else 0.0
+        out[marca] = {
+            "stock":   round(m_st, 2),
+            "cu_prom": round(cu_prom),
+            "ct":      round(m_ct),
+            "n_skus":  len(items),
+            "items":   items,
+        }
+        tot_stock += m_st
+        tot_costo += m_ct
+        tot_skus  += len(items)
+
+    marcas_sorted = sorted(out, key=lambda m: -out[m]["ct"])
+    return {
+        "marcas":      marcas_sorted,
+        "data":        out,
+        "total_stock": round(tot_stock, 2),
+        "total_costo": round(tot_costo),
+        "total_skus":  tot_skus,
+        "n_marcas":    len(out),
+    }
+
+
 def read_ratios2(wb):
     ws = None
     for name in wb.sheetnames:
@@ -2410,6 +2500,7 @@ def main():
     casos_data = read_casos(wb2)
     ratios2 = read_ratios2(wb2)
     resumen_programas = read_resumen_tipos_programas(wb2)
+    inv_ts = read_inventario_ts(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -2427,6 +2518,10 @@ def main():
     app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada, mapa_data=mapa_data)
     app_data["ratios2"] = ratios2
     app_data["resumen_programas"] = resumen_programas
+    app_data["inv_ts"] = inv_ts
+    if inv_ts:
+        print(f"       INVENTARIO TS: {inv_ts['n_marcas']} marcas | {inv_ts['total_skus']} SKUs | "
+              f"{inv_ts['total_stock']:,.0f} un | MM${inv_ts['total_costo']/1e6:,.1f}")
     # Hora fija 02:50 am (el proceso real de actualización se considera
     # completo a esa hora todos los días; el aviso por correo sale 10 min
     # después, a las 03:00 am). Si esta corrida pasa de las 02:50 am del día

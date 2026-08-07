@@ -49,7 +49,8 @@ function sv(name,btn){
     base:initBaseInstalada,
     satisfaccion:initSatisfaccion,
     visitas:initVisitas,
-    alertas:initAlertas
+    alertas:initAlertas,
+    invts:()=>{ if(window.initInvTS) window.initInvTS(); }
   };
   const k='_i_'+name;
   if(inits[name]&&!window[k]){inits[name]();window[k]=true;}
