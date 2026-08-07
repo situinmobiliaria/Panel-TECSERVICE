@@ -35,6 +35,30 @@ function _biLookupContrato(nombre){
 }
 
 // Badge de estado relación (desde panel de facturación)
+// ── POTENCIAL ST ANUAL (MANTENIMIENTO BI) ──────────────────────
+// Valor anual de mantención por equipo, según línea de negocio. Se aplica
+// sólo sobre los equipos con Potencial ST = Sí, por eso usa _biVal(), que
+// ya devuelve el conteo del filtro activo.
+const _BI_TARIFA = {
+  esterilizacion: 2043239,
+  endoscopia:      898585,
+  dental:          612671,
+};
+
+function _biPotAnual(c){
+  return Object.keys(_BI_TARIFA).reduce((s,k)=>s+_biVal(c,k)*_BI_TARIFA[k],0);
+}
+
+// Celda de la columna "Potencial ST Anual": si el cliente ya tiene contrato
+// no hay potencial que capturar, se marca como CONTRATO ACTIVO.
+function _biPotCelda(c,p,d){
+  const conContrato = (d && d.n > 0) || (p && p.tiene_contrato);
+  if(conContrato) return '<span class="badge bok">Contrato activo</span>';
+  const v = _biPotAnual(c);
+  if(!v) return '<span style="color:var(--mut)">—</span>';
+  return `<strong style="color:var(--am);font-family:'Roboto Mono',monospace">${mm(v)}</strong>`;
+}
+
 function _biRelBadge(p,d){
   if(!p&&!d) return '<span class="badge bgy">Sin datos</span>';
   if(d&&d.n>0){
@@ -148,7 +172,7 @@ function _biRenderTabla(){
   if(!tb) return;
 
   if(list.length === 0){
-    tb.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--mut);padding:1.2rem;font-style:italic">Sin resultados para los filtros seleccionados</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="13" style="text-align:center;color:var(--mut);padding:1.2rem;font-style:italic">Sin resultados para los filtros seleccionados</td></tr>`;
   } else {
     tb.innerHTML = list.map((c,i)=>{
       const p=_biLookupPanel(c.nombre);
@@ -165,9 +189,10 @@ function _biRenderTabla(){
       <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--teal)">${_biVal(c,'endoscopia')||'—'}</td>
       <td style="text-align:right;font-family:'Roboto Mono',monospace;color:#7B2FBE">${_biVal(c,'mobiliario')||'—'}</td>
       <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--gn)">${_biVal(c,'mmq_reas')||'—'}</td>
+      <td>${_biEstadoBadge(c.estado)}</td>
       <td style="text-align:right;color:var(--az1);font-weight:700">${fac2026}</td>
       <td style="text-align:right;color:var(--teal)">${facContr}</td>
-      <td>${_biRelBadge(p,d)}</td>
+      <td style="text-align:right">${_biPotCelda(c,p,d)}</td>
     </tr>`;
     }).join('');
   }
@@ -184,14 +209,23 @@ function _biRenderTabla(){
     const mmq  = list.reduce((s,c)=>s+_biVal(c,'mmq_reas'),0);
     const facTotal = list.reduce((s,c)=>{const p=_biLookupPanel(c.nombre);return s+(p&&p.real_ytd?p.real_ytd:0);},0);
     const conContr = list.filter(c=>{const d=_biLookupContrato(c.nombre);return d&&d.n>0;}).length;
+    // Sólo suma el potencial de quienes NO tienen contrato: en los que ya lo
+    // tienen no hay nada que capturar.
+    const potTotal = list.reduce((s2,c)=>{
+      const p2=_biLookupPanel(c.nombre), d2=_biLookupContrato(c.nombre);
+      if((d2&&d2.n>0)||(p2&&p2.tiene_contrato)) return s2;
+      return s2+_biPotAnual(c);
+    },0);
     const st='text-align:right;font-family:\'Roboto Mono\',monospace;color:rgba(255,255,255,.75)';
     foot.innerHTML = `<td colspan="2" style="font-weight:700;font-size:.62rem;color:rgba(255,255,255,.85)">${list.length} clientes · ${conContr} con contrato activo</td>
       <td style="${st};font-weight:700;color:#fff">${tot.toLocaleString('es-CL')}</td>
       <td style="${st}">${dent}</td><td style="${st}">${este}</td>
       <td style="${st}">${inc}</td><td style="${st}">${endo}</td>
       <td style="${st}">${mob}</td><td style="${st}">${mmq}</td>
+      <td></td>
       <td style="${st};font-weight:700;color:#FFC000">${mm(facTotal)}</td>
-      <td></td><td></td>`;
+      <td></td>
+      <td style="${st};font-weight:700;color:#FFC000" title="Potencial de los clientes sin contrato">${mm(potTotal)}</td>`;
   }
 }
 
@@ -598,7 +632,7 @@ function initBaseInstalada(){
         <th onclick="biSortCol(9,this)">Estado BI</th>
         <th onclick="biSortCol(10,this)" class="num" style="color:#FFC000">Fac. 2026</th>
         <th class="num">F. Contr.</th>
-        <th>Relación</th>
+        <th class="num" style="color:#FFC000" title="Equipos con Potencial ST = Sí valorizados a la tarifa anual de mantención por línea. Los clientes con contrato vigente se marcan como Contrato activo.">Potencial ST Anual<br><span style="font-weight:400;font-size:.55rem">(Mantenimiento BI)</span></th>
       </tr></thead>
       <tbody id="tb-bi-cli"></tbody>
       <tfoot><tr id="tfoot-bi-cli" style="background:var(--az3);font-size:.62rem"></tr></tfoot>
