@@ -74,7 +74,7 @@ JS_FILES = [
     "utils.js", "datos.js", "hoja_resumen.js", "hoja_tipos.js", "hoja_nuevos.js",
     "hoja_vencimientos.js", "hoja_vision.js", "hoja_presupuesto.js",
     "hoja_facturacion.js", "hoja_panelfact.js", "hoja_satisfaccion.js", "hoja_visitas.js",
-    "hoja_alerta.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js",
+    "hoja_alerta.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js",
 ]
 
 ANO   = date.today().year
@@ -1455,6 +1455,116 @@ def read_casos(wb):
 
 
 
+def read_repuestos_vendidos(wb):
+    """Repuestos vendidos por marca, mes y cliente.
+
+    Fuente: hoja "Repuestos Vendidas" (una fila por línea de cotización).
+    Replica la tabla dinámica "TD": suma "Precio de venta" agrupando por
+    "Marca 2" (marca normalizada) y año/mes. NO filtra por Estado — la
+    dinámica incluye Aprobado, En borrador y Rechazado (validado: el total
+    da 1.240.069.989,55 sólo sin filtrar).
+
+    La marca se pasa a mayúsculas antes de agrupar porque el Excel trae
+    PURYTAS/Purytas y NACIONAL/Nacional como variantes de la misma marca;
+    la dinámica las junta y sin normalizar los totales no cuadran.
+
+    Columnas: C=Nombre del cliente, M=Cantidad, P=Precio de venta,
+              R=año, S=mes, T=Marca 2.
+    """
+    MESES_ABR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+                 "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    ws = None
+    for name in wb.sheetnames:
+        n = name.strip().lower()
+        if "repuesto" in n and "vend" in n:
+            ws = wb[name]
+            break
+    if ws is None:
+        return {}
+
+    # celdas[(marca, anio, mes)] = [monto, cantidad]
+    celdas = defaultdict(lambda: [0.0, 0.0])
+    # clientes[marca][cliente] = [monto, cantidad]
+    clientes = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0]))
+    periodos = set()
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 20:
+            continue
+        marca = safe_str(row[19]).strip().upper()
+        if not marca:
+            continue
+        try:
+            mes = int(row[18])
+        except (TypeError, ValueError):
+            continue
+        if not (1 <= mes <= 12):
+            continue
+        anio = safe_str(row[17]).strip()
+        if not anio:
+            continue
+        monto = to_float(row[15])
+        cant  = to_float(row[12])
+        cli   = safe_str(row[2]).strip() or "(sin cliente)"
+
+        celdas[(marca, anio, mes)][0] += monto
+        celdas[(marca, anio, mes)][1] += cant
+        clientes[marca][cli][0] += monto
+        clientes[marca][cli][1] += cant
+        periodos.add((anio, mes))
+
+    if not celdas:
+        return {}
+
+    per = sorted(periodos, key=lambda p: (int(p[0]), p[1]))
+    meses = [{"a": a, "m": m, "lbl": f"{MESES_ABR[m-1]} {a[2:]}"} for a, m in per]
+    n = len(per)
+    idx = {p: i for i, p in enumerate(per)}
+
+    marcas = sorted({m for (m, _, _) in celdas})
+    out = {}
+    for marca in marcas:
+        monto = [0.0] * n
+        cant  = [0.0] * n
+        for (mk, a, m), (v, q) in celdas.items():
+            if mk != marca:
+                continue
+            i = idx[(a, m)]
+            monto[i] += v
+            cant[i]  += q
+        cl = sorted(clientes[marca].items(), key=lambda x: -x[1][0])
+        top = [{"c": c, "monto": round(v[0]), "cant": round(v[1])} for c, v in cl[:3]]
+        resto = cl[3:]
+        out[marca] = {
+            "monto":      [round(x) for x in monto],
+            "cant":       [round(x) for x in cant],
+            "monto_tot":  round(sum(monto)),
+            "cant_tot":   round(sum(cant)),
+            "n_clientes": len(cl),
+            "top":        top,
+            "resto_monto": round(sum(v[0] for _, v in resto)),
+            "resto_n":     len(resto),
+        }
+
+    marcas_sorted = sorted(out, key=lambda m: -out[m]["monto_tot"])
+    tot_monto = [round(sum(out[m]["monto"][i] for m in out)) for i in range(n)]
+    tot_cant  = [round(sum(out[m]["cant"][i]  for m in out)) for i in range(n)]
+    todos_cli = set()
+    for marca in clientes:
+        todos_cli.update(clientes[marca].keys())
+
+    return {
+        "meses":       meses,
+        "marcas":      marcas_sorted,
+        "data":        out,
+        "tot_monto":   tot_monto,
+        "tot_cant":    tot_cant,
+        "tot_monto_g": sum(tot_monto),
+        "tot_cant_g":  sum(tot_cant),
+        "n_clientes":  len(todos_cli),
+    }
+
+
 def read_inventario_ts(wb):
     """Inventario de repuestos en bodega, agregado por marca y SKU.
 
@@ -2496,6 +2606,7 @@ def main():
     ratios2 = read_ratios2(wb2)
     resumen_programas = read_resumen_tipos_programas(wb2)
     inv_ts = read_inventario_ts(wb2)
+    rep_vend = read_repuestos_vendidos(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -2514,9 +2625,15 @@ def main():
     app_data["ratios2"] = ratios2
     app_data["resumen_programas"] = resumen_programas
     app_data["inv_ts"] = inv_ts
+    app_data["rep_vend"] = rep_vend
     if inv_ts:
         print(f"       INVENTARIO TS: {inv_ts['n_marcas']} marcas | {inv_ts['total_skus']} SKUs | "
               f"{inv_ts['total_stock']:,.0f} un | MM${inv_ts['total_costo']/1e6:,.1f}")
+    if rep_vend:
+        print(f"       REPUESTOS VENDIDOS: {len(rep_vend['marcas'])} marcas | {len(rep_vend['meses'])} meses "
+              f"({rep_vend['meses'][0]['lbl']}-{rep_vend['meses'][-1]['lbl']}) | "
+              f"{rep_vend['n_clientes']} clientes | MM${rep_vend['tot_monto_g']/1e6:,.1f} | "
+              f"{rep_vend['tot_cant_g']:,.0f} un")
     # Hora fija 02:50 am (el proceso real de actualización se considera
     # completo a esa hora todos los días; el aviso por correo sale 10 min
     # después, a las 03:00 am). Si esta corrida pasa de las 02:50 am del día

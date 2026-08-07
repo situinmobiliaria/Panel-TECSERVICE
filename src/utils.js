@@ -50,7 +50,7 @@ function sv(name,btn){
     satisfaccion:initSatisfaccion,
     visitas:initVisitas,
     alertas:initAlertas,
-    invts:()=>{ if(window.initInvTS) window.initInvTS(); }
+    invts:()=>{ if(window.initInvTS) window.initInvTS(); if(window.initRepVend) window.initRepVend(); }
   };
   const k='_i_'+name;
   if(inits[name]&&!window[k]){inits[name]();window[k]=true;}
