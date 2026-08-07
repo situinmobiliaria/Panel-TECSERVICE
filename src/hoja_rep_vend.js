@@ -382,15 +382,19 @@
   }
 
   function renderCliSelect() {
-    const sel = document.getElementById('rv-cli-sel');
-    if (!sel) return;
+    const dl  = document.getElementById('rv-cli-dl');
+    const inp = document.getElementById('rv-cli-inp');
+    if (!dl || !inp) return;
     const cl = clientesOrdenados();
-    if (!cl.length) { sel.innerHTML = ''; _cli = null; return; }
+    if (!cl.length) { dl.innerHTML = ''; inp.value = ''; _cli = null; return; }
     // Si el cliente elegido no vendió en el período, cae al primero
     if (!_cli || cl.indexOf(_cli) === -1) _cli = cl[0];
-    sel.innerHTML = cl.map((c, i) =>
-      `<option value="${esc(c)}"${c === _cli ? ' selected' : ''}>${i + 1}. ${esc(c)} — ${nMM(sumaSel(RV.cli_serie[c].monto))}</option>`
+    // El value es el nombre exacto (lo que se escribe); el label agrega el
+    // ranking y el monto para poder elegir sin saber el nombre completo.
+    dl.innerHTML = cl.map((c, i) =>
+      `<option value="${esc(c)}" label="${i + 1}º · ${nMM(sumaSel(RV.cli_serie[c].monto))}"></option>`
     ).join('');
+    inp.value = _cli;
     const lbl = document.getElementById('rv-cli-lbl');
     if (lbl) lbl.textContent = `${cl.length} clientes con venta · ${lblAnio()}`;
   }
@@ -430,33 +434,58 @@
     const I   = idxs();
     const ms  = mesesSel();
     const key = esMonto() ? 'monto' : 'cant';
+    const dk  = esMonto() ? 'm' : 'q';
+
+    // Una serie apilada por marca: al pasar el mouse el tooltip muestra el
+    // aporte de cada marca y el total del mes en el pie.
+    const det = d.det || {};
+    const marcasCli = Object.keys(det)
+      .filter(m => I.some(i => ((det[m] || {})[dk] || [])[i] > 0))
+      .sort((a, b) => I.reduce((s, i) => s + (det[b][dk][i] || 0), 0)
+                    - I.reduce((s, i) => s + (det[a][dk][i] || 0), 0));
+
+    const ds = marcasCli.map((m, k) => ({
+      label: m.length > 24 ? m.slice(0, 23) + '…' : m,
+      data: I.map(i => (det[m][dk] || [])[i] || 0),
+      backgroundColor: COLORS[k % COLORS.length],
+      borderWidth: 0, stack: 'c', order: 2,
+    }));
+
     const serie = I.map(i => (d[key] || [])[i] || 0);
-    // Promedio del período como línea de referencia
-    const prom = serie.length ? serie.reduce((s, v) => s + v, 0) / serie.length : 0;
+    const prom  = serie.length ? serie.reduce((s, v) => s + v, 0) / serie.length : 0;
+    ds.push({
+      label: 'Promedio del período', data: ms.map(() => prom), type: 'line',
+      borderColor: '#FFC000', borderWidth: 2, borderDash: [5, 4],
+      pointRadius: 0, fill: false, order: 1,
+    });
 
     _chCli = new Chart(ctx.getContext('2d'), {
       type: 'bar',
-      data: {
-        labels: ms.map(x => x.lbl),
-        datasets: [
-          { label: _cli.length > 40 ? _cli.slice(0, 39) + '…' : _cli,
-            data: serie, backgroundColor: '#002D73CC', borderColor: '#002D73',
-            borderWidth: 1, borderRadius: 3, order: 2 },
-          { label: 'Promedio del período', data: ms.map(() => prom), type: 'line',
-            borderColor: '#FFC000', borderWidth: 2, borderDash: [5, 4],
-            pointRadius: 0, fill: false, order: 1 },
-        ],
-      },
+      data: { labels: ms.map(x => x.lbl), datasets: ds },
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 8 }, padding: 8 } },
-          tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmtV(c.raw)}` } },
+          legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 8 }, padding: 7 } },
+          tooltip: {
+            callbacks: {
+              // Sólo las marcas con venta ese mes, para no llenar de ceros
+              label: c => c.dataset.type === 'line'
+                ? ` ${c.dataset.label}: ${fmtV(c.raw)}`
+                : (c.raw > 0 ? ` ${c.dataset.label}: ${fmtV(c.raw)}` : null),
+              footer: items => {
+                const t = items.filter(i => i.dataset.type !== 'line')
+                               .reduce((s, i) => s + i.raw, 0);
+                return 'TOTAL DEL MES: ' + fmtV(t);
+              },
+            },
+            footerFont: { weight: '700', size: 11 },
+            footerColor: '#FFD966',
+          },
         },
         scales: {
-          x: { grid: { display: false }, ticks: { font: { size: 8 } } },
-          y: { beginAtZero: true, grid: { color: '#E2E6F033' },
+          x: { stacked: true, grid: { display: false }, ticks: { font: { size: 8 } } },
+          y: { stacked: true, beginAtZero: true, grid: { color: '#E2E6F033' },
                ticks: { font: { size: 8 }, callback: v => esMonto() ? Math.round(v / 1e6) : nUn(v) },
                title: { display: true, text: esMonto() ? 'MM$' : 'unidades', font: { size: 8 }, color: '#6B7BA8' } },
         },
@@ -475,6 +504,17 @@
   window._rvModo = function (k) { if (_modo !== k) { _modo = k; repintar(); } };
   window._rvAnio = function (k) { if (_anio !== k) { _anio = k; repintar(); } };
   window._rvCli  = function (c) { _cli = c; renderCliKPI(); renderChartCli(); };
+
+  // Acepta el nombre exacto (elegido del datalist) o un texto parcial: en ese
+  // caso toma el primer cliente que lo contenga, ordenado por venta.
+  window._rvCliInput = function (v) {
+    const q = (v || '').trim().toLowerCase();
+    if (!q) return;
+    const cl = clientesOrdenados();
+    let hit = cl.find(c => c.toLowerCase() === q);
+    if (!hit) hit = cl.find(c => c.toLowerCase().includes(q));
+    if (hit && hit !== _cli) { _cli = hit; renderCliKPI(); renderChartCli(); }
+  };
 
   window.initRepVend = function () {
     if (!(RV.marcas || []).length) return;

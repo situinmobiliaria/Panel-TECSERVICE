@@ -1492,6 +1492,10 @@ def read_repuestos_vendidos(wb):
     # cliente, para el gráfico de evolución con selector de cliente.
     cli_mes   = defaultdict(lambda: [0.0, 0.0])
     cli_marca = defaultdict(lambda: defaultdict(float))
+    # cli_mm[(cliente, marca, anio, mes)] = [monto, cantidad] — desglose por
+    # marca dentro de cada mes, para las barras apiladas del gráfico y su
+    # tooltip. Sólo se guardan los pares (cliente, marca) con venta real.
+    cli_mm    = defaultdict(lambda: [0.0, 0.0])
     periodos = set()
 
     for row in ws.iter_rows(min_row=2, values_only=True):
@@ -1520,6 +1524,8 @@ def read_repuestos_vendidos(wb):
         cli_mes[(cli, anio, mes)][0] += monto
         cli_mes[(cli, anio, mes)][1] += cant
         cli_marca[cli][marca] += monto
+        cli_mm[(cli, marca, anio, mes)][0] += monto
+        cli_mm[(cli, marca, anio, mes)][1] += cant
         periodos.add((anio, mes))
 
     if not celdas:
@@ -1570,24 +1576,36 @@ def read_repuestos_vendidos(wb):
         todos_cli.update(clientes[marca].keys())
 
     # Serie mensual por cliente (para el gráfico con selector de cliente)
+    series_mes = defaultdict(lambda: [[0.0] * n, [0.0] * n])
+    for (ck, a, m), (v, q) in cli_mes.items():
+        i = idx[(a, m)]
+        series_mes[ck][0][i] += v
+        series_mes[ck][1][i] += q
+
+    # Desglose mensual por marca dentro de cada cliente
+    det = defaultdict(lambda: defaultdict(lambda: [[0.0] * n, [0.0] * n]))
+    for (ck, mk_, a, m), (v, q) in cli_mm.items():
+        i = idx[(a, m)]
+        det[ck][mk_][0][i] += v
+        det[ck][mk_][1][i] += q
+
     cli_out = {}
     for c in todos_cli:
-        mo = [0.0] * n
-        qt = [0.0] * n
-        for (ck, a, m), (v, q) in cli_mes.items():
-            if ck != c:
-                continue
-            i = idx[(a, m)]
-            mo[i] += v
-            qt[i] += q
+        mo, qt = series_mes[c]
         mk = sorted(cli_marca[c].items(), key=lambda x: -x[1])
         cli_out[c] = {
             "monto":     [round(x) for x in mo],
             "cant":      [round(x) for x in qt],
             "monto_tot": round(sum(mo)),
             "cant_tot":  round(sum(qt)),
-            "marcas":    [[k, round(v)] for k, v in mk[:5]],
+            "marcas":    [[k, round(v)] for k, v in mk],
             "n_marcas":  len(mk),
+            # {marca: {"m": [n montos], "q": [n cantidades]}} ordenado por monto
+            "det": {
+                k: {"m": [round(x) for x in det[c][k][0]],
+                    "q": [round(x) for x in det[c][k][1]]}
+                for k, _ in mk
+            },
         }
 
     return {
