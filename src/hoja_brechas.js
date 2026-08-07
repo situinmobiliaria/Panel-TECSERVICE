@@ -444,6 +444,49 @@
     },
   };
 
+  // ── Indicador en la hoja Resumen, con desglose al pasar el mouse ──
+  function initSnapshot() {
+    const val = document.getElementById('rs-snap-brecha');
+    if (!val) return;
+    const T = totalBrecha();
+    if (!T) return;
+    val.textContent = nMM(T);
+
+    const sub = document.getElementById('rs-snap-brecha-sub');
+    if (sub) sub.textContent = 'ingresos no materializados';
+
+    const pop = document.getElementById('rs-snap-brecha-pop');
+    if (!pop) return;
+    const filas = [
+      ['Oportunidades por Facturar', OP.total || 0, '#33448D'],
+      ['Bajo Contrato',              CT.total || 0, '#FFC000'],
+      ['Sin Stock',                  ST.total || 0, '#C00000'],
+    ];
+    pop.innerHTML =
+      `<div style="font-size:.55rem;text-transform:uppercase;letter-spacing:.06em;
+                   color:rgba(255,255,255,.55);margin-bottom:.3rem">Composición de la brecha</div>` +
+      filas.map(([l, v, c]) =>
+        `<div class="kpi-pop-row">
+           <span class="d" style="background:${c}"></span>
+           <span class="l">${l}</span>
+           <span class="v">${nMM(v)}</span>
+           <span class="p">${pc(v, T)}</span>
+         </div>`).join('') +
+      `<div class="kpi-pop-row kpi-pop-tot">
+         <span class="d" style="background:transparent"></span>
+         <span class="l" style="color:#fff">TOTAL</span>
+         <span class="v">${nMM(T)}</span>
+         <span class="p">100%</span>
+       </div>
+       <div style="font-size:.53rem;color:rgba(255,255,255,.45);margin-top:.35rem">
+         Clic para ver el detalle completo</div>`;
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initSnapshot);
+  } else {
+    initSnapshot();
+  }
+
   window.initBrechas = function () {
     if (!OP.total && !ST.total && !CT.total) return;
     kpis(); barraComp();

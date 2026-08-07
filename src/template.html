@@ -81,6 +81,20 @@ body{font-family:'Roboto',sans-serif;background:#E8EBF5;color:var(--txt);min-hei
 .kpi-val{font-family:'Roboto Condensed',sans-serif;font-size:1.85rem;font-weight:900;
   line-height:1;color:var(--kc,var(--az2));margin-bottom:.25rem}
 .kpi-sub{font-size:.62rem;color:var(--mut);line-height:1.4}
+/* Desglose que aparece al pasar el mouse sobre un KPI (ej. Brechas) */
+.kpi-hov{position:relative}
+.kpi-pop{position:absolute;top:calc(100% + 6px);right:0;z-index:60;min-width:270px;
+  background:var(--az3);color:#fff;border-radius:6px;padding:.6rem .75rem;
+  box-shadow:0 6px 20px rgba(0,0,0,.28);opacity:0;visibility:hidden;
+  transform:translateY(-4px);transition:opacity .15s,transform .15s,visibility .15s;
+  pointer-events:none;text-align:left}
+.kpi-hov:hover .kpi-pop{opacity:1;visibility:visible;transform:translateY(0)}
+.kpi-pop-row{display:flex;align-items:center;gap:.5rem;padding:.22rem 0;font-size:.63rem}
+.kpi-pop-row .d{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.kpi-pop-row .l{flex:1;color:rgba(255,255,255,.82)}
+.kpi-pop-row .v{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.kpi-pop-row .p{color:rgba(255,255,255,.5);font-size:.58rem;min-width:38px;text-align:right}
+.kpi-pop-tot{border-top:1px solid rgba(255,255,255,.22);margin-top:.3rem;padding-top:.35rem;font-weight:800}
 
 /* ── CARD ── */
 .card{background:var(--wh);border:1px solid var(--brd);border-radius:var(--r);
@@ -492,7 +506,7 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
   </div>
 
   <!-- Snapshot del mes -->
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.6rem;margin-top:.65rem;margin-bottom:.65rem">
+  <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:.6rem;margin-top:.65rem;margin-bottom:.65rem">
     <div class="kpi" style="--kc:#7A1FAA;padding:.6rem .7rem">
       <div class="kpi-lbl" style="font-size:.57rem">Nuevos Clientes · últ. 90d</div>
       <div class="kpi-val" id="rs-snap-nuevos" style="font-size:1.5rem;color:#7A1FAA">—</div>
@@ -517,6 +531,14 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
       <div class="kpi-lbl" style="font-size:.57rem">Visitas YTD · Ejecutivos</div>
       <div class="kpi-val" id="rs-snap-vis" style="font-size:1.5rem;color:#003F7F">—</div>
       <div class="kpi-sub" id="rs-snap-vis-sub">Eglys + Cristián</div>
+    </div>
+    <!-- El desglose aparece al pasar el mouse (ver .kpi-pop en el <style>) -->
+    <div class="kpi kpi-hov" id="rs-snap-brecha-card" style="--kc:var(--rd);padding:.6rem .7rem;cursor:pointer"
+         onclick="sv('brechas',document.querySelector('.nb[onclick*=brechas]'))">
+      <div class="kpi-lbl" style="font-size:.57rem">Brechas de Facturación</div>
+      <div class="kpi-val" id="rs-snap-brecha" style="font-size:1.5rem;color:var(--rd)">—</div>
+      <div class="kpi-sub" id="rs-snap-brecha-sub">ingresos no materializados</div>
+      <div class="kpi-pop" id="rs-snap-brecha-pop"></div>
     </div>
   </div>
 
