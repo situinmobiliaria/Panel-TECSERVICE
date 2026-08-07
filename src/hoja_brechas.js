@@ -157,7 +157,7 @@
       <div style="overflow-x:auto;max-height:420px;overflow-y:auto">
         <table style="width:100%;border-collapse:collapse;min-width:900px">
           <thead><tr>${th('PROPIETARIO', 'left')}${th('CLIENTE', 'left')}${th('OPORTUNIDAD', 'left')}
-            ${th('N° OC', 'left')}${th('OV SAP', 'left')}${th('FECHA FACT.', 'left')}${th('MONTO', 'right')}</tr></thead>
+            ${th('N° OC', 'left')}${th('OV SAP', 'left')}${th('MONTO', 'right')}</tr></thead>
           <tbody>${it.map((r, i) => `
             <tr style="background:${i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)'}">
               <td style="padding:.28rem .6rem;font-size:.63rem;${SEP}">${esc(r.prop)}</td>
@@ -165,12 +165,11 @@
               <td style="padding:.28rem .6rem;font-size:.62rem;color:var(--mut);${SEP}" title="${esc(r.oport)}">${esc(r.oport)}</td>
               <td style="padding:.28rem .6rem;font-size:.6rem;font-family:'Roboto Mono',monospace;${SEP}">${esc(r.oc)}</td>
               <td style="padding:.28rem .6rem;font-size:.6rem;font-family:'Roboto Mono',monospace;${SEP}">${esc(r.ov)}</td>
-              <td style="padding:.28rem .6rem;font-size:.6rem;color:var(--mut);${SEP}">${esc(r.fecha_fmt) || '—'}</td>
               <td style="padding:.28rem .6rem;text-align:right;font-size:.64rem;font-weight:600;
                          font-variant-numeric:tabular-nums">${nCLP(r.monto)}</td>
             </tr>`).join('')}</tbody>
           <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
-            <td colspan="6" style="padding:.35rem .6rem;font-size:.64rem">TOTAL · ${it.length} oportunidades</td>
+            <td colspan="5" style="padding:.35rem .6rem;font-size:.64rem">TOTAL · ${it.length} oportunidades</td>
             <td style="padding:.35rem .6rem;text-align:right;font-size:.64rem;font-variant-numeric:tabular-nums">${nCLP(OP.total)}</td>
           </tr></tfoot>
         </table>
