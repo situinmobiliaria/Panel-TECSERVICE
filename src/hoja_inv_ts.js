@@ -75,7 +75,7 @@
           <span style="font-size:.58rem;color:var(--mut);font-weight:400;margin-left:.4rem">${d.n_skus} SKU</span>
         </td>
         <td style="padding:.4rem .7rem;text-align:right;font-size:.72rem;font-variant-numeric:tabular-nums">${nUn(d.stock)}</td>
-        <td style="padding:.4rem .7rem;text-align:right;font-size:.72rem;font-variant-numeric:tabular-nums;color:var(--mut)">${nCLP(d.cu_prom)}</td>
+        <td style="padding:.4rem .7rem"></td>
         <td style="padding:.4rem .7rem;text-align:right;font-size:.73rem;font-weight:700;font-variant-numeric:tabular-nums">${nCLP(d.ct)}</td>
         <td style="padding:.4rem .7rem;text-align:right;font-size:.68rem;color:var(--mut)">${pc(d.ct, gCt)}</td>
       </tr>`;
@@ -117,7 +117,7 @@
           <thead><tr>
             ${th('MARCA / SKU · DESCRIPCIÓN', 'left')}
             ${th('EN STOCK', 'right')}
-            ${th('COSTO PROMEDIO', 'right')}
+            ${th('COSTO UNITARIO', 'right')}
             ${th('COSTO TOTAL', 'right')}
             ${th('% TOTAL', 'right')}
           </tr></thead>

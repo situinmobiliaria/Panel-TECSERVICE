@@ -1475,12 +1475,12 @@ def read_inventario_ts(wb):
         return {}
 
     # {marca: {sku: {"d": desc, "st": stock, "cus": [costos unit], "ct": costo total}}}
+    # El costo unitario se promedia sólo a nivel SKU (82 SKU están en más de una
+    # bodega). A nivel marca NO se expone un promedio: cualquier forma de
+    # agregarlo es engañosa — el promedio simple pesa igual un tornillo de $47
+    # que un generador de $3,8 MM, y ponderarlo por costo eleva al cuadrado los
+    # SKU caros. La tabla muestra sólo stock y costo total por marca.
     marcas = defaultdict(lambda: defaultdict(lambda: {"d": "", "st": 0.0, "cus": [], "ct": 0.0}))
-    # Costos unitarios de TODAS las filas por marca. El "Promedio de Costo del
-    # artículo" de la dinámica promedia las filas de origen, no los SKU ya
-    # agrupados: con 82 SKU repetidos en varias bodegas, promediar sobre los
-    # SKU únicos da un valor distinto al del Excel.
-    cus_marca = defaultdict(list)
 
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not row or len(row) < 14:
@@ -1497,7 +1497,7 @@ def read_inventario_ts(wb):
         cu = row[12]
         if isinstance(cu, (int, float)):
             it["cus"].append(float(cu))
-            cus_marca[marca].append(float(cu))
+
 
     out       = {}
     tot_stock = 0.0
@@ -1519,13 +1519,8 @@ def read_inventario_ts(wb):
             m_st += it["st"]
             m_ct += it["ct"]
         items.sort(key=lambda x: -x["ct"])
-        # Promedio sobre las filas de origen, igual que "Promedio de Costo del
-        # artículo" en la dinámica (ver nota en cus_marca).
-        cl      = cus_marca.get(marca, [])
-        cu_prom = sum(cl) / len(cl) if cl else 0.0
         out[marca] = {
             "stock":   round(m_st, 2),
-            "cu_prom": round(cu_prom),
             "ct":      round(m_ct),
             "n_skus":  len(items),
             "items":   items,
