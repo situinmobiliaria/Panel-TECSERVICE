@@ -750,6 +750,11 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
   <div class="sh" style="margin-top:1.4rem"><h2>Inventario y Venta de Repuestos</h2><div class="sh-line"></div>
     <span class="sh-tag">Repuestos en bodega y venta del período <strong id="rs-rep-per">—</strong></span></div>
 
+  <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.7rem">
+    <span style="font-size:.58rem;font-weight:700;color:var(--mut);letter-spacing:.05em">PERÍODO DE VENTA:</span>
+    <div id="rs-rep-anio" style="display:flex;gap:.25rem;flex-wrap:wrap"></div>
+  </div>
+
   <div id="rs-rep-kpi" class="g5" style="grid-template-columns:repeat(4,1fr)"></div>
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:.9rem">
@@ -10994,49 +10999,79 @@ async function eerrExportPDF() {
   const invDeMarca = m => (INV.data || {})[ALIAS_INV[m] || m];
 
   let _chRsMes = null, _chRsMarca = null;
+  let _rsAnio = 'todos';             // filtro propio del bloque en Resumen
+
+  // Índices de RV.meses según el año elegido en este bloque
+  function rsIdx() {
+    return (RV.meses || []).map((x, i) => (_rsAnio === 'todos' || x.a === _rsAnio) ? i : -1)
+                           .filter(i => i >= 0);
+  }
+  function rsSuma(arr) { return rsIdx().reduce((s, i) => s + ((arr || [])[i] || 0), 0); }
+  function rsVentaMarca(m) { return rsSuma((RV.data[m] || {}).monto); }
+  function rsLblAnio() { return _rsAnio === 'todos' ? 'ambos años (2025 y 2026)' : `año ${_rsAnio}`; }
+
+  function rsSeg() {
+    const box = document.getElementById('rs-rep-anio');
+    if (!box) return;
+    const opts = [['todos', 'Ambos años']].concat((RV.anios || []).map(a => [a, a]));
+    box.innerHTML = opts.map(([k, t]) =>
+      `<button onclick="window._rsRepAnio('${k}')" style="font-size:.6rem;padding:.22rem .7rem;border-radius:3px;
+        border:1px solid ${_rsAnio === k ? 'var(--az1)' : 'var(--brd)'};cursor:pointer;
+        background:${_rsAnio === k ? 'var(--az1)' : 'var(--bg2)'};color:${_rsAnio === k ? '#fff' : 'var(--txt)'};
+        font-weight:${_rsAnio === k ? '700' : '400'}">${t}</button>`).join('');
+  }
 
   function rsKPIs() {
     const box = document.getElementById('rs-rep-kpi');
     if (!box) return;
-    const ms  = RV.meses || [];
-    const n   = ms.length;
-    // Rotación: venta de los últimos 12 meses sobre el stock valorizado de hoy
-    const u12 = RV.tot_monto.slice(Math.max(0, n - 12)).reduce((s, v) => s + v, 0);
-    const rot = INV.total_costo ? u12 / INV.total_costo : 0;
-    const i26 = ms.map((x, i) => x.a === '2026' ? i : -1).filter(i => i >= 0);
-    const v26 = i26.reduce((s, i) => s + (RV.tot_monto[i] || 0), 0);
-    const i25 = ms.map((x, i) => x.a === '2025' ? i : -1).filter(i => i >= 0);
-    const v25 = i25.reduce((s, i) => s + (RV.tot_monto[i] || 0), 0);
-    const top = (RV.marcas || [])[0];
+    const ms = RV.meses || [];
+    const I  = rsIdx();
+    const nm = I.length;
+    const venta = rsSuma(RV.tot_monto);
+    const uds   = rsSuma(RV.tot_cant);
+    // Rotación anualizada: así 2025 (7 meses) y 2026 (7 meses) son comparables
+    // entre sí y con el período completo.
+    const anual = nm ? venta / nm * 12 : 0;
+    const rot   = INV.total_costo ? anual / INV.total_costo : 0;
+    const marcasOrd = (RV.marcas || []).slice().sort((a, b) => rsVentaMarca(b) - rsVentaMarca(a));
+    const top = marcasOrd[0];
+    const vTop = top ? rsVentaMarca(top) : 0;
 
-    const tile = (lbl, v, sub, kc) =>
+    // pie: leyenda del período. El inventario es una foto de hoy, así que
+    // lleva su propia nota en gris en vez del año seleccionado.
+    const pie = (t, gris) =>
+      `<div style="font-size:.55rem;font-weight:700;margin-top:.2rem;
+         color:${gris ? 'var(--mut)' : 'var(--az2)'}">${t}</div>`;
+    const tile = (lbl, v, sub, kc, foot) =>
       `<div class="kpi" style="--kc:${kc}">
          <div class="kpi-lbl">${lbl}</div>
          <div class="kpi-val" style="color:${kc}">${v}</div>
-         <div class="kpi-sub">${sub}</div>
+         <div class="kpi-sub">${sub}${foot}</div>
        </div>`;
+    const pAnio = pie(rsLblAnio(), false);
 
     box.innerHTML =
       tile('Inventario Valorizado', nMM(INV.total_costo),
-           `${nUn(INV.total_skus)} SKU · ${nUn(INV.n_marcas)} marcas`, 'var(--az3)') +
-      tile(`Venta Repuestos ${i26.length ? '2026' : ''}`, nMM(v26),
-           i25.length ? `2025: ${nMM(v25)} (${ms[i25[0]].lbl}–${ms[i25[i25.length-1]].lbl})` : '—', 'var(--az2)') +
+           `${nUn(INV.total_skus)} SKU · ${nUn(INV.n_marcas)} marcas`, 'var(--az3)',
+           pie('stock actual · no depende del período', true)) +
+      tile('Venta de Repuestos', nMM(venta),
+           `${nUn(uds)} unidades · ${nm} mes${nm === 1 ? '' : 'es'}`, 'var(--az2)', pAnio) +
       tile('Rotación Inventario', rot.toFixed(2).replace('.', ',') + 'x',
-           'venta últimos 12 meses / stock', rot >= 1 ? 'var(--gn)' : 'var(--am)') +
+           'venta anualizada / stock', rot >= 1 ? 'var(--gn)' : 'var(--am)', pAnio) +
       tile('Marca Principal', top ? (top.length > 16 ? top.slice(0, 15) + '…' : top) : '—',
-           top ? `${nMM(RV.data[top].monto_tot)} · ${pc(RV.data[top].monto_tot, RV.tot_monto_g)} de la venta` : '—',
-           'var(--teal)');
+           top ? `${nMM(vTop)} · ${pc(vTop, venta)} de la venta` : '—', 'var(--teal)', pAnio);
 
     const per = document.getElementById('rs-rep-per');
-    if (per && n) per.textContent = `${ms[0].lbl} – ${ms[n - 1].lbl}`;
+    if (per && nm) per.textContent = `${ms[I[0]].lbl} – ${ms[I[nm - 1]].lbl}`;
   }
 
   function rsChartMes() {
     const ctx = document.getElementById('cRsRepMes');
     if (!ctx || !window.Chart) return;
     if (_chRsMes) { _chRsMes.destroy(); _chRsMes = null; }
-    const ms   = RV.meses || [];
-    const dat  = RV.tot_monto || [];
+    const I    = rsIdx();
+    const ms   = I.map(i => RV.meses[i]);
+    const dat  = I.map(i => (RV.tot_monto || [])[i] || 0);
     const prom = dat.length ? dat.reduce((s, v) => s + v, 0) / dat.length : 0;
 
     _chRsMes = new Chart(ctx.getContext('2d'), {
@@ -11079,7 +11114,7 @@ async function eerrExportPDF() {
     const ventaDe = {};
     (RV.marcas || []).forEach(m => {
       const k = ALIAS_INV[m] || m;
-      ventaDe[k] = (ventaDe[k] || 0) + RV.data[m].monto_tot;
+      ventaDe[k] = (ventaDe[k] || 0) + rsVentaMarca(m);
     });
     const top = INV.marcas.slice(0, 10);
 
@@ -11090,7 +11125,8 @@ async function eerrExportPDF() {
         datasets: [
           { label: 'Stock valorizado', data: top.map(m => INV.data[m].ct),
             backgroundColor: '#33448DCC', borderColor: '#33448D', borderWidth: 1, borderRadius: 2 },
-          { label: 'Venta del período', data: top.map(m => ventaDe[m] || 0),
+          { label: `Venta · ${_rsAnio === 'todos' ? 'ambos años' : _rsAnio}`,
+            data: top.map(m => ventaDe[m] || 0),
             backgroundColor: '#28D2C3CC', borderColor: '#28D2C3', borderWidth: 1, borderRadius: 2 },
         ],
       },
@@ -11123,8 +11159,13 @@ async function eerrExportPDF() {
 
   function initResumenRep() {
     if (!(RV.marcas || []).length) return;
-    rsKPIs(); rsChartMes(); rsChartMarca();
+    rsSeg(); rsKPIs(); rsChartMes(); rsChartMarca();
   }
+  window._rsRepAnio = function (k) {
+    if (_rsAnio === k) return;
+    _rsAnio = k;
+    initResumenRep();
+  };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initResumenRep);
   } else {
