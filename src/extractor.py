@@ -1859,20 +1859,12 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
     reg_con  = {}   # {region: [n floats]} contratos brutos
     reg_lin  = {}   # {region: {linea: [n floats]}} contratos por línea
 
-    # Acumulado Ene-mes_corte 2025 por región (misma base "total facturación"
-    # que usa real_ytd_2025 por cliente en el resto del panel), para comparar
-    # YoY contra el acumulado 2026 de la tabla.
-    ytd_cli_2025 = bbdd.get("ytd_cli_2025", {})
-    reg_2025 = defaultdict(float)
-
     for p in panel_raw:
         cli    = p["cliente"]
         region = cli_to_region.get(cli, "Sin región")
         if region not in reg_con:
             reg_con[region] = [0.0] * n
             reg_lin[region] = {L: [0.0] * n for L in LINEAS}
-        nom = p.get("nombre_analisis") or cli
-        reg_2025[region] += ytd_cli_2025.get(nom, ytd_cli_2025.get(cli, 0.0))
         cons = contratos_by_cli.get(cli, [])
         ca   = p.get("contr_meses_2026") or [0.0] * 12
         for m in range(n):
@@ -1909,16 +1901,11 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
         otr_mm  = to_mm(otr_arr)
         tot_mm  = [round(con_mm[m] + otr_mm[m], 3) for m in range(n)]
         rlm     = reg_lin.get(r, {L: [0.0]*n for L in LINEAS})
-        tot_2026_ytd = round(sum(tot_mm), 3)
-        acum_2025    = round(reg_2025.get(r, 0.0) / MM, 3)
-        dif_pct      = round((tot_2026_ytd - acum_2025) / acum_2025 * 100, 1) if acum_2025 > 0 else None
         reg_out[r] = {
             "contratos": with_total(con_mm),
             "otros":     with_total(otr_mm),
             "total":     with_total(tot_mm),
             "lineas": {L: with_total(to_mm(rlm.get(L, [0.0]*n))) for L in LINEAS},
-            "acum_2025": acum_2025,
-            "dif_pct_2025": dif_pct,
         }
 
     regiones_sorted = sorted(reg_out, key=lambda r: reg_out[r]["contratos"][n], reverse=True)
