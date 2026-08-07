@@ -39,10 +39,15 @@ function _biLookupContrato(nombre){
 // Valor anual de mantención por equipo, según línea de negocio. Se aplica
 // sólo sobre los equipos con Potencial ST = Sí, por eso usa _biVal(), que
 // ya devuelve el conteo del filtro activo.
+//   Esterilización  50 UF/año
+//   Endoscopía      22 UF/año
+//   Dental          16 UF/año
+// Los montos en pesos vienen dados; no se recalculan con la UF del día para
+// que el tablero no cambie de cifras entre una corrida y otra.
 const _BI_TARIFA = {
-  esterilizacion: 2043239,
-  endoscopia:      898585,
-  dental:          612671,
+  esterilizacion: 2043239,   // 50 UF
+  endoscopia:      898585,   // 22 UF
+  dental:          612671,   // 16 UF
 };
 
 function _biPotAnual(c){
@@ -632,7 +637,7 @@ function initBaseInstalada(){
         <th onclick="biSortCol(9,this)">Estado BI</th>
         <th onclick="biSortCol(10,this)" class="num" style="color:#FFC000">Fac. 2026</th>
         <th class="num">F. Contr.</th>
-        <th class="num" style="color:#FFC000" title="Equipos con Potencial ST = Sí valorizados a la tarifa anual de mantención por línea. Los clientes con contrato vigente se marcan como Contrato activo.">Potencial ST Anual<br><span style="font-weight:400;font-size:.55rem">(Mantenimiento BI)</span></th>
+        <th class="num" style="color:#FFC000" title="Potencial de servicio técnico anual sobre la base instalada.&#10;&#10;Tarifa anual de mantención por equipo:&#10;  · Esterilización   50 UF   ($2.043.239)&#10;  · Endoscopía       22 UF   ($898.585)&#10;  · Dental           16 UF   ($612.671)&#10;&#10;Se valorizan sólo los equipos con Potencial ST = Sí, según el filtro del inicio de la hoja.&#10;Los clientes con contrato vigente se marcan como Contrato activo y no suman al total.">Potencial ST Anual<br><span style="font-weight:400;font-size:.55rem">(Mantenimiento BI)</span></th>
       </tr></thead>
       <tbody id="tb-bi-cli"></tbody>
       <tfoot><tr id="tfoot-bi-cli" style="background:var(--az3);font-size:.62rem"></tr></tfoot>
