@@ -57,9 +57,13 @@
     const gSt = marcas.reduce((s, m) => s + data[m].stock, 0);
     const gSk = marcas.reduce((s, m) => s + data[m].n_skus, 0);
 
+    // Borde vertical entre columnas: hace visible dónde empieza y termina cada
+    // una, ahora que SKU y descripción son columnas separadas de ancho fijo.
+    const SEP = 'border-right:1px solid var(--brd)';
     const th = (t, al) =>
       `<th style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;padding:.42rem .7rem;
-        font-size:.6rem;letter-spacing:.04em;text-align:${al};white-space:nowrap">${t}</th>`;
+        font-size:.6rem;letter-spacing:.04em;text-align:${al};white-space:nowrap;
+        border-right:1px solid rgba(255,255,255,.18)">${t}</th>`;
 
     let rows = '';
     marcas.forEach((m, i) => {
@@ -69,14 +73,15 @@
 
       rows += `<tr style="background:${zebra};cursor:pointer;border-left:3px solid #002D73"
           onclick="window._invtsToggle(${JSON.stringify(m).replace(/"/g, '&quot;')})">
-        <td style="padding:.4rem .7rem;font-size:.73rem;font-weight:600;white-space:nowrap">
+        <td style="padding:.4rem .7rem;font-size:.73rem;font-weight:600;white-space:nowrap;
+                   overflow:hidden;text-overflow:ellipsis;${SEP}" title="${esc(m)}">
           <span style="display:inline-block;width:.85rem;font-size:.55rem;color:var(--mut);
             transform:rotate(${isOpen ? 90 : 0}deg);transition:transform .15s">&#9654;</span>${esc(m)}
-          <span style="font-size:.58rem;color:var(--mut);font-weight:400;margin-left:.4rem">${d.n_skus} SKU</span>
         </td>
-        <td style="padding:.4rem .7rem;text-align:right;font-size:.72rem;font-variant-numeric:tabular-nums">${nUn(d.stock)}</td>
-        <td style="padding:.4rem .7rem"></td>
-        <td style="padding:.4rem .7rem;text-align:right;font-size:.73rem;font-weight:700;font-variant-numeric:tabular-nums">${nCLP(d.ct)}</td>
+        <td style="padding:.4rem .7rem;font-size:.62rem;color:var(--mut);white-space:nowrap;${SEP}">${d.n_skus} SKU</td>
+        <td style="padding:.4rem .7rem;text-align:right;font-size:.72rem;font-variant-numeric:tabular-nums;${SEP}">${nUn(d.stock)}</td>
+        <td style="padding:.4rem .7rem;${SEP}"></td>
+        <td style="padding:.4rem .7rem;text-align:right;font-size:.73rem;font-weight:700;font-variant-numeric:tabular-nums;${SEP}">${nCLP(d.ct)}</td>
         <td style="padding:.4rem .7rem;text-align:right;font-size:.68rem;color:var(--mut)">${pc(d.ct, gCt)}</td>
       </tr>`;
 
@@ -87,13 +92,17 @@
         }
         items.forEach(it => {
           rows += `<tr style="background:var(--bg)">
-            <td style="padding:.25rem .7rem .25rem 2.1rem;font-size:.66rem;color:var(--mut)">
+            <td style="padding:.25rem .7rem .25rem 1.9rem;${SEP}">
               <span style="font-family:'Roboto Mono',monospace;font-size:.63rem;background:var(--bg2);
-                padding:.05rem .3rem;border-radius:3px;margin-right:.45rem">${esc(it.sku)}</span>${esc(it.d)}
+                padding:.05rem .3rem;border-radius:3px;display:inline-block;max-width:100%;
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom"
+                title="${esc(it.sku)}">${esc(it.sku)}</span>
             </td>
-            <td style="padding:.25rem .7rem;text-align:right;font-size:.66rem;font-variant-numeric:tabular-nums">${nUn(it.st)}</td>
-            <td style="padding:.25rem .7rem;text-align:right;font-size:.66rem;font-variant-numeric:tabular-nums;color:var(--mut)">${nCLP(it.cu)}</td>
-            <td style="padding:.25rem .7rem;text-align:right;font-size:.66rem;font-variant-numeric:tabular-nums">${nCLP(it.ct)}</td>
+            <td style="padding:.25rem .7rem;font-size:.66rem;color:var(--mut);white-space:nowrap;
+                       overflow:hidden;text-overflow:ellipsis;${SEP}" title="${esc(it.d)}">${esc(it.d)}</td>
+            <td style="padding:.25rem .7rem;text-align:right;font-size:.66rem;font-variant-numeric:tabular-nums;${SEP}">${nUn(it.st)}</td>
+            <td style="padding:.25rem .7rem;text-align:right;font-size:.66rem;font-variant-numeric:tabular-nums;color:var(--mut);${SEP}">${nCLP(it.cu)}</td>
+            <td style="padding:.25rem .7rem;text-align:right;font-size:.66rem;font-variant-numeric:tabular-nums;${SEP}">${nCLP(it.ct)}</td>
             <td style="padding:.25rem .7rem;text-align:right;font-size:.62rem;color:var(--mut)">${pc(it.ct, d.ct)}</td>
           </tr>`;
         });
@@ -113,9 +122,18 @@
         <span style="font-size:.63rem;color:var(--mut)">${marcas.length} marcas · ${nUn(gSk)} SKU · clic en una marca para ver el detalle</span>
       </div>
       <div style="overflow-x:auto;max-height:640px;overflow-y:auto">
-        <table style="width:100%;border-collapse:collapse">
+        <table style="width:100%;min-width:940px;border-collapse:collapse;table-layout:fixed">
+          <colgroup>
+            <col style="width:210px">
+            <col>
+            <col style="width:100px">
+            <col style="width:130px">
+            <col style="width:140px">
+            <col style="width:82px">
+          </colgroup>
           <thead><tr>
-            ${th('MARCA / SKU · DESCRIPCIÓN', 'left')}
+            ${th('MARCA / SKU', 'left')}
+            ${th('DESCRIPCIÓN', 'left')}
             ${th('EN STOCK', 'right')}
             ${th('COSTO UNITARIO', 'right')}
             ${th('COSTO TOTAL', 'right')}
@@ -123,10 +141,11 @@
           </tr></thead>
           <tbody>${rows}</tbody>
           <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
-            <td style="padding:.45rem .7rem;font-size:.72rem">TOTAL${q ? ' (filtrado)' : ''} · ${marcas.length} marcas</td>
-            <td style="padding:.45rem .7rem;text-align:right;font-size:.72rem;font-variant-numeric:tabular-nums">${nUn(gSt)}</td>
-            <td></td>
-            <td style="padding:.45rem .7rem;text-align:right;font-size:.72rem;font-variant-numeric:tabular-nums">${nCLP(gCt)}</td>
+            <td style="padding:.45rem .7rem;font-size:.72rem;white-space:nowrap;${SEP}">TOTAL${q ? ' (filtrado)' : ''}</td>
+            <td style="padding:.45rem .7rem;font-size:.66rem;font-weight:400;color:rgba(255,255,255,.75);${SEP}">${marcas.length} marcas · ${nUn(gSk)} SKU</td>
+            <td style="padding:.45rem .7rem;text-align:right;font-size:.72rem;font-variant-numeric:tabular-nums;${SEP}">${nUn(gSt)}</td>
+            <td style="${SEP}"></td>
+            <td style="padding:.45rem .7rem;text-align:right;font-size:.72rem;font-variant-numeric:tabular-nums;${SEP}">${nCLP(gCt)}</td>
             <td style="padding:.45rem .7rem;text-align:right;font-size:.68rem">100%</td>
           </tr></tfoot>
         </table>
