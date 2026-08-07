@@ -1929,11 +1929,21 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
   </div>
 
   <div class="card">
-    <div class="ch" style="flex-wrap:wrap;gap:.5rem">
-      <span class="ct">Detalle de Repuestos en Espera</span>
-      <div id="br-st-filtro" style="display:flex;gap:.25rem;margin-left:auto;flex-wrap:wrap"></div>
+    <div class="ch"><span class="ct">Detalle de Repuestos en Espera</span>
+      <span style="font-size:.55rem;color:var(--mut);margin-left:auto" id="br-st-det-tag">—</span></div>
+    <div class="cb">
+      <div style="display:flex;flex-direction:column;gap:.4rem;margin-bottom:.7rem">
+        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+          <span style="font-size:.56rem;font-weight:700;color:var(--mut);letter-spacing:.05em;min-width:92px">LÍNEA:</span>
+          <div id="br-st-filtro" style="display:flex;gap:.25rem;flex-wrap:wrap"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+          <span style="font-size:.56rem;font-weight:700;color:var(--mut);letter-spacing:.05em;min-width:92px">ANTIGÜEDAD:</span>
+          <div id="br-st-filtro-ag" style="display:flex;gap:.25rem;flex-wrap:wrap"></div>
+        </div>
+      </div>
+      <div id="br-st-det"></div>
     </div>
-    <div class="cb"><div id="br-st-det"></div></div>
   </div>
 </div>
 
@@ -11272,8 +11282,10 @@ async function eerrExportPDF() {
   const pc   = (a, b) => b ? ((a / b) * 100).toFixed(1).replace('.', ',') + '%' : '—';
   const esc  = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  const COLORS = ['#002D73','#28D2C3','#FFC000','#33448D','#7A1FAA','#D46000',
-                  '#00832F','#C00000','#4C9BE8','#E8B24C'];
+  // Tonos ordenados para que dos azules nunca queden juntos en la misma torta:
+  // #002D73 y #33448D se confundían entre sí.
+  const COLORS = ['#002D73','#28D2C3','#FFC000','#7A1FAA','#00832F','#D46000',
+                  '#C00000','#4C9BE8','#E8B24C','#33448D'];
   // Semáforo por antigüedad: mientras más vieja la espera, más grave
   const AGING_COLOR = {
     '0–30 días': '#00832F', '31–60 días': '#8B8200', '61–90 días': '#D46000',
@@ -11588,25 +11600,54 @@ async function eerrExportPDF() {
         «no está» significa que el código no aparece en el inventario de repuestos.</p>`;
   }
 
-  // Detalle con filtro por línea de negocio
+  // Detalle con filtro por línea de negocio y por antigüedad
   let _fLinea = 'todas';
+  let _fAging = 'todas';
+
+  // Mismos tramos que el gráfico de antigüedad (definidos en el extractor)
+  const TRAMOS = [[0, 30, '0–30 días'], [31, 60, '31–60 días'], [61, 90, '61–90 días'],
+                  [91, 180, '91–180 días'], [181, Infinity, 'Más de 180 días']];
+  const tramoDe = d => {
+    if (d == null) return 'Sin fecha';
+    const t = TRAMOS.find(([lo, hi]) => d >= lo && d <= hi);
+    return t ? t[2] : 'Sin fecha';
+  };
+
+  function btn(k, txt, activo, fn, color) {
+    const on = activo === k;
+    const c = on ? (color || 'var(--az1)') : 'var(--brd)';
+    return `<button onclick="window.${fn}(${JSON.stringify(k).replace(/"/g, '&quot;')})"
+      style="font-size:.58rem;padding:.2rem .55rem;border-radius:3px;cursor:pointer;border:1px solid ${c};
+      background:${on ? (color || 'var(--az1)') : 'var(--bg2)'};color:${on ? '#fff' : 'var(--txt)'};
+      font-weight:${on ? '700' : '400'}">${txt}</button>`;
+  }
+
   function stFiltro() {
     const box = document.getElementById('br-st-filtro');
-    if (!box) return;
-    const ls = ['todas'].concat((ST.por_linea || []).map(x => x.k));
-    box.innerHTML = ls.map(k =>
-      `<button onclick="window._brLinea(${JSON.stringify(k).replace(/"/g, '&quot;')})"
-        style="font-size:.58rem;padding:.2rem .55rem;border-radius:3px;cursor:pointer;
-        border:1px solid ${_fLinea === k ? 'var(--az1)' : 'var(--brd)'};
-        background:${_fLinea === k ? 'var(--az1)' : 'var(--bg2)'};color:${_fLinea === k ? '#fff' : 'var(--txt)'};
-        font-weight:${_fLinea === k ? '700' : '400'}">${k === 'todas' ? 'Todas las líneas' : esc(k)}</button>`).join('');
+    if (box) {
+      box.innerHTML = ['todas'].concat((ST.por_linea || []).map(x => x.k))
+        .map(k => btn(k, k === 'todas' ? 'Todas' : esc(k), _fLinea, '_brLinea')).join('');
+    }
+    const box2 = document.getElementById('br-st-filtro-ag');
+    if (box2) {
+      // Sólo los tramos que existen, con el color del semáforo del gráfico
+      const conDatos = (ST.aging || []).filter(a => a.n > 0);
+      box2.innerHTML = btn('todas', 'Todas', _fAging, '_brAging') +
+        conDatos.map(a => btn(a.k, `${esc(a.k)} <span style="opacity:.7">(${a.n})</span>`,
+                              _fAging, '_brAging', AGING_COLOR[a.k])).join('');
+    }
   }
 
   function stDetalle() {
     const box = document.getElementById('br-st-det');
     if (!box) return;
-    const it = (ST.items || []).filter(r => _fLinea === 'todas' || r.linea === _fLinea);
+    const it = (ST.items || []).filter(r =>
+      (_fLinea === 'todas' || r.linea === _fLinea) &&
+      (_fAging === 'todas' || tramoDe(r.dias) === _fAging));
     const tot = it.reduce((s, r) => s + r.monto, 0);
+
+    const tag = document.getElementById('br-st-det-tag');
+    if (tag) tag.textContent = `${it.length} de ${(ST.items || []).length} líneas · ${nMM(tot)}`;
     const pill = d => {
       if (d == null) return '<span style="color:var(--mut)">—</span>';
       const c = d <= 30 ? '#00832F' : d <= 60 ? '#8B8200' : d <= 90 ? '#D46000' : d <= 180 ? '#C00000' : '#7A0000';
@@ -11634,7 +11675,7 @@ async function eerrExportPDF() {
             </tr>`).join('')}</tbody>
           <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
             <td colspan="6" style="padding:.35rem .6rem;font-size:.63rem">
-              TOTAL${_fLinea === 'todas' ? '' : ' · ' + esc(_fLinea)} · ${it.length} líneas</td>
+              TOTAL${_fLinea === 'todas' ? '' : ' · ' + esc(_fLinea)}${_fAging === 'todas' ? '' : ' · ' + esc(_fAging)} · ${it.length} líneas</td>
             <td style="padding:.35rem .6rem;text-align:right;font-size:.63rem;font-variant-numeric:tabular-nums">${nCLP(tot)}</td>
             <td colspan="2"></td>
           </tr></tfoot>
@@ -11643,6 +11684,7 @@ async function eerrExportPDF() {
   }
 
   window._brLinea = function (k) { _fLinea = k; stFiltro(); stDetalle(); };
+  window._brAging = function (k) { _fAging = k; stFiltro(); stDetalle(); };
 
   // Plugin: % sobre los arcos de los donuts
   const pctArcos = {

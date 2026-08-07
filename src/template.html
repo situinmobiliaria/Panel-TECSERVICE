@@ -1929,11 +1929,21 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
   </div>
 
   <div class="card">
-    <div class="ch" style="flex-wrap:wrap;gap:.5rem">
-      <span class="ct">Detalle de Repuestos en Espera</span>
-      <div id="br-st-filtro" style="display:flex;gap:.25rem;margin-left:auto;flex-wrap:wrap"></div>
+    <div class="ch"><span class="ct">Detalle de Repuestos en Espera</span>
+      <span style="font-size:.55rem;color:var(--mut);margin-left:auto" id="br-st-det-tag">—</span></div>
+    <div class="cb">
+      <div style="display:flex;flex-direction:column;gap:.4rem;margin-bottom:.7rem">
+        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+          <span style="font-size:.56rem;font-weight:700;color:var(--mut);letter-spacing:.05em;min-width:92px">LÍNEA:</span>
+          <div id="br-st-filtro" style="display:flex;gap:.25rem;flex-wrap:wrap"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+          <span style="font-size:.56rem;font-weight:700;color:var(--mut);letter-spacing:.05em;min-width:92px">ANTIGÜEDAD:</span>
+          <div id="br-st-filtro-ag" style="display:flex;gap:.25rem;flex-wrap:wrap"></div>
+        </div>
+      </div>
+      <div id="br-st-det"></div>
     </div>
-    <div class="cb"><div id="br-st-det"></div></div>
   </div>
 </div>
 
