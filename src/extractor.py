@@ -1484,8 +1484,10 @@ def read_repuestos_vendidos(wb):
 
     # celdas[(marca, anio, mes)] = [monto, cantidad]
     celdas = defaultdict(lambda: [0.0, 0.0])
-    # clientes[marca][cliente] = [monto, cantidad]
-    clientes = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0]))
+    # clientes[marca][cliente][anio] = [monto, cantidad]. Se guarda abierto por
+    # año para que el panel pueda recalcular el top de clientes según el
+    # segmentador 2025 / 2026 / ambos sin volver a leer el Excel.
+    clientes = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: [0.0, 0.0])))
     periodos = set()
 
     for row in ws.iter_rows(min_row=2, values_only=True):
@@ -1509,8 +1511,8 @@ def read_repuestos_vendidos(wb):
 
         celdas[(marca, anio, mes)][0] += monto
         celdas[(marca, anio, mes)][1] += cant
-        clientes[marca][cli][0] += monto
-        clientes[marca][cli][1] += cant
+        clientes[marca][cli][anio][0] += monto
+        clientes[marca][cli][anio][1] += cant
         periodos.add((anio, mes))
 
     if not celdas:
@@ -1521,6 +1523,7 @@ def read_repuestos_vendidos(wb):
     n = len(per)
     idx = {p: i for i, p in enumerate(per)}
 
+    anios = sorted({a for a, _ in per})
     marcas = sorted({m for (m, _, _) in celdas})
     out = {}
     for marca in marcas:
@@ -1532,18 +1535,24 @@ def read_repuestos_vendidos(wb):
             i = idx[(a, m)]
             monto[i] += v
             cant[i]  += q
-        cl = sorted(clientes[marca].items(), key=lambda x: -x[1][0])
-        top = [{"c": c, "monto": round(v[0]), "cant": round(v[1])} for c, v in cl[:3]]
-        resto = cl[3:]
+        # Lista completa de clientes abierta por año: el panel arma el top
+        # según el año seleccionado.
+        cli_out = []
+        for c, por_anio in clientes[marca].items():
+            reg = {"c": c}
+            for a in anios:
+                v, q = por_anio.get(a, [0.0, 0.0])
+                reg["m" + a[2:]] = round(v)
+                reg["q" + a[2:]] = round(q)
+            cli_out.append(reg)
+        cli_out.sort(key=lambda r: -sum(r[k] for k in r if k.startswith("m")))
         out[marca] = {
             "monto":      [round(x) for x in monto],
             "cant":       [round(x) for x in cant],
             "monto_tot":  round(sum(monto)),
             "cant_tot":   round(sum(cant)),
-            "n_clientes": len(cl),
-            "top":        top,
-            "resto_monto": round(sum(v[0] for _, v in resto)),
-            "resto_n":     len(resto),
+            "n_clientes": len(cli_out),
+            "clientes":   cli_out,
         }
 
     marcas_sorted = sorted(out, key=lambda m: -out[m]["monto_tot"])
@@ -1555,6 +1564,7 @@ def read_repuestos_vendidos(wb):
 
     return {
         "meses":       meses,
+        "anios":       anios,
         "marcas":      marcas_sorted,
         "data":        out,
         "tot_monto":   tot_monto,

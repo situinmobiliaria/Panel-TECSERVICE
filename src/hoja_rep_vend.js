@@ -1,12 +1,14 @@
 // ═══════════════════════════════════════════════════════════════
 // hoja_rep_vend.js — Venta de Repuestos (dentro de Inventario TS)
 // Réplica de la tabla dinámica "TD" (hoja Repuestos Vendidas):
-// marca × mes, con alternancia monto / cantidad, gráficos y top clientes.
+// marca × mes, con segmentador de año, alternancia monto / cantidad,
+// gráficos y top clientes.
 // Depende de: datos.js, utils.js, Chart.js
 // ═══════════════════════════════════════════════════════════════
 (function () {
   const RV = (window.APP_DATA || {}).rep_vend || {};
   let _modo = 'monto';               // 'monto' | 'cant'
+  let _anio = 'todos';               // 'todos' | '2025' | '2026'
   let _chMes = null, _chMarca = null;
 
   const nUn  = v => (v || 0).toLocaleString('es-CL', { maximumFractionDigits: 0 });
@@ -19,51 +21,133 @@
                   '#00832F','#C00000','#4C9BE8','#E8B24C','#1AA8A0','#9B59B6'];
 
   const esMonto = () => _modo === 'monto';
-  const val  = (arr, i) => (arr || [])[i] || 0;
   const fmtV = v => esMonto() ? nCLP(v) : nUn(v);
-  const fmtC = v => esMonto() ? nMM(v)  : nUn(v);
+
+  // ── Filtro de año: índices de RV.meses que entran ────────────
+  function idxs() {
+    const ms = RV.meses || [];
+    return ms.map((x, i) => (_anio === 'todos' || x.a === _anio) ? i : -1).filter(i => i >= 0);
+  }
+  function mesesSel() { const I = idxs(); return I.map(i => RV.meses[i]); }
+
+  // Suma de un array mensual sobre los meses seleccionados
+  function sumaSel(arr) {
+    if (!arr) return 0;
+    return idxs().reduce((s, i) => s + (arr[i] || 0), 0);
+  }
+  // Total de una marca según año y modo
+  function totMarca(m) {
+    const d = RV.data[m] || {};
+    return sumaSel(esMonto() ? d.monto : d.cant);
+  }
+  // Total general según año y modo
+  function totGeneral() {
+    return sumaSel(esMonto() ? RV.tot_monto : RV.tot_cant);
+  }
+  // Etiqueta del período activo
+  function lblPeriodo() {
+    const ms = mesesSel();
+    if (!ms.length) return '—';
+    if (_anio === 'todos') return `${ms[0].lbl} – ${ms[ms.length - 1].lbl}`;
+    return `${ms[0].lbl} – ${ms[ms.length - 1].lbl} · año ${_anio}`;
+  }
+  function lblAnio() {
+    return _anio === 'todos' ? 'ambos años (2025 y 2026)' : `año ${_anio}`;
+  }
+  // Clientes de una marca agregados según el año activo
+  function cliMarca(m) {
+    const d = RV.data[m] || {};
+    const anios = _anio === 'todos' ? (RV.anios || []) : [_anio];
+    return (d.clientes || []).map(r => {
+      let mo = 0, q = 0;
+      anios.forEach(a => { mo += r['m' + a.slice(2)] || 0; q += r['q' + a.slice(2)] || 0; });
+      return { c: r.c, monto: mo, cant: q };
+    }).filter(r => r.monto > 0 || r.cant > 0)
+      .sort((a, b) => b.monto - a.monto);
+  }
+
+  // ── Segmentadores ────────────────────────────────────────────
+  function seg(id, opts, activo, fn) {
+    const box = document.getElementById(id);
+    if (!box) return;
+    box.innerHTML = opts.map(([k, t]) =>
+      `<button onclick="window.${fn}('${k}')" style="font-size:.6rem;padding:.22rem .7rem;border-radius:3px;
+        border:1px solid ${activo === k ? 'var(--az1)' : 'var(--brd)'};cursor:pointer;
+        background:${activo === k ? 'var(--az1)' : 'var(--bg2)'};color:${activo === k ? '#fff' : 'var(--txt)'};
+        font-weight:${activo === k ? '700' : '400'}">${t}</button>`).join('');
+  }
+  function renderSegs() {
+    const anios = RV.anios || [];
+    seg('rv-anio', [['todos', 'Ambos años']].concat(anios.map(a => [a, a])), _anio, '_rvAnio');
+    seg('rv-modo', [['monto', 'Monto ($)'], ['cant', 'Cantidad (un)']], _modo, '_rvModo');
+  }
 
   // ── KPIs ─────────────────────────────────────────────────────
   function renderKPIs() {
     const box = document.getElementById('rv-kpi');
     if (!box) return;
-    const meses = RV.meses || [];
-    const iUlt  = meses.length - 1;
-    const ultM  = val(RV.tot_monto, iUlt);
-    const prevM = iUlt > 0 ? val(RV.tot_monto, iUlt - 1) : 0;
+    const ms   = mesesSel();
+    const I    = idxs();
+    const totM = sumaSel(RV.tot_monto);
+    const totQ = sumaSel(RV.tot_cant);
+    const iUlt = I[I.length - 1];
+    const ultM = iUlt !== undefined ? (RV.tot_monto[iUlt] || 0) : 0;
+    const iPrev = I[I.length - 2];
+    const prevM = iPrev !== undefined ? (RV.tot_monto[iPrev] || 0) : 0;
     const varP  = prevM > 0 ? ((ultM - prevM) / prevM * 100) : null;
-    const prom  = meses.length ? RV.tot_monto_g / meses.length : 0;
+    const prom  = ms.length ? totM / ms.length : 0;
+    const nCli  = new Set((RV.marcas || []).flatMap(m => cliMarca(m).map(r => r.c))).size;
+    const nMar  = (RV.marcas || []).filter(m => totMarca(m) > 0).length;
 
+    // El pie de cada indicador deja explícito de qué período son las cifras.
+    const pie = t => `<div style="font-size:.55rem;color:var(--az2);font-weight:700;margin-top:.2rem">${t}</div>`;
     const tile = (lbl, v, sub, kc) =>
       `<div class="kpi" style="--kc:${kc}">
          <div class="kpi-lbl">${lbl}</div>
          <div class="kpi-val" style="color:${kc}">${v}</div>
-         <div class="kpi-sub">${sub}</div>
+         <div class="kpi-sub">${sub}${pie(lblAnio())}</div>
        </div>`;
 
     box.innerHTML =
-      tile('Venta Total Repuestos', nMM(RV.tot_monto_g),
-           `${nUn(RV.tot_cant_g)} unidades · ${meses.length} meses`, 'var(--az3)') +
+      tile('Venta Total Repuestos', nMM(totM),
+           `${nUn(totQ)} unidades · ${ms.length} mes${ms.length === 1 ? '' : 'es'}`, 'var(--az3)') +
       tile('Promedio Mensual', nMM(prom),
-           `${meses[0] ? meses[0].lbl : ''} – ${meses[iUlt] ? meses[iUlt].lbl : ''}`, 'var(--az2)') +
-      tile(`Último Mes · ${meses[iUlt] ? meses[iUlt].lbl : ''}`, nMM(ultM),
-           varP === null ? '—'
+           ms.length ? `${ms[0].lbl} – ${ms[ms.length - 1].lbl}` : '—', 'var(--az2)') +
+      tile(`Último Mes · ${ms.length ? ms[ms.length - 1].lbl : ''}`, nMM(ultM),
+           varP === null ? 'sin mes previo en el período'
              : `<span style="color:${varP >= 0 ? 'var(--gn)' : 'var(--rd)'};font-weight:700">${varP >= 0 ? '+' : ''}${varP.toFixed(1).replace('.', ',')}%</span> vs mes anterior`,
            'var(--teal)') +
-      tile('Clientes', nUn(RV.n_clientes), `${(RV.marcas || []).length} marcas`, 'var(--am)');
+      tile('Clientes', nUn(nCli), `${nMar} marcas con venta`, 'var(--am)');
   }
 
-  // ── Selector monto / cantidad ────────────────────────────────
-  function renderModo() {
-    const box = document.getElementById('rv-modo');
-    if (!box) return;
-    const b = (k, t) =>
-      `<button onclick="window._rvModo('${k}')" style="font-size:.6rem;padding:.22rem .7rem;border-radius:3px;
-        border:1px solid ${_modo === k ? 'var(--az1)' : 'var(--brd)'};cursor:pointer;
-        background:${_modo === k ? 'var(--az1)' : 'var(--bg2)'};color:${_modo === k ? '#fff' : 'var(--txt)'};
-        font-weight:${_modo === k ? '700' : '400'}">${t}</button>`;
-    box.innerHTML = b('monto', 'Monto ($)') + b('cant', 'Cantidad (un)');
-  }
+  // ── Plugin inline: % sobre los arcos del donut ───────────────
+  // No hay chartjs-plugin-datalabels cargado; esto evita sumar otro CDN.
+  const pctEnArcos = {
+    id: 'pctEnArcos',
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart;
+      const meta = chart.getDatasetMeta(0);
+      const data = chart.data.datasets[0].data;
+      const tot  = data.reduce((s, v) => s + (v || 0), 0);
+      if (!tot) return;
+      ctx.save();
+      ctx.font = '700 10px Roboto, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      meta.data.forEach((arc, i) => {
+        const p = (data[i] || 0) / tot * 100;
+        if (p < 4) return;                       // muy angosto: no cabe
+        const { x, y } = arc.tooltipPosition();
+        const txt = p.toFixed(1).replace('.', ',') + '%';
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = 'rgba(0,0,0,.45)';
+        ctx.strokeText(txt, x, y);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(txt, x, y);
+      });
+      ctx.restore();
+    },
+  };
 
   // ── Gráfico: barras apiladas por mes ─────────────────────────
   function renderChartMes() {
@@ -71,32 +155,34 @@
     if (!ctx || !window.Chart) return;
     if (_chMes) { _chMes.destroy(); _chMes = null; }
 
-    const meses  = RV.meses || [];
+    const I      = idxs();
+    const ms     = mesesSel();
     const key    = esMonto() ? 'monto' : 'cant';
-    const marcas = RV.marcas || [];
+    const marcas = (RV.marcas || []).slice().sort((a, b) => totMarca(b) - totMarca(a))
+                     .filter(m => totMarca(m) > 0);
     const top    = marcas.slice(0, 6);
     const resto  = marcas.slice(6);
 
     const ds = top.map((m, i) => ({
       label: m.length > 22 ? m.slice(0, 21) + '…' : m,
-      data: (RV.data[m] || {})[key] || [],
+      data: I.map(j => ((RV.data[m] || {})[key] || [])[j] || 0),
       backgroundColor: COLORS[i % COLORS.length],
       borderWidth: 0, stack: 's',
     }));
     if (resto.length) {
       ds.push({
         label: `Otras (${resto.length})`,
-        data: meses.map((_, i) => resto.reduce((s, m) => s + val((RV.data[m] || {})[key], i), 0)),
+        data: I.map(j => resto.reduce((s, m) => s + (((RV.data[m] || {})[key] || [])[j] || 0), 0)),
         backgroundColor: '#B8C1D8', borderWidth: 0, stack: 's',
       });
     }
 
     const lbl = document.getElementById('rv-chart-lbl');
-    if (lbl) lbl.textContent = esMonto() ? 'en millones de pesos' : 'en unidades';
+    if (lbl) lbl.textContent = (esMonto() ? 'en millones de pesos' : 'en unidades') + ' · ' + lblAnio();
 
     _chMes = new Chart(ctx.getContext('2d'), {
       type: 'bar',
-      data: { labels: meses.map(x => x.lbl), datasets: ds },
+      data: { labels: ms.map(x => x.lbl), datasets: ds },
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
@@ -127,15 +213,15 @@
     if (!ctx || !window.Chart) return;
     if (_chMarca) { _chMarca.destroy(); _chMarca = null; }
 
-    const key    = esMonto() ? 'monto_tot' : 'cant_tot';
-    const marcas = RV.marcas || [];
+    const marcas = (RV.marcas || []).slice().sort((a, b) => totMarca(b) - totMarca(a))
+                     .filter(m => totMarca(m) > 0);
     const top    = marcas.slice(0, 7);
     const resto  = marcas.slice(7);
     const labels = top.map(m => m.length > 20 ? m.slice(0, 19) + '…' : m);
-    const data   = top.map(m => (RV.data[m] || {})[key] || 0);
+    const data   = top.map(m => totMarca(m));
     if (resto.length) {
       labels.push(`Otras (${resto.length})`);
-      data.push(resto.reduce((s, m) => s + ((RV.data[m] || {})[key] || 0), 0));
+      data.push(resto.reduce((s, m) => s + totMarca(m), 0));
     }
     const tot = data.reduce((s, v) => s + v, 0);
 
@@ -146,12 +232,13 @@
         datasets: [{ data, backgroundColor: COLORS.slice(0, top.length).concat(['#B8C1D8']), borderWidth: 2, borderColor: 'var(--wh)' }],
       },
       options: {
-        responsive: true, maintainAspectRatio: false, cutout: '58%',
+        responsive: true, maintainAspectRatio: false, cutout: '52%',
         plugins: {
           legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 8 }, padding: 6 } },
           tooltip: { callbacks: { label: c => ` ${c.label}: ${fmtV(c.raw)} (${pc(c.raw, tot)})` } },
         },
       },
+      plugins: [pctEnArcos],
     });
   }
 
@@ -159,17 +246,18 @@
   function renderTable() {
     const box = document.getElementById('rv-table');
     if (!box) return;
-    const meses  = RV.meses || [];
-    const marcas = RV.marcas || [];
+    const I  = idxs();
+    const ms = mesesSel();
+    const marcas = (RV.marcas || []).slice().sort((a, b) => totMarca(b) - totMarca(a))
+                     .filter(m => totMarca(m) > 0);
     if (!marcas.length) {
-      box.innerHTML = '<p style="padding:1.4rem;color:var(--mut);font-style:italic">Sin datos de venta de repuestos.</p>';
+      box.innerHTML = '<p style="padding:1.4rem;color:var(--mut);font-style:italic">Sin datos para el período seleccionado.</p>';
       return;
     }
-    const key    = esMonto() ? 'monto' : 'cant';
-    const keyTot = esMonto() ? 'monto_tot' : 'cant_tot';
-    const totG   = esMonto() ? RV.tot_monto_g : RV.tot_cant_g;
-    const totArr = esMonto() ? RV.tot_monto   : RV.tot_cant;
-    const SEP    = 'border-right:1px solid var(--brd)';
+    const key  = esMonto() ? 'monto' : 'cant';
+    const totG = totGeneral();
+    const arrT = esMonto() ? RV.tot_monto : RV.tot_cant;
+    const SEP  = 'border-right:1px solid var(--brd)';
 
     const th = (t, al, extra) =>
       `<th style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;padding:.4rem .55rem;
@@ -178,44 +266,46 @@
 
     const rows = marcas.map((m, i) => {
       const d = RV.data[m] || {};
-      const zebra = i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)';
-      const celdas = meses.map((_, j) => {
-        const v = val(d[key], j);
+      const z = i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)';
+      const celdas = I.map(j => {
+        const v = (d[key] || [])[j] || 0;
         return `<td style="padding:.3rem .55rem;text-align:right;font-size:.63rem;
           font-variant-numeric:tabular-nums;color:${v ? 'var(--txt)' : 'var(--mut)'};${SEP}">${v ? fmtV(v) : '—'}</td>`;
       }).join('');
-      return `<tr style="background:${zebra}">
+      const tm = totMarca(m);
+      return `<tr style="background:${z}">
         <td style="padding:.3rem .55rem;font-size:.66rem;font-weight:600;white-space:nowrap;
-                   position:sticky;left:0;background:${zebra};z-index:1;${SEP}" title="${esc(m)}">${esc(m)}</td>
+                   position:sticky;left:0;background:${z};z-index:1;${SEP}" title="${esc(m)}">${esc(m)}</td>
         ${celdas}
         <td style="padding:.3rem .55rem;text-align:right;font-size:.66rem;font-weight:700;
-                   font-variant-numeric:tabular-nums;${SEP}">${fmtV(d[keyTot])}</td>
-        <td style="padding:.3rem .55rem;text-align:right;font-size:.6rem;color:var(--mut)">${pc(d[keyTot], totG)}</td>
+                   font-variant-numeric:tabular-nums;${SEP}">${fmtV(tm)}</td>
+        <td style="padding:.3rem .55rem;text-align:right;font-size:.6rem;color:var(--mut)">${pc(tm, totG)}</td>
       </tr>`;
     }).join('');
 
     box.innerHTML = `
       <div style="overflow-x:auto;max-height:520px;overflow-y:auto">
-        <table style="width:100%;border-collapse:collapse;min-width:1100px">
+        <table style="width:100%;border-collapse:collapse;min-width:${260 + ms.length * 62}px">
           <thead><tr>
             ${th('MARCA', 'left', 'position:sticky;left:0;z-index:3;min-width:180px')}
-            ${meses.map(x => th(x.lbl.toUpperCase(), 'right')).join('')}
+            ${ms.map(x => th(x.lbl.toUpperCase(), 'right')).join('')}
             ${th('TOTAL', 'right')}
             ${th('%', 'right')}
           </tr></thead>
           <tbody>${rows}</tbody>
           <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
             <td style="padding:.4rem .55rem;font-size:.66rem;position:sticky;left:0;background:var(--az3);z-index:1;${SEP}">TOTAL</td>
-            ${meses.map((_, j) => `<td style="padding:.4rem .55rem;text-align:right;font-size:.63rem;
-              font-variant-numeric:tabular-nums;${SEP}">${fmtV(val(totArr, j))}</td>`).join('')}
+            ${I.map(j => `<td style="padding:.4rem .55rem;text-align:right;font-size:.63rem;
+              font-variant-numeric:tabular-nums;${SEP}">${fmtV((arrT || [])[j] || 0)}</td>`).join('')}
             <td style="padding:.4rem .55rem;text-align:right;font-size:.66rem;font-variant-numeric:tabular-nums;${SEP}">${fmtV(totG)}</td>
             <td style="padding:.4rem .55rem;text-align:right;font-size:.6rem">100%</td>
           </tr></tfoot>
         </table>
       </div>
       <p style="font-size:.56rem;color:var(--mut);margin:.5rem 0 0;line-height:1.4">
-        Fuente: hoja «Repuestos Vendidas», campo «Precio de venta» agrupado por «Marca 2» y mes.
-        Incluye todos los estados de cotización (Aprobado, En borrador y Rechazado), igual que la tabla dinámica del Excel.
+        Período: <strong>${lblPeriodo()}</strong>. Fuente: hoja «Repuestos Vendidas», campo «Precio de venta»
+        agrupado por «Marca 2» y mes. Incluye todos los estados de cotización (Aprobado, En borrador y
+        Rechazado), igual que la tabla dinámica del Excel.
       </p>`;
   }
 
@@ -223,40 +313,43 @@
   function renderClientes() {
     const box = document.getElementById('rv-cli-table');
     if (!box) return;
-    const marcas = (RV.marcas || []).filter(m => (RV.data[m] || {}).monto_tot > 0);
+    const marcas = (RV.marcas || []).slice().sort((a, b) => totMarca(b) - totMarca(a))
+                     .filter(m => totMarca(m) > 0);
     if (!marcas.length) { box.innerHTML = ''; return; }
     const SEP = 'border-right:1px solid var(--brd)';
     const th = (t, al) =>
       `<th style="background:var(--az1);color:#fff;padding:.4rem .6rem;font-size:.58rem;
         letter-spacing:.03em;text-align:${al};white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)">${t}</th>`;
-
     const MED = ['#C9A227', '#9AA5B1', '#B06E3B'];   // oro, plata, bronce
+
     const rows = marcas.map((m, i) => {
-      const d     = RV.data[m] || {};
-      const zebra = i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)';
-      const top   = d.top || [];
-      const nf    = Math.max(top.length, 1);
+      const cl  = cliMarca(m);
+      if (!cl.length) return '';
+      const z   = i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)';
+      const top = cl.slice(0, 3);
+      const res = cl.slice(3);
+      const tm  = cl.reduce((s, r) => s + r.monto, 0);
       return top.map((t, k) => `
-        <tr style="background:${zebra}">
-          ${k === 0 ? `<td rowspan="${nf}" style="padding:.3rem .6rem;font-size:.66rem;font-weight:600;
+        <tr style="background:${z}">
+          ${k === 0 ? `<td rowspan="${top.length}" style="padding:.3rem .6rem;font-size:.66rem;font-weight:600;
               white-space:nowrap;vertical-align:top;${SEP}">${esc(m)}
               <div style="font-size:.55rem;color:var(--mut);font-weight:400;margin-top:.15rem">
-                ${d.n_clientes} cliente${d.n_clientes === 1 ? '' : 's'}</div></td>` : ''}
+                ${cl.length} cliente${cl.length === 1 ? '' : 's'}</div></td>` : ''}
           <td style="padding:.3rem .6rem;text-align:center;font-size:.62rem;font-weight:700;
                      color:${MED[k] || 'var(--mut)'};${SEP}">${k + 1}</td>
           <td style="padding:.3rem .6rem;font-size:.64rem;${SEP}" title="${esc(t.c)}">${esc(t.c)}</td>
           <td style="padding:.3rem .6rem;text-align:right;font-size:.64rem;font-weight:600;
                      font-variant-numeric:tabular-nums;${SEP}">${nCLP(t.monto)}</td>
           <td style="padding:.3rem .6rem;text-align:right;font-size:.62rem;color:var(--mut);${SEP}">${nUn(t.cant)}</td>
-          <td style="padding:.3rem .6rem;text-align:right;font-size:.62rem;color:var(--mut)">${pc(t.monto, d.monto_tot)}</td>
-        </tr>`).join('') + (d.resto_n > 0 ? `
-        <tr style="background:${zebra}">
-          <td style="padding:.22rem .6rem;font-size:.58rem;color:var(--mut);font-style:italic;${SEP}"></td>
-          <td style="padding:.22rem .6rem;font-size:.58rem;color:var(--mut);font-style:italic;${SEP}">
-            otros ${d.resto_n} cliente${d.resto_n === 1 ? '' : 's'}</td>
-          <td style="padding:.22rem .6rem;text-align:right;font-size:.58rem;color:var(--mut);${SEP}">${nCLP(d.resto_monto)}</td>
+          <td style="padding:.3rem .6rem;text-align:right;font-size:.62rem;color:var(--mut)">${pc(t.monto, tm)}</td>
+        </tr>`).join('') + (res.length ? `
+        <tr style="background:${z}">
           <td style="${SEP}"></td>
-          <td style="padding:.22rem .6rem;text-align:right;font-size:.58rem;color:var(--mut)">${pc(d.resto_monto, d.monto_tot)}</td>
+          <td style="padding:.22rem .6rem;font-size:.58rem;color:var(--mut);font-style:italic;${SEP}">
+            otros ${res.length} cliente${res.length === 1 ? '' : 's'}</td>
+          <td style="padding:.22rem .6rem;text-align:right;font-size:.58rem;color:var(--mut);${SEP}">${nCLP(res.reduce((s, r) => s + r.monto, 0))}</td>
+          <td style="padding:.22rem .6rem;text-align:right;font-size:.58rem;color:var(--mut);${SEP}">${nUn(res.reduce((s, r) => s + r.cant, 0))}</td>
+          <td style="padding:.22rem .6rem;text-align:right;font-size:.58rem;color:var(--mut)">${pc(res.reduce((s, r) => s + r.monto, 0), tm)}</td>
         </tr>` : '');
     }).join('');
 
@@ -269,28 +362,22 @@
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
-      </div>`;
+      </div>
+      <p style="font-size:.56rem;color:var(--mut);margin:.5rem 0 0">Período: <strong>${lblPeriodo()}</strong>.</p>`;
   }
 
-  window._rvModo = function (k) {
-    if (_modo === k) return;
-    _modo = k;
-    renderModo();
-    renderTable();
-    renderChartMes();
-    renderChartMarca();
-  };
+  function repintar() {
+    renderSegs(); renderKPIs(); renderTable();
+    renderClientes(); renderChartMes(); renderChartMarca();
+    const p = document.getElementById('rv-periodo');
+    if (p) p.textContent = lblPeriodo();
+  }
+
+  window._rvModo = function (k) { if (_modo !== k) { _modo = k; repintar(); } };
+  window._rvAnio = function (k) { if (_anio !== k) { _anio = k; repintar(); } };
 
   window.initRepVend = function () {
     if (!(RV.marcas || []).length) return;
-    const meses = RV.meses || [];
-    const p = document.getElementById('rv-periodo');
-    if (p && meses.length) p.textContent = `${meses[0].lbl} – ${meses[meses.length - 1].lbl}`;
-    renderKPIs();
-    renderModo();
-    renderTable();
-    renderClientes();
-    renderChartMes();
-    renderChartMarca();
+    repintar();
   };
 })();
