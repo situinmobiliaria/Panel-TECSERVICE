@@ -70,11 +70,18 @@ PPTO_ANUAL_TOTAL = 2_724_000_000   # Presupuesto anual total del área (CLP)
 
 EJECUTIVOS_VISITAS = ["Eglys Ramirez", "Cristian Perez"]
 
+# IMPORTANTE: esta lista debe estar sincronizada con $jsFiles en build.ps1.
+# Si un archivo falta aquí, esa hoja simplemente no existe en el standalone
+# (dashboard_contratos_v16.2.html) aunque sí funcione en index.html. Faltaban
+# base_instalada, mapa, matriz, casos y pdf, así que esas 5 hojas nunca se
+# generaron en el standalone. main() ahora avisa si las listas divergen.
 JS_FILES = [
     "utils.js", "datos.js", "hoja_resumen.js", "hoja_tipos.js", "hoja_nuevos.js",
     "hoja_vencimientos.js", "hoja_vision.js", "hoja_presupuesto.js",
-    "hoja_facturacion.js", "hoja_panelfact.js", "hoja_satisfaccion.js", "hoja_visitas.js",
-    "hoja_alerta.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js", "hoja_brechas.js",
+    "hoja_facturacion.js", "hoja_panelfact.js", "hoja_base_instalada.js", "hoja_satisfaccion.js",
+    "hoja_visitas.js", "hoja_mapa.js", "hoja_matriz.js", "hoja_casos.js", "hoja_alerta.js",
+    "hoja_pdf.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js",
+    "hoja_brechas.js",
 ]
 
 ANO   = date.today().year
@@ -2805,12 +2812,37 @@ def build_final_html(html, datos_js_patched):
 # MAIN
 
 # ══════════════════════════════════════════════════════════════════════════════
+def _check_js_files():
+    """Avisa si JS_FILES y $jsFiles de build.ps1 divergen.
+
+    Son dos listas separadas: JS_FILES arma el standalone y $jsFiles arma
+    index.html. Si un archivo está sólo en una, esa hoja funciona en un
+    entregable y no existe en el otro, sin ningún error visible."""
+    ps = os.path.join(DIR, "build.ps1")
+    if not os.path.exists(ps):
+        return
+    with open(ps, encoding="utf-8", errors="ignore") as f:
+        txt = f.read()
+    m = re.search(r"\$jsFiles\s*=\s*@\((.*?)\)", txt, re.S)
+    if not m:
+        return
+    en_ps  = set(re.findall(r"'([^']+\.js)'", m.group(1)))
+    en_py  = set(JS_FILES)
+    faltan_py = en_ps - en_py
+    faltan_ps = en_py - en_ps
+    if faltan_py:
+        print(f"  AVISO: en build.ps1 pero NO en JS_FILES (faltarian en el standalone): {sorted(faltan_py)}")
+    if faltan_ps:
+        print(f"  AVISO: en JS_FILES pero NO en build.ps1 (faltarian en index.html): {sorted(faltan_ps)}")
+
+
 def main():
     print("=" * 60)
     print("  EXTRACTOR DASHBOARD CONTRATOS TECSERVICE")
     print(f"  Excel : {os.path.basename(XLSX)}")
     print(f"  Fecha : {TODAY}  |  Ano : {ANO}")
     print("=" * 60)
+    _check_js_files()
 
     # Detectar archivo: si existe .xlsb, convertir a xlsx temporal (siempre fresco)
     xlsx_to_use = XLSX
