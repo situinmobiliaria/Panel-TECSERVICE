@@ -9,7 +9,8 @@
   const RV = (window.APP_DATA || {}).rep_vend || {};
   let _modo = 'monto';               // 'monto' | 'cant'
   let _anio = 'todos';               // 'todos' | '2025' | '2026'
-  let _chMes = null, _chMarca = null;
+  let _cli  = null;                  // cliente seleccionado en el gráfico
+  let _chMes = null, _chMarca = null, _chCli = null;
 
   const nUn  = v => (v || 0).toLocaleString('es-CL', { maximumFractionDigits: 0 });
   const nCLP = v => '$' + Math.round(v || 0).toLocaleString('es-CL');
@@ -366,15 +367,114 @@
       <p style="font-size:.56rem;color:var(--mut);margin:.5rem 0 0">Período: <strong>${lblPeriodo()}</strong>.</p>`;
   }
 
+  // ── Evolución mensual de un cliente ──────────────────────────
+  // Total de un cliente en el período activo
+  function totCli(c) {
+    const d = (RV.cli_serie || {})[c];
+    if (!d) return 0;
+    return sumaSel(esMonto() ? d.monto : d.cant);
+  }
+  // Clientes con venta en el período, de mayor a menor
+  function clientesOrdenados() {
+    return Object.keys(RV.cli_serie || {})
+      .filter(c => sumaSel((RV.cli_serie[c] || {}).monto) > 0)
+      .sort((a, b) => sumaSel(RV.cli_serie[b].monto) - sumaSel(RV.cli_serie[a].monto));
+  }
+
+  function renderCliSelect() {
+    const sel = document.getElementById('rv-cli-sel');
+    if (!sel) return;
+    const cl = clientesOrdenados();
+    if (!cl.length) { sel.innerHTML = ''; _cli = null; return; }
+    // Si el cliente elegido no vendió en el período, cae al primero
+    if (!_cli || cl.indexOf(_cli) === -1) _cli = cl[0];
+    sel.innerHTML = cl.map((c, i) =>
+      `<option value="${esc(c)}"${c === _cli ? ' selected' : ''}>${i + 1}. ${esc(c)} — ${nMM(sumaSel(RV.cli_serie[c].monto))}</option>`
+    ).join('');
+    const lbl = document.getElementById('rv-cli-lbl');
+    if (lbl) lbl.textContent = `${cl.length} clientes con venta · ${lblAnio()}`;
+  }
+
+  function renderCliKPI() {
+    const box = document.getElementById('rv-cli-kpi');
+    if (!box) return;
+    const d = (RV.cli_serie || {})[_cli];
+    if (!d) { box.innerHTML = ''; return; }
+    const I    = idxs();
+    const mo   = sumaSel(d.monto);
+    const qt   = sumaSel(d.cant);
+    const act  = I.filter(i => (d.monto[i] || 0) > 0).length;
+    const totG = sumaSel(RV.tot_monto);
+    const mejor = I.reduce((b, i) => (d.monto[i] || 0) > (d.monto[b] || 0) ? i : b, I[0]);
+
+    const chip = (lbl, v) =>
+      `<div style="background:var(--bg2);border-left:3px solid var(--az2);border-radius:5px;padding:.35rem .7rem">
+         <div style="font-size:.53rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">${lbl}</div>
+         <div style="font-size:.8rem;font-weight:800;color:var(--az1);font-variant-numeric:tabular-nums">${v}</div>
+       </div>`;
+    box.innerHTML =
+      chip('Vendido', nMM(mo)) +
+      chip('Unidades', nUn(qt)) +
+      chip('% del total', pc(mo, totG)) +
+      chip('Meses con venta', `${act} de ${I.length}`) +
+      chip('Mejor mes', mejor !== undefined ? `${RV.meses[mejor].lbl} · ${nMM(d.monto[mejor] || 0)}` : '—') +
+      chip('Marcas', `${d.n_marcas} · ${(d.marcas[0] || ['—'])[0]}`);
+  }
+
+  function renderChartCli() {
+    const ctx = document.getElementById('cRvCli');
+    if (!ctx || !window.Chart) return;
+    if (_chCli) { _chCli.destroy(); _chCli = null; }
+    const d = (RV.cli_serie || {})[_cli];
+    if (!d) return;
+    const I   = idxs();
+    const ms  = mesesSel();
+    const key = esMonto() ? 'monto' : 'cant';
+    const serie = I.map(i => (d[key] || [])[i] || 0);
+    // Promedio del período como línea de referencia
+    const prom = serie.length ? serie.reduce((s, v) => s + v, 0) / serie.length : 0;
+
+    _chCli = new Chart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: ms.map(x => x.lbl),
+        datasets: [
+          { label: _cli.length > 40 ? _cli.slice(0, 39) + '…' : _cli,
+            data: serie, backgroundColor: '#002D73CC', borderColor: '#002D73',
+            borderWidth: 1, borderRadius: 3, order: 2 },
+          { label: 'Promedio del período', data: ms.map(() => prom), type: 'line',
+            borderColor: '#FFC000', borderWidth: 2, borderDash: [5, 4],
+            pointRadius: 0, fill: false, order: 1 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 8 }, padding: 8 } },
+          tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmtV(c.raw)}` } },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 8 } } },
+          y: { beginAtZero: true, grid: { color: '#E2E6F033' },
+               ticks: { font: { size: 8 }, callback: v => esMonto() ? Math.round(v / 1e6) : nUn(v) },
+               title: { display: true, text: esMonto() ? 'MM$' : 'unidades', font: { size: 8 }, color: '#6B7BA8' } },
+        },
+      },
+    });
+  }
+
   function repintar() {
     renderSegs(); renderKPIs(); renderTable();
     renderClientes(); renderChartMes(); renderChartMarca();
+    renderCliSelect(); renderCliKPI(); renderChartCli();
     const p = document.getElementById('rv-periodo');
     if (p) p.textContent = lblPeriodo();
   }
 
   window._rvModo = function (k) { if (_modo !== k) { _modo = k; repintar(); } };
   window._rvAnio = function (k) { if (_anio !== k) { _anio = k; repintar(); } };
+  window._rvCli  = function (c) { _cli = c; renderCliKPI(); renderChartCli(); };
 
   window.initRepVend = function () {
     if (!(RV.marcas || []).length) return;

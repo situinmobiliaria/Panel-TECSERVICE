@@ -1488,6 +1488,10 @@ def read_repuestos_vendidos(wb):
     # año para que el panel pueda recalcular el top de clientes según el
     # segmentador 2025 / 2026 / ambos sin volver a leer el Excel.
     clientes = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: [0.0, 0.0])))
+    # cli_mes[(cliente, anio, mes)] = [monto, cantidad] — serie mensual por
+    # cliente, para el gráfico de evolución con selector de cliente.
+    cli_mes   = defaultdict(lambda: [0.0, 0.0])
+    cli_marca = defaultdict(lambda: defaultdict(float))
     periodos = set()
 
     for row in ws.iter_rows(min_row=2, values_only=True):
@@ -1513,6 +1517,9 @@ def read_repuestos_vendidos(wb):
         celdas[(marca, anio, mes)][1] += cant
         clientes[marca][cli][anio][0] += monto
         clientes[marca][cli][anio][1] += cant
+        cli_mes[(cli, anio, mes)][0] += monto
+        cli_mes[(cli, anio, mes)][1] += cant
+        cli_marca[cli][marca] += monto
         periodos.add((anio, mes))
 
     if not celdas:
@@ -1562,6 +1569,27 @@ def read_repuestos_vendidos(wb):
     for marca in clientes:
         todos_cli.update(clientes[marca].keys())
 
+    # Serie mensual por cliente (para el gráfico con selector de cliente)
+    cli_out = {}
+    for c in todos_cli:
+        mo = [0.0] * n
+        qt = [0.0] * n
+        for (ck, a, m), (v, q) in cli_mes.items():
+            if ck != c:
+                continue
+            i = idx[(a, m)]
+            mo[i] += v
+            qt[i] += q
+        mk = sorted(cli_marca[c].items(), key=lambda x: -x[1])
+        cli_out[c] = {
+            "monto":     [round(x) for x in mo],
+            "cant":      [round(x) for x in qt],
+            "monto_tot": round(sum(mo)),
+            "cant_tot":  round(sum(qt)),
+            "marcas":    [[k, round(v)] for k, v in mk[:5]],
+            "n_marcas":  len(mk),
+        }
+
     return {
         "meses":       meses,
         "anios":       anios,
@@ -1572,6 +1600,7 @@ def read_repuestos_vendidos(wb):
         "tot_monto_g": sum(tot_monto),
         "tot_cant_g":  sum(tot_cant),
         "n_clientes":  len(todos_cli),
+        "cli_serie":   cli_out,
     }
 
 
