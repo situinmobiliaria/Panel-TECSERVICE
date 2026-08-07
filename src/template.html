@@ -745,6 +745,26 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
       <div style="color:var(--mut);font-size:.7rem;text-align:center;padding:1rem">Cargando…</div>
     </div>
   </div>
+
+  <!-- ─── INVENTARIO Y VENTA DE REPUESTOS ──────────────────────── -->
+  <div class="sh" style="margin-top:1.4rem"><h2>Inventario y Venta de Repuestos</h2><div class="sh-line"></div>
+    <span class="sh-tag">Repuestos en bodega y venta del período <strong id="rs-rep-per">—</strong></span></div>
+
+  <div id="rs-rep-kpi" class="g5" style="grid-template-columns:repeat(4,1fr)"></div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:.9rem">
+    <div class="card">
+      <div class="ch"><span class="ct">Venta Mensual de Repuestos</span>
+        <button class="btn" onclick="sv('invts',document.querySelector('.nb[onclick*=invts]'))"
+          style="font-size:.6rem;margin-left:auto">Ver detalle →</button></div>
+      <div class="cb"><div style="position:relative;height:230px"><canvas id="cRsRepMes"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="ch"><span class="ct">Inventario vs Venta por Marca</span>
+        <span style="font-size:.55rem;color:var(--mut);margin-left:auto">top 10 por stock valorizado</span></div>
+      <div class="cb"><div style="position:relative;height:230px"><canvas id="cRsRepMarca"></canvas></div></div>
+    </div>
+  </div>
 </div>
 
 <!-- ═══ TIPOS DE CONTRATO ═══ -->

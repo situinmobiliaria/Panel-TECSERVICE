@@ -745,6 +745,26 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
       <div style="color:var(--mut);font-size:.7rem;text-align:center;padding:1rem">Cargando…</div>
     </div>
   </div>
+
+  <!-- ─── INVENTARIO Y VENTA DE REPUESTOS ──────────────────────── -->
+  <div class="sh" style="margin-top:1.4rem"><h2>Inventario y Venta de Repuestos</h2><div class="sh-line"></div>
+    <span class="sh-tag">Repuestos en bodega y venta del período <strong id="rs-rep-per">—</strong></span></div>
+
+  <div id="rs-rep-kpi" class="g5" style="grid-template-columns:repeat(4,1fr)"></div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:.9rem">
+    <div class="card">
+      <div class="ch"><span class="ct">Venta Mensual de Repuestos</span>
+        <button class="btn" onclick="sv('invts',document.querySelector('.nb[onclick*=invts]'))"
+          style="font-size:.6rem;margin-left:auto">Ver detalle →</button></div>
+      <div class="cb"><div style="position:relative;height:230px"><canvas id="cRsRepMes"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="ch"><span class="ct">Inventario vs Venta por Marca</span>
+        <span style="font-size:.55rem;color:var(--mut);margin-left:auto">top 10 por stock valorizado</span></div>
+      <div class="cb"><div style="position:relative;height:230px"><canvas id="cRsRepMarca"></canvas></div></div>
+    </div>
+  </div>
 </div>
 
 <!-- ═══ TIPOS DE CONTRATO ═══ -->
@@ -10956,6 +10976,160 @@ async function eerrExportPDF() {
     if (!(RV.marcas || []).length) return;
     repintar();
   };
+
+  // ═══════════════════════════════════════════════════════════════
+  // BLOQUE EN LA HOJA RESUMEN
+  // ═══════════════════════════════════════════════════════════════
+  const INV = (window.APP_DATA || {}).inv_ts || {};
+
+  // La marca se escribe distinto en cada hoja del Excel: "Marca 2" en
+  // Repuestos Vendidas vs "FirmName" en Inventario Bodega. 15 de 20 calzan
+  // exacto; estas son las que no. "OTROS (SIN MARCA ATRIBUIBLE)" y "AT GROUP"
+  // no tienen equivalente en inventario y quedan fuera del comparativo.
+  const ALIAS_INV = {
+    'PENTAX': 'PENTAX MEDICAL',
+    'DDC DOLPHIN': 'DDC',
+    'BIEN AIR': 'BIEN-AIR',
+  };
+  const invDeMarca = m => (INV.data || {})[ALIAS_INV[m] || m];
+
+  let _chRsMes = null, _chRsMarca = null;
+
+  function rsKPIs() {
+    const box = document.getElementById('rs-rep-kpi');
+    if (!box) return;
+    const ms  = RV.meses || [];
+    const n   = ms.length;
+    // Rotación: venta de los últimos 12 meses sobre el stock valorizado de hoy
+    const u12 = RV.tot_monto.slice(Math.max(0, n - 12)).reduce((s, v) => s + v, 0);
+    const rot = INV.total_costo ? u12 / INV.total_costo : 0;
+    const i26 = ms.map((x, i) => x.a === '2026' ? i : -1).filter(i => i >= 0);
+    const v26 = i26.reduce((s, i) => s + (RV.tot_monto[i] || 0), 0);
+    const i25 = ms.map((x, i) => x.a === '2025' ? i : -1).filter(i => i >= 0);
+    const v25 = i25.reduce((s, i) => s + (RV.tot_monto[i] || 0), 0);
+    const top = (RV.marcas || [])[0];
+
+    const tile = (lbl, v, sub, kc) =>
+      `<div class="kpi" style="--kc:${kc}">
+         <div class="kpi-lbl">${lbl}</div>
+         <div class="kpi-val" style="color:${kc}">${v}</div>
+         <div class="kpi-sub">${sub}</div>
+       </div>`;
+
+    box.innerHTML =
+      tile('Inventario Valorizado', nMM(INV.total_costo),
+           `${nUn(INV.total_skus)} SKU · ${nUn(INV.n_marcas)} marcas`, 'var(--az3)') +
+      tile(`Venta Repuestos ${i26.length ? '2026' : ''}`, nMM(v26),
+           i25.length ? `2025: ${nMM(v25)} (${ms[i25[0]].lbl}–${ms[i25[i25.length-1]].lbl})` : '—', 'var(--az2)') +
+      tile('Rotación Inventario', rot.toFixed(2).replace('.', ',') + 'x',
+           'venta últimos 12 meses / stock', rot >= 1 ? 'var(--gn)' : 'var(--am)') +
+      tile('Marca Principal', top ? (top.length > 16 ? top.slice(0, 15) + '…' : top) : '—',
+           top ? `${nMM(RV.data[top].monto_tot)} · ${pc(RV.data[top].monto_tot, RV.tot_monto_g)} de la venta` : '—',
+           'var(--teal)');
+
+    const per = document.getElementById('rs-rep-per');
+    if (per && n) per.textContent = `${ms[0].lbl} – ${ms[n - 1].lbl}`;
+  }
+
+  function rsChartMes() {
+    const ctx = document.getElementById('cRsRepMes');
+    if (!ctx || !window.Chart) return;
+    if (_chRsMes) { _chRsMes.destroy(); _chRsMes = null; }
+    const ms   = RV.meses || [];
+    const dat  = RV.tot_monto || [];
+    const prom = dat.length ? dat.reduce((s, v) => s + v, 0) / dat.length : 0;
+
+    _chRsMes = new Chart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: ms.map(x => x.lbl),
+        datasets: [
+          { label: 'Venta repuestos', data: dat,
+            backgroundColor: ms.map(x => x.a === '2026' ? '#002D73CC' : '#33448D77'),
+            borderColor: ms.map(x => x.a === '2026' ? '#002D73' : '#33448D'),
+            borderWidth: 1, borderRadius: 3, order: 2 },
+          { label: 'Promedio', data: ms.map(() => prom), type: 'line',
+            borderColor: '#FFC000', borderWidth: 2, borderDash: [5, 4],
+            pointRadius: 0, fill: false, order: 1 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${nCLP(c.raw)}` } },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 8 } } },
+          y: { beginAtZero: true, grid: { color: '#E2E6F033' },
+               ticks: { font: { size: 8 }, callback: v => Math.round(v / 1e6) },
+               title: { display: true, text: 'MM$', font: { size: 8 }, color: '#6B7BA8' } },
+        },
+      },
+    });
+  }
+
+  function rsChartMarca() {
+    const ctx = document.getElementById('cRsRepMarca');
+    if (!ctx || !window.Chart || !INV.marcas) return;
+    if (_chRsMarca) { _chRsMarca.destroy(); _chRsMarca = null; }
+
+    // Top 10 por stock valorizado, con su venta del período al lado
+    const ventaDe = {};
+    (RV.marcas || []).forEach(m => {
+      const k = ALIAS_INV[m] || m;
+      ventaDe[k] = (ventaDe[k] || 0) + RV.data[m].monto_tot;
+    });
+    const top = INV.marcas.slice(0, 10);
+
+    _chRsMarca = new Chart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: top.map(m => m.length > 15 ? m.slice(0, 14) + '…' : m),
+        datasets: [
+          { label: 'Stock valorizado', data: top.map(m => INV.data[m].ct),
+            backgroundColor: '#33448DCC', borderColor: '#33448D', borderWidth: 1, borderRadius: 2 },
+          { label: 'Venta del período', data: top.map(m => ventaDe[m] || 0),
+            backgroundColor: '#28D2C3CC', borderColor: '#28D2C3', borderWidth: 1, borderRadius: 2 },
+        ],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 8 }, padding: 7 } },
+          tooltip: {
+            callbacks: {
+              label: c => ` ${c.dataset.label}: ${nCLP(c.raw)}`,
+              footer: it => {
+                const s = it.find(x => x.datasetIndex === 0), v = it.find(x => x.datasetIndex === 1);
+                if (!s || !v || !s.raw) return '';
+                return 'Rotación: ' + (v.raw / s.raw).toFixed(2).replace('.', ',') + 'x';
+              },
+            },
+          },
+        },
+        scales: {
+          x: { beginAtZero: true, grid: { color: '#E2E6F033' },
+               ticks: { font: { size: 8 }, callback: v => Math.round(v / 1e6) },
+               title: { display: true, text: 'MM$', font: { size: 8 }, color: '#6B7BA8' } },
+          y: { grid: { display: false }, ticks: { font: { size: 8 } } },
+        },
+      },
+    });
+  }
+
+  function initResumenRep() {
+    if (!(RV.marcas || []).length) return;
+    rsKPIs(); rsChartMes(); rsChartMarca();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initResumenRep);
+  } else {
+    initResumenRep();
+  }
 })();
 </script>
 <script>
