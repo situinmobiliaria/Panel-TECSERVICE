@@ -9788,7 +9788,7 @@ async function eerrExportPDF() {
     <span class="sh-tag">Inventario de repuestos valorizado en bodega · Datos al <strong id="invts-fecha">—</strong></span>
   </div>
 
-  <div id="invts-kpi" style="display:flex;gap:.7rem;flex-wrap:wrap;margin-bottom:.9rem"></div>
+  <div id="invts-kpi" class="g5" style="grid-template-columns:repeat(4,1fr)"></div>
 
   <div class="card">
     <div class="ch"><span class="ct">Resumen de Inventario por Marca</span></div>
@@ -10208,27 +10208,22 @@ async function eerrExportPDF() {
   function renderKPIs() {
     const box = document.getElementById('invts-kpi');
     if (!box) return;
-    // Fondo de color sólido con degradado, mismo lenguaje que las barras
-    // .f-gn / .f-rd del tablero. Los cuatro tonos llevan texto blanco.
-    const tile = (lbl, val, sub, c1, c2, accent) =>
-      `<div style="background:linear-gradient(135deg,${c1},${c2});border-radius:8px;
-                   padding:.75rem 1.05rem;flex:1;min-width:150px;color:#fff;
-                   box-shadow:0 1px 3px rgba(0,0,0,.18)">
-         <div style="font-size:.57rem;text-transform:uppercase;letter-spacing:.07em;
-                     color:rgba(255,255,255,.72);margin-bottom:.35rem">${lbl}</div>
-         <div style="font-family:'Roboto Condensed',sans-serif;font-weight:900;font-size:1.4rem;
-                     color:${accent};font-variant-numeric:tabular-nums;line-height:1">${val}</div>
-         <div style="font-size:.6rem;color:rgba(255,255,255,.6);margin-top:.3rem">${sub}</div>
+    // Mismas clases .kpi / --kc que los Indicadores Clave del Resumen.
+    const tile = (lbl, val, sub, kc, tip) =>
+      `<div class="kpi" style="--kc:${kc}" data-tip="${esc(tip)}">
+         <div class="kpi-lbl">${lbl}</div>
+         <div class="kpi-val" style="color:${kc}">${val}</div>
+         <div class="kpi-sub">${sub}</div>
        </div>`;
     box.innerHTML =
-      tile('Costo Total Inventario', nMM(INV.total_costo), nCLP(INV.total_costo),
-           '#001B47', '#002D73', '#28D2C3') +
-      tile('Unidades en Stock',      nUn(INV.total_stock), 'suma de En stock',
-           '#22306B', '#33448D', '#8FD8FF') +
-      tile('SKUs',                   nUn(INV.total_skus),  'artículos distintos',
-           '#0A5F59', '#128A80', '#7BFFF2') +
-      tile('Marcas',                 nUn(INV.n_marcas),    'proveedores',
-           '#7A5200', '#A8760B', '#FFD966');
+      tile('Costo Total Inventario', nMM(INV.total_costo), nCLP(INV.total_costo), 'var(--az3)',
+           'Costo total valorizado del inventario de repuestos en bodega.') +
+      tile('Unidades en Stock', nUn(INV.total_stock), `${nUn(INV.total_skus)} SKU distintos`, 'var(--az2)',
+           'Suma de la columna En stock de todas las bodegas.') +
+      tile('SKUs', nUn(INV.total_skus), 'artículos distintos', 'var(--teal)',
+           'Número de artículos distintos (Número de artículo) con stock registrado.') +
+      tile('Marcas', nUn(INV.n_marcas), 'proveedores con stock', 'var(--am)',
+           'Número de marcas (FirmName) con repuestos en bodega.');
   }
 
   // ── Tabla ────────────────────────────────────────────────────
