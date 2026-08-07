@@ -9,6 +9,7 @@
   const RV = (window.APP_DATA || {}).rep_vend || {};
   let _modo = 'monto';               // 'monto' | 'cant'
   let _anio = 'todos';               // 'todos' | '2025' | '2026'
+  let _fam  = 'todas';               // familia de producto (Equipo Asociado)
   let _cli  = null;                  // cliente seleccionado en el gráfico
   let _chMes = null, _chMarca = null, _chCli = null;
 
@@ -36,15 +37,27 @@
     if (!arr) return 0;
     return idxs().reduce((s, i) => s + (arr[i] || 0), 0);
   }
-  // Total de una marca según año y modo
-  function totMarca(m) {
+  // Serie mensual de una marca según la familia activa
+  function serieMarca(m) {
     const d = RV.data[m] || {};
-    return sumaSel(esMonto() ? d.monto : d.cant);
+    const k = esMonto() ? 'monto' : 'cant';
+    if (_fam === 'todas') return d[k] || [];
+    const f = (d.fam || {})[_fam];
+    return f ? f[esMonto() ? 'm' : 'q'] : [];
   }
-  // Total general según año y modo
-  function totGeneral() {
-    return sumaSel(esMonto() ? RV.tot_monto : RV.tot_cant);
+  // Total de una marca según año, modo y familia
+  function totMarca(m) { return sumaSel(serieMarca(m)); }
+
+  // Serie mensual general según la familia activa
+  function serieTotal() {
+    const k = esMonto() ? 'monto' : 'cant';
+    if (_fam === 'todas') return (esMonto() ? RV.tot_monto : RV.tot_cant) || [];
+    const f = (RV.fam || {})[_fam];
+    return f ? f[k] : [];
   }
+  function totGeneral() { return sumaSel(serieTotal()); }
+
+  function lblFam() { return _fam === 'todas' ? 'todas las familias' : _fam; }
   // Etiqueta del período activo
   function lblPeriodo() {
     const ms = mesesSel();
@@ -59,6 +72,24 @@
   function cliMarca(m) {
     const d = RV.data[m] || {};
     const anios = _anio === 'todos' ? (RV.anios || []) : [_anio];
+    // Con familia filtrada no hay apertura cliente×marca×familia: se usa el
+    // desglose por familia del cliente, que sí existe.
+    if (_fam !== 'todas') {
+      const I = idxs();
+      return (d.clientes || []).map(r => {
+        const cs = (RV.cli_serie || {})[r.c] || {};
+        const f  = (cs.fam || {})[_fam];
+        if (!f) return null;
+        // Prorratea la familia del cliente por el peso de esta marca en él
+        const totCli = I.reduce((s2, i) => s2 + ((cs.monto || [])[i] || 0), 0);
+        const enMarca = I.reduce((s2, i) => s2 + (((cs.det || {})[m] || {}).m || [])[i] || 0, 0);
+        if (!totCli || !enMarca) return null;
+        const w = enMarca / totCli;
+        const mo = I.reduce((s2, i) => s2 + (f.m[i] || 0), 0) * w;
+        const q  = I.reduce((s2, i) => s2 + (f.q[i] || 0), 0) * w;
+        return mo > 0 ? { c: r.c, monto: Math.round(mo), cant: Math.round(q) } : null;
+      }).filter(Boolean).sort((a, b) => b.monto - a.monto);
+    }
     return (d.clientes || []).map(r => {
       let mo = 0, q = 0;
       anios.forEach(a => { mo += r['m' + a.slice(2)] || 0; q += r['q' + a.slice(2)] || 0; });
@@ -81,6 +112,7 @@
     const anios = RV.anios || [];
     seg('rv-anio', [['todos', 'Ambos años']].concat(anios.map(a => [a, a])), _anio, '_rvAnio');
     seg('rv-modo', [['monto', 'Monto ($)'], ['cant', 'Cantidad (un)']], _modo, '_rvModo');
+    seg('rv-fam', [['todas', 'Todas']].concat((RV.familias || []).map(f => [f, f])), _fam, '_rvFam');
   }
 
   // ── KPIs ─────────────────────────────────────────────────────
@@ -89,12 +121,16 @@
     if (!box) return;
     const ms   = mesesSel();
     const I    = idxs();
-    const totM = sumaSel(RV.tot_monto);
-    const totQ = sumaSel(RV.tot_cant);
+    const sMonto = _fam === 'todas' ? (RV.tot_monto || [])
+                 : (((RV.fam || {})[_fam] || {}).monto || []);
+    const sCant  = _fam === 'todas' ? (RV.tot_cant || [])
+                 : (((RV.fam || {})[_fam] || {}).cant || []);
+    const totM = sumaSel(sMonto);
+    const totQ = sumaSel(sCant);
     const iUlt = I[I.length - 1];
-    const ultM = iUlt !== undefined ? (RV.tot_monto[iUlt] || 0) : 0;
+    const ultM = iUlt !== undefined ? (sMonto[iUlt] || 0) : 0;
     const iPrev = I[I.length - 2];
-    const prevM = iPrev !== undefined ? (RV.tot_monto[iPrev] || 0) : 0;
+    const prevM = iPrev !== undefined ? (sMonto[iPrev] || 0) : 0;
     const varP  = prevM > 0 ? ((ultM - prevM) / prevM * 100) : null;
     const prom  = ms.length ? totM / ms.length : 0;
     const nCli  = new Set((RV.marcas || []).flatMap(m => cliMarca(m).map(r => r.c))).size;
@@ -106,7 +142,7 @@
       `<div class="kpi" style="--kc:${kc}">
          <div class="kpi-lbl">${lbl}</div>
          <div class="kpi-val" style="color:${kc}">${v}</div>
-         <div class="kpi-sub">${sub}${pie(lblAnio())}</div>
+         <div class="kpi-sub">${sub}${pie(lblAnio() + (_fam === 'todas' ? '' : ' · ' + _fam))}</div>
        </div>`;
 
     box.innerHTML =
@@ -166,20 +202,21 @@
 
     const ds = top.map((m, i) => ({
       label: m.length > 22 ? m.slice(0, 21) + '…' : m,
-      data: I.map(j => ((RV.data[m] || {})[key] || [])[j] || 0),
+      data: I.map(j => (serieMarca(m)[j] || 0)),
       backgroundColor: COLORS[i % COLORS.length],
       borderWidth: 0, stack: 's',
     }));
     if (resto.length) {
       ds.push({
         label: `Otras (${resto.length})`,
-        data: I.map(j => resto.reduce((s, m) => s + (((RV.data[m] || {})[key] || [])[j] || 0), 0)),
+        data: I.map(j => resto.reduce((s, m) => s + (serieMarca(m)[j] || 0), 0)),
         backgroundColor: '#B8C1D8', borderWidth: 0, stack: 's',
       });
     }
 
     const lbl = document.getElementById('rv-chart-lbl');
-    if (lbl) lbl.textContent = (esMonto() ? 'en millones de pesos' : 'en unidades') + ' · ' + lblAnio();
+    if (lbl) lbl.textContent = (esMonto() ? 'en millones de pesos' : 'en unidades') +
+      ' · ' + lblAnio() + (_fam === 'todas' ? '' : ' · ' + _fam);
 
     _chMes = new Chart(ctx.getContext('2d'), {
       type: 'bar',
@@ -243,6 +280,97 @@
     });
   }
 
+  // ── Tabla resumen por familia de producto ────────────────────
+  // Familia como fila principal, expandible a sus marcas. Los meses van en
+  // columnas, igual que la tabla de marcas.
+  const _famOpen = new Set();
+  window._rvFamToggle = function (f) {
+    if (_famOpen.has(f)) _famOpen.delete(f); else _famOpen.add(f);
+    renderTablaFam();
+  };
+
+  function renderTablaFam() {
+    const box = document.getElementById('rv-fam-table');
+    if (!box) return;
+    const I  = idxs();
+    const ms = mesesSel();
+    const fams = (RV.familias || []).filter(f => _fam === 'todas' || f === _fam);
+    if (!fams.length) { box.innerHTML = ''; return; }
+
+    const kM = esMonto() ? 'monto' : 'cant';
+    const kD = esMonto() ? 'm' : 'q';
+    const serieFam = f => ((RV.fam || {})[f] || {})[kM] || [];
+    const gTot = fams.reduce((s, f) => s + sumaSel(serieFam(f)), 0);
+
+    const th = (t, al, extra) =>
+      `<th style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;padding:.4rem .55rem;
+        font-size:.57rem;letter-spacing:.03em;text-align:${al};white-space:nowrap;
+        border-right:1px solid rgba(255,255,255,.18);${extra || ''}">${t}</th>`;
+    const SEPc = 'border-right:1px solid var(--brd)';
+
+    let rows = '';
+    fams.forEach((f, i) => {
+      const sf   = serieFam(f);
+      const tf   = sumaSel(sf);
+      const open = _famOpen.has(f);
+      const col  = COLORS[i % COLORS.length];
+      rows += `<tr style="background:var(--bg2);cursor:pointer;border-left:3px solid ${col}"
+          onclick="window._rvFamToggle(${JSON.stringify(f).replace(/"/g, '&quot;')})">
+        <td style="padding:.35rem .55rem;font-size:.68rem;font-weight:700;white-space:nowrap;
+                   position:sticky;left:0;background:var(--bg2);z-index:1;${SEPc}">
+          <span style="display:inline-block;width:.8rem;font-size:.52rem;color:var(--mut);
+            transform:rotate(${open ? 90 : 0}deg);transition:transform .15s">&#9654;</span>${esc(f)}
+        </td>
+        ${I.map(j => `<td style="padding:.35rem .55rem;text-align:right;font-size:.63rem;
+          font-variant-numeric:tabular-nums;${SEPc}">${(sf[j] || 0) ? fmtV(sf[j]) : '—'}</td>`).join('')}
+        <td style="padding:.35rem .55rem;text-align:right;font-size:.67rem;font-weight:700;
+                   font-variant-numeric:tabular-nums;${SEPc}">${fmtV(tf)}</td>
+        <td style="padding:.35rem .55rem;text-align:right;font-size:.6rem;color:var(--mut)">${pc(tf, gTot)}</td>
+      </tr>`;
+
+      if (open) {
+        // Marcas dentro de la familia, con su serie mensual
+        const marcas = (RV.marcas || [])
+          .map(m => ({ m, s: ((RV.data[m] || {}).fam || {})[f] }))
+          .filter(x => x.s && I.some(j => (x.s[kD][j] || 0) > 0))
+          .sort((a, b) => sumaSel(b.s[kD]) - sumaSel(a.s[kD]));
+        marcas.forEach(({ m, s: sm }) => {
+          const tm = sumaSel(sm[kD]);
+          rows += `<tr style="background:var(--bg)">
+            <td style="padding:.25rem .55rem .25rem 1.9rem;font-size:.63rem;color:var(--mut);
+                       white-space:nowrap;position:sticky;left:0;background:var(--bg);z-index:1;${SEPc}">${esc(m)}</td>
+            ${I.map(j => `<td style="padding:.25rem .55rem;text-align:right;font-size:.61rem;
+              font-variant-numeric:tabular-nums;color:var(--mut);${SEPc}">${(sm[kD][j] || 0) ? fmtV(sm[kD][j]) : '—'}</td>`).join('')}
+            <td style="padding:.25rem .55rem;text-align:right;font-size:.63rem;
+                       font-variant-numeric:tabular-nums;${SEPc}">${fmtV(tm)}</td>
+            <td style="padding:.25rem .55rem;text-align:right;font-size:.58rem;color:var(--mut)">${pc(tm, tf)}</td>
+          </tr>`;
+        });
+      }
+    });
+
+    box.innerHTML = `
+      <div style="overflow-x:auto;max-height:440px;overflow-y:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:${240 + ms.length * 62}px">
+          <thead><tr>
+            ${th('FAMILIA / MARCA', 'left', 'position:sticky;left:0;z-index:3;min-width:170px')}
+            ${ms.map(x => th(x.lbl.toUpperCase(), 'right')).join('')}
+            ${th('TOTAL', 'right')}${th('%', 'right')}
+          </tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
+            <td style="padding:.4rem .55rem;font-size:.66rem;position:sticky;left:0;background:var(--az3);z-index:1;${SEPc}">TOTAL</td>
+            ${I.map(j => `<td style="padding:.4rem .55rem;text-align:right;font-size:.62rem;
+              font-variant-numeric:tabular-nums;${SEPc}">${fmtV(fams.reduce((s, f) => s + (serieFam(f)[j] || 0), 0))}</td>`).join('')}
+            <td style="padding:.4rem .55rem;text-align:right;font-size:.66rem;font-variant-numeric:tabular-nums;${SEPc}">${fmtV(gTot)}</td>
+            <td style="padding:.4rem .55rem;text-align:right;font-size:.6rem">100%</td>
+          </tr></tfoot>
+        </table>
+      </div>
+      <p style="font-size:.56rem;color:var(--mut);margin:.5rem 0 0;line-height:1.4">
+        Familia de producto = campo «Equipo Asociado» de la hoja «Repuestos Vendidas».</p>`;
+  }
+
   // ── Tabla marca × mes ────────────────────────────────────────
   function renderTable() {
     const box = document.getElementById('rv-table');
@@ -268,8 +396,9 @@
     const rows = marcas.map((m, i) => {
       const d = RV.data[m] || {};
       const z = i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)';
+      const sm = serieMarca(m);
       const celdas = I.map(j => {
-        const v = (d[key] || [])[j] || 0;
+        const v = sm[j] || 0;
         return `<td style="padding:.3rem .55rem;text-align:right;font-size:.63rem;
           font-variant-numeric:tabular-nums;color:${v ? 'var(--txt)' : 'var(--mut)'};${SEP}">${v ? fmtV(v) : '—'}</td>`;
       }).join('');
@@ -297,14 +426,15 @@
           <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
             <td style="padding:.4rem .55rem;font-size:.66rem;position:sticky;left:0;background:var(--az3);z-index:1;${SEP}">TOTAL</td>
             ${I.map(j => `<td style="padding:.4rem .55rem;text-align:right;font-size:.63rem;
-              font-variant-numeric:tabular-nums;${SEP}">${fmtV((arrT || [])[j] || 0)}</td>`).join('')}
+              font-variant-numeric:tabular-nums;${SEP}">${fmtV(serieTotal()[j] || 0)}</td>`).join('')}
             <td style="padding:.4rem .55rem;text-align:right;font-size:.66rem;font-variant-numeric:tabular-nums;${SEP}">${fmtV(totG)}</td>
             <td style="padding:.4rem .55rem;text-align:right;font-size:.6rem">100%</td>
           </tr></tfoot>
         </table>
       </div>
       <p style="font-size:.56rem;color:var(--mut);margin:.5rem 0 0;line-height:1.4">
-        Período: <strong>${lblPeriodo()}</strong>. Fuente: hoja «Repuestos Vendidas», campo «Precio de venta»
+        Período: <strong>${lblPeriodo()}</strong> · Familia: <strong>${esc(lblFam())}</strong>.
+        Fuente: hoja «Repuestos Vendidas», campo «Precio de venta»
         agrupado por «Marca 2» y mes. Incluye todos los estados de cotización (Aprobado, En borrador y
         Rechazado), igual que la tabla dinámica del Excel.
       </p>`;
@@ -369,16 +499,21 @@
 
   // ── Evolución mensual de un cliente ──────────────────────────
   // Total de un cliente en el período activo
-  function totCli(c) {
+  function serieCli(c) {
     const d = (RV.cli_serie || {})[c];
-    if (!d) return 0;
-    return sumaSel(esMonto() ? d.monto : d.cant);
+    if (!d) return [];
+    if (_fam === 'todas') return (esMonto() ? d.monto : d.cant) || [];
+    const f = (d.fam || {})[_fam];
+    return f ? f[esMonto() ? 'm' : 'q'] : [];
   }
+  function totCli(c) { return sumaSel(serieCli(c)); }
   // Clientes con venta en el período, de mayor a menor
   function clientesOrdenados() {
-    return Object.keys(RV.cli_serie || {})
-      .filter(c => sumaSel((RV.cli_serie[c] || {}).monto) > 0)
-      .sort((a, b) => sumaSel(RV.cli_serie[b].monto) - sumaSel(RV.cli_serie[a].monto));
+    const mo = c => { const d = RV.cli_serie[c] || {};
+      if (_fam === 'todas') return sumaSel(d.monto);
+      const f = (d.fam || {})[_fam]; return f ? sumaSel(f.m) : 0; };
+    return Object.keys(RV.cli_serie || {}).filter(c => mo(c) > 0)
+      .sort((a, b) => mo(b) - mo(a));
   }
 
   function renderCliSelect() {
@@ -451,7 +586,8 @@
       borderWidth: 0, stack: 'c', order: 2,
     }));
 
-    const serie = I.map(i => (d[key] || [])[i] || 0);
+    const sc    = serieCli(_cli);
+    const serie = I.map(i => sc[i] || 0);
     const prom  = serie.length ? serie.reduce((s, v) => s + v, 0) / serie.length : 0;
     ds.push({
       label: 'Promedio del período', data: ms.map(() => prom), type: 'line',
@@ -494,7 +630,7 @@
   }
 
   function repintar() {
-    renderSegs(); renderKPIs(); renderTable();
+    renderSegs(); renderKPIs(); renderTablaFam(); renderTable();
     renderClientes(); renderChartMes(); renderChartMarca();
     renderCliSelect(); renderCliKPI(); renderChartCli();
     const p = document.getElementById('rv-periodo');
@@ -503,6 +639,7 @@
 
   window._rvModo = function (k) { if (_modo !== k) { _modo = k; repintar(); } };
   window._rvAnio = function (k) { if (_anio !== k) { _anio = k; repintar(); } };
+  window._rvFam  = function (k) { if (_fam  !== k) { _fam  = k; repintar(); } };
   window._rvCli  = function (c) { _cli = c; renderCliKPI(); renderChartCli(); };
 
   // Acepta el nombre exacto (elegido del datalist) o un texto parcial: en ese

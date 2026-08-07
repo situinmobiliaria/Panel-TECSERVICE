@@ -1675,7 +1675,7 @@ def read_repuestos_vendidos(wb):
     la dinámica las junta y sin normalizar los totales no cuadran.
 
     Columnas: C=Nombre del cliente, M=Cantidad, P=Precio de venta,
-              R=año, S=mes, T=Marca 2.
+              R=año, S=mes, T=Marca 2, V=Equipo Asociado (familia).
     """
     MESES_ABR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
                  "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
@@ -1702,6 +1702,12 @@ def read_repuestos_vendidos(wb):
     # marca dentro de cada mes, para las barras apiladas del gráfico y su
     # tooltip. Sólo se guardan los pares (cliente, marca) con venta real.
     cli_mm    = defaultdict(lambda: [0.0, 0.0])
+    # Familia de producto = "Equipo Asociado" (col V): AUTOCLAVES, LAVADORA,
+    # OTROS. Se abre por marca y por cliente para poder segmentar las tablas.
+    fam_mes   = defaultdict(lambda: [0.0, 0.0])   # (familia, anio, mes)
+    marca_fam = defaultdict(lambda: [0.0, 0.0])   # (marca, familia, anio, mes)
+    cli_fam   = defaultdict(lambda: [0.0, 0.0])   # (cliente, familia, anio, mes)
+    familias  = set()
     periodos = set()
 
     for row in ws.iter_rows(min_row=2, values_only=True):
@@ -1732,6 +1738,15 @@ def read_repuestos_vendidos(wb):
         cli_marca[cli][marca] += monto
         cli_mm[(cli, marca, anio, mes)][0] += monto
         cli_mm[(cli, marca, anio, mes)][1] += cant
+        fam = safe_str(row[21]).strip().upper() if len(row) > 21 else ""
+        fam = fam or "SIN CLASIFICAR"
+        familias.add(fam)
+        fam_mes[(fam, anio, mes)][0] += monto
+        fam_mes[(fam, anio, mes)][1] += cant
+        marca_fam[(marca, fam, anio, mes)][0] += monto
+        marca_fam[(marca, fam, anio, mes)][1] += cant
+        cli_fam[(cli, fam, anio, mes)][0] += monto
+        cli_fam[(cli, fam, anio, mes)][1] += cant
         periodos.add((anio, mes))
 
     if not celdas:
@@ -1765,6 +1780,15 @@ def read_repuestos_vendidos(wb):
                 reg["q" + a[2:]] = round(q)
             cli_out.append(reg)
         cli_out.sort(key=lambda r: -sum(r[k] for k in r if k.startswith("m")))
+        # Serie mensual de esta marca abierta por familia de producto
+        fam_d = {}
+        for (mk, fm, a, m), (v, q) in marca_fam.items():
+            if mk != marca:
+                continue
+            e = fam_d.setdefault(fm, {"m": [0.0] * n, "q": [0.0] * n})
+            i = idx[(a, m)]
+            e["m"][i] += v
+            e["q"][i] += q
         out[marca] = {
             "monto":      [round(x) for x in monto],
             "cant":       [round(x) for x in cant],
@@ -1772,6 +1796,9 @@ def read_repuestos_vendidos(wb):
             "cant_tot":   round(sum(cant)),
             "n_clientes": len(cli_out),
             "clientes":   cli_out,
+            "fam":        {k: {"m": [round(x) for x in v["m"]],
+                               "q": [round(x) for x in v["q"]]}
+                           for k, v in fam_d.items()},
         }
 
     marcas_sorted = sorted(out, key=lambda m: -out[m]["monto_tot"])
@@ -1795,6 +1822,13 @@ def read_repuestos_vendidos(wb):
         det[ck][mk_][0][i] += v
         det[ck][mk_][1][i] += q
 
+    # Desglose mensual por familia dentro de cada cliente
+    detf = defaultdict(lambda: defaultdict(lambda: [[0.0] * n, [0.0] * n]))
+    for (ck, fm, a, m), (v, q) in cli_fam.items():
+        i = idx[(a, m)]
+        detf[ck][fm][0][i] += v
+        detf[ck][fm][1][i] += q
+
     cli_out = {}
     for c in todos_cli:
         mo, qt = series_mes[c]
@@ -1812,12 +1846,46 @@ def read_repuestos_vendidos(wb):
                     "q": [round(x) for x in det[c][k][1]]}
                 for k, _ in mk
             },
+            "fam": {
+                k: {"m": [round(x) for x in v[0]],
+                    "q": [round(x) for x in v[1]]}
+                for k, v in detf[c].items()
+            },
         }
+
+    # Resumen por familia de producto: serie mensual y apertura por marca
+    fam_out = {}
+    for fm in familias:
+        mo = [0.0] * n
+        qt = [0.0] * n
+        for (f2, a, m), (v, q) in fam_mes.items():
+            if f2 != fm:
+                continue
+            i = idx[(a, m)]
+            mo[i] += v
+            qt[i] += q
+        por_marca = defaultdict(lambda: [0.0, 0.0])
+        for (mk, f2, a, m), (v, q) in marca_fam.items():
+            if f2 != fm:
+                continue
+            por_marca[mk][0] += v
+            por_marca[mk][1] += q
+        fam_out[fm] = {
+            "monto":     [round(x) for x in mo],
+            "cant":      [round(x) for x in qt],
+            "monto_tot": round(sum(mo)),
+            "cant_tot":  round(sum(qt)),
+            "marcas":    [{"k": k, "monto": round(v[0]), "cant": round(v[1])}
+                          for k, v in sorted(por_marca.items(), key=lambda x: -x[1][0])],
+        }
+    familias_sorted = sorted(fam_out, key=lambda f: -fam_out[f]["monto_tot"])
 
     return {
         "meses":       meses,
         "anios":       anios,
         "marcas":      marcas_sorted,
+        "familias":    familias_sorted,
+        "fam":         fam_out,
         "data":        out,
         "tot_monto":   tot_monto,
         "tot_cant":    tot_cant,
@@ -2924,7 +2992,7 @@ def main():
     if rep_vend:
         print(f"       REPUESTOS VENDIDOS: {len(rep_vend['marcas'])} marcas | {len(rep_vend['meses'])} meses "
               f"({rep_vend['meses'][0]['lbl']}-{rep_vend['meses'][-1]['lbl']}) | "
-              f"{rep_vend['n_clientes']} clientes | MM${rep_vend['tot_monto_g']/1e6:,.1f} | "
+              f"{rep_vend['n_clientes']} clientes | {len(rep_vend['familias'])} familias | MM${rep_vend['tot_monto_g']/1e6:,.1f} | "
               f"{rep_vend['tot_cant_g']:,.0f} un")
     # Hora fija 02:50 am (el proceso real de actualización se considera
     # completo a esa hora todos los días; el aviso por correo sale 10 min
