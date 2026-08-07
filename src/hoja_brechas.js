@@ -446,14 +446,28 @@
 
   // ── Indicador en la hoja Resumen, con desglose al pasar el mouse ──
   function initSnapshot() {
-    const val = document.getElementById('rs-snap-brecha');
-    if (!val) return;
     const T = totalBrecha();
     if (!T) return;
-    val.textContent = nMM(T);
 
-    const sub = document.getElementById('rs-snap-brecha-sub');
-    if (sub) sub.textContent = 'ingresos no materializados';
+    const val = document.getElementById('rs-snap-brecha');
+    if (val) val.textContent = nMM(T);
+
+    // Bloque corto en el Resumen: las tres brechas abiertas
+    const kbox = document.getElementById('rs-br-kpi');
+    if (kbox) {
+      const tile = (lbl, v, sub, kc) =>
+        `<div class="kpi" style="--kc:${kc}">
+           <div class="kpi-lbl">${lbl}</div>
+           <div class="kpi-val" style="color:${kc}">${nMM(v)}</div>
+           <div class="kpi-sub">${sub} · ${pc(v, T)} de la brecha</div>
+         </div>`;
+      kbox.innerHTML =
+        tile('Oportunidades por Facturar', OP.total, `${nUn(OP.n)} oportunidades`, 'var(--az2)') +
+        tile('Facturación Bajo Contrato',  CT.total, `${nUn(CT.n_clientes)} clientes`, 'var(--am)') +
+        tile('Brecha Sin Stock',           ST.total, `${nUn(ST.n_ov)} órdenes detenidas`, 'var(--rd)');
+    }
+    const tt = document.getElementById('rs-br-tot');
+    if (tt) tt.textContent = nMM(T);
 
     const pop = document.getElementById('rs-snap-brecha-pop');
     if (!pop) return;
