@@ -74,7 +74,7 @@ JS_FILES = [
     "utils.js", "datos.js", "hoja_resumen.js", "hoja_tipos.js", "hoja_nuevos.js",
     "hoja_vencimientos.js", "hoja_vision.js", "hoja_presupuesto.js",
     "hoja_facturacion.js", "hoja_panelfact.js", "hoja_satisfaccion.js", "hoja_visitas.js",
-    "hoja_alerta.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js",
+    "hoja_alerta.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js", "hoja_brechas.js",
 ]
 
 ANO   = date.today().year
@@ -1455,6 +1455,205 @@ def read_casos(wb):
 
 
 
+def _ffill(valor, previo):
+    """Los export de Salesforce dejan en blanco las filas que continúan el
+    mismo grupo (propietario, línea, orden). Arrastra el último valor visto."""
+    v = safe_str(valor).strip()
+    return v if v else previo
+
+
+def _parse_fecha(v):
+    """Fecha que puede venir como datetime o como texto D/M/YYYY."""
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    s = safe_str(v).strip()
+    if not s:
+        return None
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def read_brecha_oport(wb):
+    """Oportunidades adjudicadas que aún no se facturan.
+
+    Fuente: hoja "Brecha Oport por Facturar". El monto es "Monto adjudicado
+    (convertido)" (col H). El propietario (col A) viene con celdas en blanco
+    en las filas que continúan el mismo grupo, así que se arrastra.
+    """
+    ws = None
+    for name in wb.sheetnames:
+        n = name.strip().lower()
+        if "brecha" in n and "oport" in n:
+            ws = wb[name]
+            break
+    if ws is None:
+        return {}
+
+    items, prop = [], ""
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 9:
+            continue
+        prop = _ffill(row[0], prop)
+        cliente = safe_str(row[2]).strip()
+        monto   = to_float(row[7])
+        if not cliente and monto == 0:
+            continue
+        f = _parse_fecha(row[6])
+        items.append({
+            "prop":     prop or "Sin asignar",
+            "cliente":  cliente or "(sin cliente)",
+            "oport":    safe_str(row[3]).strip(),
+            "contrato": safe_str(row[4]).strip(),
+            "oc":       safe_str(row[5]).strip(),
+            "fecha":    f.isoformat() if f else "",
+            "fecha_fmt": f.strftime("%d/%m/%Y") if f else "",
+            "ov":       safe_str(row[8]).strip(),
+            "monto":    round(monto),
+        })
+
+    if not items:
+        return {}
+    items.sort(key=lambda x: -x["monto"])
+
+    def agrupa(campo):
+        g = defaultdict(lambda: [0.0, 0])
+        for it in items:
+            g[it[campo]][0] += it["monto"]
+            g[it[campo]][1] += 1
+        return [{"k": k, "monto": round(v[0]), "n": v[1]}
+                for k, v in sorted(g.items(), key=lambda x: -x[1][0])]
+
+    return {
+        "total":          round(sum(i["monto"] for i in items)),
+        "n":              len(items),
+        "por_propietario": agrupa("prop"),
+        "por_cliente":     agrupa("cliente"),
+        "items":           items,
+    }
+
+
+def read_brecha_stock(wb):
+    """Oportunidades detenidas por falta de stock de repuestos.
+
+    Fuente: hoja "Brecha Sin Stock". El monto es "Precio total" (col N).
+    Propietario (A), línea de negocio (B) y orden de venta (C) vienen con
+    celdas en blanco en las filas de continuación y se arrastran.
+    """
+    ws = None
+    for name in wb.sheetnames:
+        n = name.strip().lower()
+        if "brecha" in n and "stock" in n:
+            ws = wb[name]
+            break
+    if ws is None:
+        return {}
+
+    items = []
+    prop = linea = ov = ""
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 14:
+            continue
+        prop  = _ffill(row[0], prop)
+        linea = _ffill(row[1], linea)
+        ov    = _ffill(row[2], ov)
+        monto = to_float(row[13])
+        cod   = safe_str(row[9]).strip()
+        if not cod and monto == 0:
+            continue
+        f = _parse_fecha(row[8])
+        items.append({
+            "prop":     prop or "Sin asignar",
+            "linea":    linea or "Sin línea",
+            "ov":       ov,
+            "oport":    safe_str(row[4]).strip(),
+            "cliente":  safe_str(row[6]).strip() or "(sin cliente)",
+            "oc":       safe_str(row[7]).strip(),
+            "fecha":    f.isoformat() if f else "",
+            "fecha_fmt": f.strftime("%d/%m/%Y") if f else "",
+            "cod":      cod,
+            "prod":     safe_str(row[10]).strip(),
+            "cant":     round(to_float(row[11]), 2),
+            "pu":       round(to_float(row[12])),
+            "monto":    round(monto),
+            "dias":     (TODAY - f).days if f else None,
+        })
+
+    if not items:
+        return {}
+    items.sort(key=lambda x: -x["monto"])
+
+    def agrupa(campo):
+        g = defaultdict(lambda: [0.0, 0, 0.0])
+        for it in items:
+            g[it[campo]][0] += it["monto"]
+            g[it[campo]][1] += 1
+            g[it[campo]][2] += it["cant"]
+        return [{"k": k, "monto": round(v[0]), "n": v[1], "cant": round(v[2], 2)}
+                for k, v in sorted(g.items(), key=lambda x: -x[1][0])]
+
+    # Antigüedad: cuánto llevan esperando repuesto. Es lo más accionable —
+    # una oportunidad de hace 8 meses probablemente ya se perdió.
+    TRAMOS = [(0, 30, "0–30 días"), (31, 60, "31–60 días"), (61, 90, "61–90 días"),
+              (91, 180, "91–180 días"), (181, 10**6, "Más de 180 días")]
+    aging = []
+    for lo, hi, lbl in TRAMOS:
+        sel = [i for i in items if i["dias"] is not None and lo <= i["dias"] <= hi]
+        aging.append({"k": lbl, "monto": round(sum(i["monto"] for i in sel)), "n": len(sel)})
+    sin_fecha = [i for i in items if i["dias"] is None]
+    if sin_fecha:
+        aging.append({"k": "Sin fecha", "monto": round(sum(i["monto"] for i in sin_fecha)),
+                      "n": len(sin_fecha)})
+
+    # Mes de creación de la oportunidad
+    MESES_ABR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+                 "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    g_mes = defaultdict(lambda: [0.0, 0])
+    for it in items:
+        if not it["fecha"]:
+            continue
+        y, m = it["fecha"][:4], int(it["fecha"][5:7])
+        g_mes[(y, m)][0] += it["monto"]
+        g_mes[(y, m)][1] += 1
+    por_mes = [{"k": f"{MESES_ABR[m-1]} {y[2:]}", "monto": round(v[0]), "n": v[1]}
+               for (y, m), v in sorted(g_mes.items(), key=lambda x: (x[0][0], x[0][1]))]
+
+    # Productos que más veces bloquean una venta
+    g_prod = defaultdict(lambda: [0.0, 0, 0.0, "", set()])
+    for it in items:
+        e = g_prod[it["cod"]]
+        e[0] += it["monto"]; e[1] += 1; e[2] += it["cant"]
+        if not e[3]:
+            e[3] = it["prod"]
+        e[4].add(it["cliente"])
+    productos = [{"cod": k, "prod": v[3], "monto": round(v[0]), "n": v[1],
+                  "cant": round(v[2], 2), "n_cli": len(v[4])}
+                 for k, v in sorted(g_prod.items(), key=lambda x: -x[1][0])][:25]
+
+    dias_val = [i["dias"] for i in items if i["dias"] is not None]
+    return {
+        "total":           round(sum(i["monto"] for i in items)),
+        "n":               len(items),
+        "n_ov":            len({i["ov"] for i in items if i["ov"]}),
+        "n_clientes":      len({i["cliente"] for i in items}),
+        "cant_total":      round(sum(i["cant"] for i in items), 2),
+        "dias_prom":       round(sum(dias_val) / len(dias_val)) if dias_val else None,
+        "dias_max":        max(dias_val) if dias_val else None,
+        "por_linea":       agrupa("linea"),
+        "por_cliente":     agrupa("cliente"),
+        "por_propietario": agrupa("prop"),
+        "aging":           aging,
+        "por_mes":         por_mes,
+        "productos":       productos,
+        "items":           items,
+    }
+
+
 def read_repuestos_vendidos(wb):
     """Repuestos vendidos por marca, mes y cliente.
 
@@ -2664,6 +2863,8 @@ def main():
     resumen_programas = read_resumen_tipos_programas(wb2)
     inv_ts = read_inventario_ts(wb2)
     rep_vend = read_repuestos_vendidos(wb2)
+    br_oport = read_brecha_oport(wb2)
+    br_stock = read_brecha_stock(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -2683,6 +2884,8 @@ def main():
     app_data["resumen_programas"] = resumen_programas
     app_data["inv_ts"] = inv_ts
     app_data["rep_vend"] = rep_vend
+    app_data["br_oport"] = br_oport
+    app_data["br_stock"] = br_stock
     if inv_ts:
         print(f"       INVENTARIO TS: {inv_ts['n_marcas']} marcas | {inv_ts['total_skus']} SKUs | "
               f"{inv_ts['total_stock']:,.0f} un | MM${inv_ts['total_costo']/1e6:,.1f}")
@@ -2710,6 +2913,19 @@ def main():
     print(f"       NC_DATA: {len(nc_data)} nuevos | PERDIDOS: {len(perdidos)}")
     alerta_data = build_alerta_data(contratos, panel_raw, mes_corte)
     print(f"       ALERTA_DATA: {len(alerta_data)} clientes con facturación bajo contrato")
+
+    # Brecha por facturación bajo contrato: no viene de una hoja propia, se
+    # deriva de ALERTA_DATA (facturación esperada por contrato − facturación
+    # real), así queda siempre alineada con la hoja "Bajo Contrato" del panel.
+    app_data["br_contrato"] = {
+        "total":     round(sum(c.get("total_gap", 0) for c in alerta_data)),
+        "esperado":  round(sum(c.get("total_expected", 0) for c in alerta_data)),
+        "real":      round(sum(c.get("total_real", 0) for c in alerta_data)),
+        "n_clientes": len(alerta_data),
+    }
+    _b = app_data["br_contrato"]
+    print(f"       BRECHAS: oport MM${(br_oport.get('total',0))/1e6:,.1f} | "
+          f"contrato MM${_b['total']/1e6:,.1f} | stock MM${(br_stock.get('total',0))/1e6:,.1f}")
     enrich_mapa_data(mapa_data, contratos, satisf)
     cc_count = sum(1 for c in mapa_data if c["cc"])
     print(f"       MAPA_DATA: {len(mapa_data)} clientes | {cc_count} con contrato")
