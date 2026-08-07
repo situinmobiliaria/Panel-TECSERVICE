@@ -75,7 +75,9 @@ function _matrizHTML(){
     <div><div class="ss-v" id="mtz-k-fa" style="color:var(--rd2)">—</div><div class="ss-l">Foco A</div></div>
     <div><div class="ss-v" id="mtz-k-fb" style="color:var(--am)">—</div><div class="ss-l">Foco B</div></div>
     <div><div class="ss-v" id="mtz-k-pot-eq">—</div><div class="ss-l">Pot. Equipos</div></div>
-    <div><div class="ss-v" id="mtz-k-pot-st">—</div><div class="ss-l">Pot. ST</div></div>
+    <div><div class="ss-v" id="mtz-k-pot-st">—</div><div class="ss-l">Pot. ST Total</div></div>
+    <div><div class="ss-v" id="mtz-k-pot-st-gar" style="color:var(--teal)">—</div><div class="ss-l">↳ Garantías</div></div>
+    <div><div class="ss-v" id="mtz-k-pot-st-bi" style="color:var(--az4)">—</div><div class="ss-l">↳ BI Actual</div></div>
     <div><div class="ss-v" id="mtz-k-bi">—</div><div class="ss-l">Equipos ST</div></div>
     <div><div class="ss-v" id="mtz-k-cc">—</div><div class="ss-l">Con Contrato</div></div>
   </div>
@@ -166,7 +168,9 @@ function _matrizHTML(){
           <th data-ms="contratos" onclick="mtzSortCol('contratos',this)" style="cursor:pointer">Contratos</th>
           <th data-ms="ingreso" onclick="mtzSortCol('ingreso',this)" style="cursor:pointer">Ingreso</th>
           <th data-ms="pot_eq" onclick="mtzSortCol('pot_eq',this)" style="cursor:pointer">Pot. Equipos</th>
-          <th data-ms="pot_st" onclick="mtzSortCol('pot_st',this)" style="cursor:pointer">Pot. ST</th>
+          <th data-ms="pot_st_gar" onclick="mtzSortCol('pot_st_gar',this)" style="cursor:pointer" title="Potencial ST por equipos en garantía (pipeline)">Pot. ST<br><span style="font-weight:400;font-size:.55rem">Garantías</span></th>
+          <th data-ms="pot_st_contr" onclick="mtzSortCol('pot_st_contr',this)" style="cursor:pointer" title="Potencial de contratos sobre la base instalada actual">Pot. ST<br><span style="font-weight:400;font-size:.55rem">BI Actual</span></th>
+          <th data-ms="pot_st" onclick="mtzSortCol('pot_st',this)" style="cursor:pointer">Pot. ST<br><span style="font-weight:400;font-size:.55rem">Total</span></th>
           <th data-ms="pot" onclick="mtzSortCol('pot',this)" style="cursor:pointer">Pot. Total</th>
           <th data-ms="sat" onclick="mtzSortCol('sat',this)" style="cursor:pointer" title="Menor = mayor urgencia">Satisf.</th>
           <th data-ms="_score" onclick="mtzSortCol('_score',this)" style="cursor:pointer">Score</th>
@@ -263,7 +267,9 @@ function renderMatriz(){
       <td class="num">${c.contratos>0?'<span class="pill pte">'+c.contratos+'</span>':'<span class="pill pgr">0</span>'}</td>
       <td class="num" style="color:var(--az2)">${_fMMz(c.ingreso_2026||c.ingreso||0)}</td>
       <td class="num" style="color:var(--am)">${_fMMz(c.pot_eq||0)}</td>
-      <td class="num" style="color:var(--teal)">${_fMMz(c.pot_st||0)}</td>
+      <td class="num" style="color:var(--teal)">${_fMMz(c.pot_st_gar||0)}</td>
+      <td class="num" style="color:var(--az2)">${_fMMz(c.pot_st_contr||0)}</td>
+      <td class="num" style="color:var(--teal);font-weight:700">${_fMMz(c.pot_st||0)}</td>
       <td class="num" style="color:var(--am);font-weight:700">${_fMMz(c.pot)}</td>
       <td class="num" style="text-align:center">${satStr}</td>
       <td>
@@ -282,6 +288,8 @@ function renderMatriz(){
   const totIng=data.reduce((s,c)=>s+(c.ingreso_2026||c.ingreso||0),0);
   const totPotEq=data.reduce((s,c)=>s+(c.pot_eq||0),0);
   const totPotSt=data.reduce((s,c)=>s+(c.pot_st||0),0);
+  const totPotStGar=data.reduce((s,c)=>s+(c.pot_st_gar||0),0);
+  const totPotStBi=data.reduce((s,c)=>s+(c.pot_st_contr||0),0);
   const totPot=data.reduce((s,c)=>s+c.pot,0);
   const totCC=data.filter(c=>c.cc).length;
   const fa=data.filter(c=>c._score>=p80).length;
@@ -293,6 +301,8 @@ function renderMatriz(){
     <td class="num">${totBi}</td><td class="num">${totCC}</td>
     <td class="num" style="color:var(--teal)">${_fMMz(totIng)}</td>
     <td class="num" style="color:var(--am)">${_fMMz(totPotEq)}</td>
+    <td class="num" style="color:var(--teal)">${_fMMz(totPotStGar)}</td>
+    <td class="num" style="color:var(--az2)">${_fMMz(totPotStBi)}</td>
     <td class="num" style="color:var(--teal)">${_fMMz(totPotSt)}</td>
     <td class="num" style="color:var(--teal)">${_fMMz(totPot)}</td>
     <td></td><td></td><td></td>`;
@@ -303,6 +313,8 @@ function renderMatriz(){
   s('mtz-k-fb',fb);
   s('mtz-k-pot-eq',_fMMz(totPotEq));
   s('mtz-k-pot-st',_fMMz(totPotSt));
+  s('mtz-k-pot-st-gar',_fMMz(totPotStGar));
+  s('mtz-k-pot-st-bi',_fMMz(totPotStBi));
   s('mtz-k-bi',totBi);
   s('mtz-k-cc',totCC);
 

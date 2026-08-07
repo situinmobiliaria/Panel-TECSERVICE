@@ -28,13 +28,17 @@ function _metVal(c){
   if(_mapaMetrica==='ingreso') return _getIngreso(c);
   if(_mapaMetrica==='equipos') return c.bi;
   if(_mapaMetrica==='pot_st')  return c.pot_st||0;
+  if(_mapaMetrica==='pot_st_gar')   return c.pot_st_gar||0;
+  if(_mapaMetrica==='pot_st_contr') return c.pot_st_contr||0;
   if(_mapaMetrica==='pot_eq')  return c.pot_eq||0;
   return c.pot;
 }
 function _metLbl(){
   if(_mapaMetrica==='ingreso') return _mapaIngrYear==='ambos'?'Ingreso 25+26':_mapaIngrYear==='2025'?'Ingreso 2025':'Ingreso 2026';
   if(_mapaMetrica==='equipos') return 'Equipos ST';
-  if(_mapaMetrica==='pot_st')  return 'Potencial ST';
+  if(_mapaMetrica==='pot_st')  return 'Potencial ST Total';
+  if(_mapaMetrica==='pot_st_gar')   return 'Pot. ST · Garantías';
+  if(_mapaMetrica==='pot_st_contr') return 'Pot. ST · BI Actual';
   if(_mapaMetrica==='pot_eq')  return 'Potencial Equipos';
   return 'Potencial';
 }
@@ -82,7 +86,9 @@ function _mapaHTML(){
       <div class="btn-g" id="mp-m">
         <button class="btn on" data-m="ingreso">Ingreso</button>
         <button class="btn" data-m="equipos">Equipos ST</button>
-        <button class="btn" data-m="pot_st">Pot. ST</button>
+        <button class="btn" data-m="pot_st">Pot. ST Total</button>
+        <button class="btn" data-m="pot_st_gar">↳ Garantías</button>
+        <button class="btn" data-m="pot_st_contr">↳ BI Actual</button>
         <button class="btn" data-m="pot_eq">Pot. Equipos</button>
       </div>
       <span class="ctrl-lbl" style="margin-left:.4rem">Año ingreso</span>
@@ -142,7 +148,10 @@ function _mapaHTML(){
       <table class="tbl" id="mp-reg-tbl">
         <thead><tr>
           <th>Región</th><th>Clientes</th><th>Con Contrato</th><th>% Contrato</th>
-          <th>Equipos ST</th><th>Ingreso</th><th>Potencial Eq.</th><th>Potencial ST</th>
+          <th>Equipos ST</th><th>Ingreso</th><th>Potencial Eq.</th>
+          <th>Pot. ST<br><span style="font-weight:400;font-size:.55rem">Garantías</span></th>
+          <th>Pot. ST<br><span style="font-weight:400;font-size:.55rem">BI Actual</span></th>
+          <th>Pot. ST<br><span style="font-weight:400;font-size:.55rem">Total</span></th>
           <th>Pot. ST<br><span style="font-weight:400;font-size:.55rem">/ cliente</span></th>
         </tr></thead>
         <tbody id="mp-reg-tbody"></tbody>
@@ -348,14 +357,16 @@ function _renderRegTable(){
   const tbody=document.getElementById('mp-reg-tbody');if(!tbody)return;
   const filt=_filtrados();const byR={};
   filt.forEach(c=>{
-    if(!byR[c.region])byR[c.region]={n:0,cc:0,bi:0,ing:0,pot_eq:0,pot_st:0};
+    if(!byR[c.region])byR[c.region]={n:0,cc:0,bi:0,ing:0,pot_eq:0,pot_st:0,pot_st_gar:0,pot_st_contr:0};
     byR[c.region].n++;if(c.cc)byR[c.region].cc++;
     byR[c.region].bi+=c.bi;byR[c.region].ing+=_getIngreso(c);
     byR[c.region].pot_eq+=(c.pot_eq||0);byR[c.region].pot_st+=(c.pot_st||0);
+    byR[c.region].pot_st_gar+=(c.pot_st_gar||0);byR[c.region].pot_st_contr+=(c.pot_st_contr||0);
   });
   const sorted=Object.entries(byR).sort((a,b)=>b[1].ing-a[1].ing);
-  const tot={n:0,cc:0,bi:0,ing:0,pot_eq:0,pot_st:0};
-  sorted.forEach(([,d])=>{tot.n+=d.n;tot.cc+=d.cc;tot.bi+=d.bi;tot.ing+=d.ing;tot.pot_eq+=d.pot_eq;tot.pot_st+=d.pot_st;});
+  const tot={n:0,cc:0,bi:0,ing:0,pot_eq:0,pot_st:0,pot_st_gar:0,pot_st_contr:0};
+  sorted.forEach(([,d])=>{tot.n+=d.n;tot.cc+=d.cc;tot.bi+=d.bi;tot.ing+=d.ing;tot.pot_eq+=d.pot_eq;tot.pot_st+=d.pot_st;
+    tot.pot_st_gar+=d.pot_st_gar;tot.pot_st_contr+=d.pot_st_contr;});
   const pctFmt=d=>d.n>0?(d.cc/d.n*100).toFixed(0)+'%':'—';
   tbody.innerHTML=sorted.map(([reg,d])=>`
     <tr>
@@ -366,8 +377,10 @@ function _renderRegTable(){
       <td class="num">${d.bi}</td>
       <td class="num" style="color:var(--az2)">${_fT(d.ing)}</td>
       <td class="num" style="color:var(--am)">${_fT(d.pot_eq)}</td>
-      <td class="num" style="color:var(--teal)">${_fT(d.pot_st)}</td>
-      <td class="num" style="color:var(--teal)">${d.n>0?_fT(d.pot_st/d.n):'—'}</td>
+      <td class="num" style="color:var(--teal)">${_fT(d.pot_st_gar)}</td>
+      <td class="num" style="color:var(--az2)">${_fT(d.pot_st_contr)}</td>
+      <td class="num" style="color:var(--teal);font-weight:700">${_fT(d.pot_st)}</td>
+      <td class="num" style="color:var(--mut)">${d.n>0?_fT(d.pot_st/d.n):'—'}</td>
     </tr>`).join('')+`
     <tr style="background:rgba(30,90,200,.08);font-weight:800;border-top:2px solid var(--az2)">
       <td><strong>TOTAL</strong></td>
@@ -377,8 +390,10 @@ function _renderRegTable(){
       <td class="num">${tot.bi}</td>
       <td class="num" style="color:var(--az2)">${_fT(tot.ing)}</td>
       <td class="num" style="color:var(--am)">${_fT(tot.pot_eq)}</td>
+      <td class="num" style="color:var(--teal)">${_fT(tot.pot_st_gar)}</td>
+      <td class="num" style="color:var(--az2)">${_fT(tot.pot_st_contr)}</td>
       <td class="num" style="color:var(--teal)">${_fT(tot.pot_st)}</td>
-      <td class="num" style="color:var(--teal)">${tot.n>0?_fT(tot.pot_st/tot.n):'—'}</td>
+      <td class="num" style="color:var(--mut)">${tot.n>0?_fT(tot.pot_st/tot.n):'—'}</td>
     </tr>`;
 }
 
