@@ -1407,7 +1407,12 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
     <div class="ch" style="flex-wrap:wrap;gap:.5rem">
       <span class="ct">Contratos de Garantía · Costo Estimado</span>
       <span style="font-size:.55rem;color:var(--mut)" id="vg-gar-lbl">—</span>
-      <div id="vg-gar-linea" style="display:flex;gap:.25rem;margin-left:auto;flex-wrap:wrap"></div>
+      <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto;flex-wrap:wrap">
+        <div id="vg-gar-linea" style="display:flex;gap:.25rem;flex-wrap:wrap"></div>
+        <button id="vg-gar-pdf-btn" onclick="vgGarExportPDF()"
+          style="font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;
+                 border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar PDF</button>
+      </div>
     </div>
     <div class="cb"><div id="vg-gar-tabla"></div></div>
   </div>
@@ -4969,6 +4974,112 @@ function _vgRenderGar(){
 
   const lbl=document.getElementById('vg-gar-lbl');
   if(lbl) lbl.textContent=`${filas.length} contratos · ${mm(tV)} cartera · ${mm(tR)} costo por ejecutar`;
+}
+
+// Exportar la tabla de garantías a PDF. Mismo enfoque que eerrExportPDF():
+// se mide el ancho natural del contenido y se crea una página a esa medida,
+// así la tabla nunca se corta ni se achica.
+async function vgGarExportPDF(){
+  if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+    alert('Librerías PDF no cargadas. Verifique conexión a internet e intente de nuevo.');
+    return;
+  }
+  const src = document.querySelector('#vg-gar-tabla table');
+  if (!src) { alert('No hay tabla de garantías para exportar.'); return; }
+
+  const btn = document.getElementById('vg-gar-pdf-btn');
+  const SVG_ICON = '<svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar PDF';
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+
+  let wrap = null;
+  try {
+    const c = src.cloneNode(true);
+    c.querySelectorAll('*').forEach(n => {
+      n.style.position  = 'static';
+      n.style.maxHeight = 'none';
+      n.style.overflow  = 'visible';
+      n.style.maxWidth  = 'none';
+      n.style.cursor    = 'default';
+    });
+    c.querySelectorAll('td,th').forEach(n => {
+      n.style.fontSize   = '9px';
+      n.style.padding    = '3px 6px';
+      n.style.lineHeight = '1.35';
+      n.style.whiteSpace = 'nowrap';
+    });
+    // Las flechas de orden y las barras de progreso no aportan en papel:
+    // la barra se reemplaza por el porcentaje, que ya va al lado.
+    c.querySelectorAll('th').forEach(n => { n.textContent = n.textContent.replace(/[▲▼]/g, '').trim(); });
+    c.querySelectorAll('td > div > div').forEach(n => {
+      if (n.parentElement && n.parentElement.style.display === 'flex' && !n.textContent.trim()) n.remove();
+    });
+    c.style.borderCollapse = 'collapse';
+    c.style.tableLayout    = 'auto';
+    c.style.width          = 'auto';
+    c.style.minWidth       = '0';
+
+    wrap = document.createElement('div');
+    wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;' +
+      'padding:14px 20px 20px;font-family:Arial,sans-serif;color:#111;' +
+      'display:inline-block;box-sizing:border-box';
+
+    const filas = _vgGarFilas().filter(f => _vgGarLinea === 'todas' || f.linea === _vgGarLinea);
+    const tV = filas.reduce((s, f) => s + f.val, 0);
+    const hoy = (window.APP_DATA || {}).hoy || '';
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'margin-bottom:10px;border-bottom:2.5px solid #002D73;padding-bottom:6px';
+    hdr.innerHTML =
+      '<span style="font-size:13px;font-weight:700;color:#002D73">TECSERVICE — Contratos de Garantía · Costo Estimado</span>' +
+      '&emsp;<span style="font-size:10px;color:#555">' +
+      (_vgGarLinea === 'todas' ? 'Todas las líneas' : _vgGarLinea) +
+      ' &nbsp;·&nbsp; ' + filas.length + ' contratos &nbsp;·&nbsp; ' + mm(tV) + ' de cartera' +
+      (hoy ? ' &nbsp;·&nbsp; Datos al ' + hoy : '') + '</span>';
+    wrap.appendChild(hdr);
+    wrap.appendChild(c);
+
+    const nota = document.createElement('div');
+    nota.style.cssText = 'font-size:8px;color:#666;margin-top:8px;line-height:1.5;max-width:900px';
+    nota.innerHTML =
+      'Costo estimado según el margen de cada programa (Basic 55%, Advanced 60%, Profesional 65%); ' +
+      'el costo es el complemento. Los contratos sin programa asignado usan un margen promedio de 50%. ' +
+      'El costo remanente descuenta el porcentaje ya consumido. Los días restantes se cuentan desde la ' +
+      'fecha de datos del panel hasta la fecha de término.';
+    wrap.appendChild(nota);
+
+    document.body.appendChild(wrap);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    const realW = Math.ceil(wrap.getBoundingClientRect().width)  || wrap.offsetWidth;
+    const realH = Math.ceil(wrap.getBoundingClientRect().height) || wrap.offsetHeight;
+    if (!realW || !realH) throw new Error('No se pudo medir el contenido (w=' + realW + ' h=' + realH + ')');
+
+    wrap.style.display = 'block';
+    wrap.style.width   = realW + 'px';
+
+    const canvas = await html2canvas(wrap, {
+      scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
+      width: realW, height: realH, windowWidth: realW, windowHeight: realH,
+    });
+
+    const { jsPDF } = window.jspdf;
+    const MM_PX = 25.4 / 96;
+    const pageW = realW * MM_PX;
+    const pageH = realH * MM_PX;
+    const pdf = new jsPDF({
+      orientation: pageW >= pageH ? 'landscape' : 'portrait',
+      unit: 'mm', format: [pageW, pageH],
+    });
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, pageW, pageH);
+    const suf = _vgGarLinea === 'todas' ? '' : '_' + _vgGarLinea.replace(/[\s/]+/g, '_');
+    pdf.save('Contratos_Garantia_TS' + suf + '_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
+
+  } catch (err) {
+    console.error('vgGarExportPDF:', err);
+    alert('Error al generar PDF: ' + err.message);
+  } finally {
+    if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    if (btn) { btn.disabled = false; btn.innerHTML = SVG_ICON; }
+  }
 }
 
 function initVision(){
