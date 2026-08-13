@@ -6137,7 +6137,12 @@ function _biRegData(){
     out.push({region:r, total:tot, n_clientes:d.n_clientes||0,
               lineas:Object.entries(ln).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1])});
   });
-  return out.sort((a,b)=>b.total-a.total);
+  // "Sin región" siempre al final: no es una región, es la falta de dato.
+  return out.sort((a,b)=>{
+    const sa = a.region === 'Sin región', sb = b.region === 'Sin región';
+    if(sa !== sb) return sa ? 1 : -1;
+    return b.total - a.total;
+  });
 }
 
 let _biMapL = null, _biMapLyr = null;
@@ -6249,8 +6254,9 @@ function _biRenderRegTabla(){
       </table>
     </div>
     <p style="font-size:.55rem;color:var(--mut);margin:.45rem 0 0;line-height:1.4">
-      La región se obtiene cruzando el cliente contra BASE MAPA. Los clientes sin coincidencia
-      quedan en «Sin región» y no se dibujan en el mapa.</p>`;
+      La región viene de la columna «Región» de la hoja BASE INSTALADA. Los equipos que en el Excel
+      figuran sin región, con «Sin Información» o con error quedan agrupados en «Sin región» y no se
+      dibujan en el mapa.</p>`;
 }
 
 function _biRefreshDynamic(){
