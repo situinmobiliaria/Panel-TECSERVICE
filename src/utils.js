@@ -60,6 +60,7 @@ function sv(name,btn){
   if(name==='nuevos')renderNC();
   if(name==='facturacion') setTimeout(renderFcGraficos, 100);
   if(name==='desglose') setTimeout(()=>{ if(window._desgMapRefresh) window._desgMapRefresh(); }, 80);
+  if(name==='base')     setTimeout(()=>{ if(window._biMapRefresh) window._biMapRefresh(); }, 80);
   // 150ms: mapa/matriz/casos interceptan sv() y pintan su contenido recién a
   // los 80ms (lazy render), así que hay que esperar más que eso para
   // encontrar su .sh y no perderse el badge en esas 3 vistas.

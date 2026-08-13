@@ -12,7 +12,7 @@ Configuración:
     Editar la sección CONFIG si cambia el presupuesto anual o el nombre del Excel.
 """
 from __future__ import annotations
-import os, re, json, math
+import os, re, json, math, unicodedata
 from datetime import date, datetime, timedelta
 from collections import defaultdict
 
@@ -1023,6 +1023,10 @@ def read_base_instalada(wb):
     por_estado     = defaultdict(int)
     tipo_por_linea = defaultdict(lambda: defaultdict(int))
     cli_map        = {}  # cliente → {total, lineas:{}, estados:{}}
+    # Región: viene en la col AD de la propia hoja, llena en el 100% de las
+    # filas activas. No se cruza contra BASE MAPA porque ésa sólo cubre los
+    # clientes con facturación (182 de 1.501).
+    reg_map        = {}
 
     total = 0
     for row in ws.iter_rows(min_row=2, values_only=True):
@@ -1048,6 +1052,21 @@ def read_base_instalada(wb):
         # col[27] = Potencial ST (Si/No)
         potencial_raw = safe_str(row[27]).strip().upper() if len(row) > 27 and row[27] is not None else ""
         es_potencial  = potencial_raw in ("SI", "SÍ", "S", "1", "TRUE", "VERDADERO")
+
+        # col[29] = Región (col AD)
+        region = _norm_region(row[29] if len(row) > 29 else None)
+        if "GEMCO" not in nombre_analisis:
+            rd = reg_map.setdefault(region, {
+                "total": 0, "total_si": 0,
+                "lineas": defaultdict(int), "lineas_si": defaultdict(int),
+                "_clientes": set(),
+            })
+            rd["total"] += 1
+            rd["lineas"][linea] += 1
+            rd["_clientes"].add(nombre_analisis)
+            if es_potencial:
+                rd["total_si"] += 1
+                rd["lineas_si"][linea] += 1
 
         total += 1
         por_linea[linea] += 1
@@ -1147,6 +1166,8 @@ def read_base_instalada(wb):
     total_no_sin_gemco = sum(c["total_no"] for c in clientes)
 
     print(f"       Base Instalada: {total_sin_gemco} activos (sin GEMCO) | {len(clientes)} clientes | {len(por_tipo)} tipos")
+    _sr = reg_map.get("Sin región", {}).get("total", 0)
+    print(f"       BI por region: {len(reg_map)} regiones | {_sr} equipos sin region")
     por_tipo_linea_out = {
         linea: sorted([{"tipo": t, "n": n} for t, n in ctr.items()], key=lambda x: -x["n"])[:6]
         for linea, ctr in tipo_por_linea.items()
@@ -1163,7 +1184,37 @@ def read_base_instalada(wb):
         "por_tipo_linea": por_tipo_linea_out,
         "por_estado":     dict(por_estado),
         "clientes":       clientes,
+        "por_region": {
+            r: {"total": d["total"], "total_si": d["total_si"],
+                "n_clientes": len(d["_clientes"]),
+                "lineas": dict(d["lineas"]), "lineas_si": dict(d["lineas_si"])}
+            for r, d in sorted(reg_map.items(), key=lambda x: -x[1]["total"])
+        },
     }
+
+
+# Nombres de región de BASE INSTALADA normalizados a los que usa el resto del
+# panel (BASE MAPA), para que el color y la posición coincidan entre hojas.
+_BI_REGION_ALIAS = {
+    "LA ARAUCANIA": "Araucanía", "ARAUCANIA": "Araucanía",
+    "BIOBIO": "Bío Bío", "BIO BIO": "Bío Bío", "BIO-BIO": "Bío Bío",
+    "METROPOLITANA": "Metropolitana", "REGION METROPOLITANA": "Metropolitana",
+    "O'HIGGINS": "O'Higgins", "OHIGGINS": "O'Higgins",
+    "MAGALLANES": "Magallanes", "NUBLE": "Ñuble",
+    "SIN INFORMACION": "Sin región", "0": "Sin región", "#N/A": "Sin región",
+}
+
+
+def _norm_region(s):
+    """Deja el nombre de región tal como lo usa el resto del panel."""
+    t = safe_str(s).strip()
+    if not t:
+        return "Sin región"
+    k = "".join(c for c in unicodedata.normalize("NFD", t.upper())
+                if unicodedata.category(c) != "Mn")
+    if k in _BI_REGION_ALIAS:
+        return _BI_REGION_ALIAS[k]
+    return t
 
 
 # ══════════════════════════════════════════════════════════════════════════════

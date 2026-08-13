@@ -266,6 +266,175 @@ function biFiltrarPotencial(btn){
 }
 
 // Actualiza KPIs, cards de línea y tabla al cambiar el filtro de Potencial ST
+// ═══════════════════════════════════════════════════════════════
+// MAPA DE EQUIPOS POR REGIÓN
+// Coordenadas y paleta son las mismas del mapa de Desglose de Ingresos,
+// y el color se asigna por la posición de la región en
+// desglose_ingresos.por_region.regiones, para que una región tenga
+// exactamente el mismo color en las dos hojas.
+// ═══════════════════════════════════════════════════════════════
+const _BI_GEO = {
+  'Arica y Parinacota':{lat:-18.5,lon:-70.3}, 'Tarapacá':{lat:-20.2,lon:-69.3},
+  'Antofagasta':{lat:-23.7,lon:-69.7}, 'Atacama':{lat:-27.4,lon:-70.3},
+  'Coquimbo':{lat:-30.0,lon:-71.3}, 'Valparaíso':{lat:-33.0,lon:-71.6},
+  'Metropolitana de Santiago':{lat:-33.5,lon:-70.6}, 'Metropolitana':{lat:-33.5,lon:-70.6},
+  "O'Higgins":{lat:-34.6,lon:-71.0}, 'Maule':{lat:-35.4,lon:-71.7},
+  'Ñuble':{lat:-36.7,lon:-71.8}, 'Bío Bío':{lat:-37.5,lon:-72.4},
+  'Biobío':{lat:-37.5,lon:-72.4}, 'Araucanía':{lat:-38.9,lon:-72.3},
+  'Los Ríos':{lat:-39.8,lon:-73.2}, 'Los Lagos':{lat:-41.5,lon:-73.0},
+  'Aysén':{lat:-45.6,lon:-72.1},
+  'Magallanes y la Antártica Chilena':{lat:-53.2,lon:-70.9}, 'Magallanes':{lat:-53.2,lon:-70.9},
+};
+const _BI_PALETTE = ['#002D73','#28D2C3','#FFC000','#E87722','#7A1FAA',
+                     '#0A5C8C','#00832F','#D46000','#8B008B','#5a7da8',
+                     '#c44569','#574b90','#3c9d4e','#b5451b','#888','#333','#aaa'];
+
+// Orden de color: primero las regiones del Desglose en su mismo orden (para
+// que una región tenga idéntico color en ambas hojas), y a continuación las
+// que sólo existen en base instalada — Atacama, O'Higgins y Magallanes no
+// tienen facturación, así que no aparecen allá y necesitan color propio.
+let _biRegOrden = null;
+function _biRegColor(r){
+  if(!_biRegOrden){
+    const ord = ((((window.APP_DATA||{}).desglose_ingresos||{}).por_region)||{}).regiones || [];
+    _biRegOrden = ord.slice();
+    Object.keys(((window.APP_DATA||{}).base_instalada||{}).por_region || {})
+      .filter(x => x !== 'Sin región' && _biRegOrden.indexOf(x) === -1)
+      .sort()
+      .forEach(x => _biRegOrden.push(x));
+  }
+  const i = _biRegOrden.indexOf(r);
+  return _BI_PALETTE[(i >= 0 ? i : _biRegOrden.length) % _BI_PALETTE.length];
+}
+
+// Datos por región respetando el filtro Potencial ST del inicio de la hoja
+function _biRegData(){
+  const pr = ((window.APP_DATA||{}).base_instalada||{}).por_region || {};
+  const usaSi = _biFiltPotencial === 'si';
+  const out = [];
+  Object.entries(pr).forEach(([r,d])=>{
+    const tot = usaSi ? (d.total_si||0) : (d.total||0);
+    if(tot <= 0) return;
+    const ln = usaSi ? (d.lineas_si||{}) : (d.lineas||{});
+    out.push({region:r, total:tot, n_clientes:d.n_clientes||0,
+              lineas:Object.entries(ln).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1])});
+  });
+  return out.sort((a,b)=>b.total-a.total);
+}
+
+let _biMapL = null, _biMapLyr = null;
+function _biRenderMapa(){
+  if(!window.L) return;
+  const cont = document.getElementById('biMapa');
+  if(!cont) return;
+  const datos = _biRegData();
+
+  if(!_biMapL){
+    _biMapL = L.map('biMapa',{zoomControl:true,scrollWheelZoom:false}).setView([-35.5,-70.5],4);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      {attribution:'© OpenStreetMap © CARTO',maxZoom:18}).addTo(_biMapL);
+  }
+  if(!_biMapLyr) _biMapLyr = L.layerGroup().addTo(_biMapL);
+  _biMapLyr.clearLayers();
+
+  const maxV = Math.max(...datos.map(d=>d.total), 1);
+  const totG = datos.reduce((s,d)=>s+d.total,0);
+
+  datos.forEach(d=>{
+    const geo = _BI_GEO[d.region];
+    if(!geo) return;                       // "Sin región" no se dibuja
+    const clr = _biRegColor(d.region);
+    const radius = Math.max(7, Math.sqrt(d.total/maxV)*34);
+    const filas = d.lineas.map(([l,v])=>
+      `<tr><td style="padding:1px 0"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;
+        background:${_biLineaColor(String(l).toUpperCase())};margin-right:5px"></span>${l}</td>
+       <td style="text-align:right;padding:1px 0 1px 12px;font-weight:700">${v.toLocaleString('es-CL')}</td>
+       <td style="text-align:right;padding:1px 0 1px 8px;color:#9aa;font-size:.9em">${(v/d.total*100).toFixed(0)}%</td></tr>`).join('');
+    L.circleMarker([geo.lat,geo.lon],{
+      radius, fillColor:clr, color:clr, weight:1.5, opacity:1, fillOpacity:.78,
+    }).bindTooltip(
+      `<div style="font-family:Roboto,sans-serif;min-width:190px">
+         <div style="font-weight:900;font-size:.78rem;color:${clr};border-bottom:1px solid #ddd;padding-bottom:3px;margin-bottom:4px">
+           ${d.region}</div>
+         <div style="font-size:.72rem;margin-bottom:4px">
+           <strong style="font-size:.9rem">${d.total.toLocaleString('es-CL')}</strong> equipos
+           <span style="color:#888">· ${(d.total/totG*100).toFixed(1)}% del total</span></div>
+         <table style="font-size:.66rem;border-collapse:collapse;width:100%">${filas}</table>
+         <div style="font-size:.62rem;color:#888;margin-top:4px;border-top:1px solid #eee;padding-top:3px">
+           ${d.n_clientes} cliente${d.n_clientes===1?'':'s'}</div>
+       </div>`,
+      {sticky:true, direction:'top', opacity:.97}
+    ).addTo(_biMapLyr);
+  });
+
+  const lbl = document.getElementById('bi-mapa-lbl');
+  if(lbl) lbl.textContent = `${datos.length} regiones · ${totG.toLocaleString('es-CL')} equipos`;
+  setTimeout(()=>{ if(_biMapL) _biMapL.invalidateSize(); }, 60);
+}
+
+// Leaflet mide mal si el contenedor estaba oculto: sv() llama a esto al
+// entrar a la hoja para que recalcule el tamaño.
+window._biMapRefresh = function(){
+  if(_biMapL) _biMapL.invalidateSize();
+};
+
+function _biRenderRegTabla(){
+  const box = document.getElementById('bi-reg-tabla');
+  if(!box) return;
+  const datos = _biRegData();
+  if(!datos.length){ box.innerHTML=''; return; }
+  const totG = datos.reduce((s,d)=>s+d.total,0);
+  const maxV = Math.max(...datos.map(d=>d.total),1);
+
+  // Columnas = líneas con equipos, ordenadas por volumen total
+  const acum = {};
+  datos.forEach(d=>d.lineas.forEach(([l,v])=>{acum[l]=(acum[l]||0)+v;}));
+  const cols = Object.keys(acum).sort((a,b)=>acum[b]-acum[a]);
+
+  const th = (t,al)=>`<th style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;
+    padding:.35rem .5rem;font-size:.55rem;letter-spacing:.03em;text-align:${al};white-space:nowrap;
+    border-right:1px solid rgba(255,255,255,.18)">${t}</th>`;
+  const SEP='border-right:1px solid var(--brd)';
+
+  box.innerHTML = `
+    <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
+      <table style="width:100%;border-collapse:collapse;min-width:${220+cols.length*62}px">
+        <thead><tr>
+          ${th('REGIÓN','left')}${th('EQUIPOS','right')}${th('%','right')}
+          ${cols.map(c=>th(String(c).toUpperCase().slice(0,11),'right')).join('')}
+          ${th('CLIENTES','right')}
+        </tr></thead>
+        <tbody>${datos.map((d,i)=>{
+          const m = Object.fromEntries(d.lineas);
+          return `<tr style="background:${i%2===0?'var(--bg2)':'var(--bg)'};border-left:3px solid ${_biRegColor(d.region)}">
+            <td style="padding:.28rem .5rem;font-size:.63rem;font-weight:600;white-space:nowrap;${SEP}">${d.region}</td>
+            <td style="padding:.28rem .5rem;text-align:right;font-size:.65rem;font-weight:700;
+                       font-variant-numeric:tabular-nums;${SEP}">${d.total.toLocaleString('es-CL')}</td>
+            <td style="padding:.28rem .5rem;${SEP}">
+              <div style="display:flex;align-items:center;gap:4px">
+                <div style="flex:1;height:5px;background:var(--gy);border-radius:3px;overflow:hidden">
+                  <div style="height:100%;width:${d.total/maxV*100}%;background:${_biRegColor(d.region)}"></div></div>
+                <span style="font-size:.55rem;color:var(--mut);min-width:30px;text-align:right">${(d.total/totG*100).toFixed(1)}%</span>
+              </div></td>
+            ${cols.map(c=>`<td style="padding:.28rem .5rem;text-align:right;font-size:.61rem;
+              font-variant-numeric:tabular-nums;color:${m[c]?_biLineaColor(String(c).toUpperCase()):'var(--mut)'};${SEP}">${m[c]?m[c].toLocaleString('es-CL'):'—'}</td>`).join('')}
+            <td style="padding:.28rem .5rem;text-align:right;font-size:.61rem;color:var(--mut)">${d.n_clientes}</td>
+          </tr>`;}).join('')}</tbody>
+        <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
+          <td style="padding:.32rem .5rem;font-size:.63rem;${SEP}">TOTAL · ${datos.length} regiones</td>
+          <td style="padding:.32rem .5rem;text-align:right;font-size:.65rem;font-variant-numeric:tabular-nums;${SEP}">${totG.toLocaleString('es-CL')}</td>
+          <td style="padding:.32rem .5rem;text-align:right;font-size:.58rem;${SEP}">100%</td>
+          ${cols.map(c=>`<td style="padding:.32rem .5rem;text-align:right;font-size:.61rem;
+            font-variant-numeric:tabular-nums;${SEP}">${acum[c].toLocaleString('es-CL')}</td>`).join('')}
+          <td style="padding:.32rem .5rem;text-align:right;font-size:.61rem">${datos.reduce((s,d)=>s+d.n_clientes,0)}</td>
+        </tr></tfoot>
+      </table>
+    </div>
+    <p style="font-size:.55rem;color:var(--mut);margin:.45rem 0 0;line-height:1.4">
+      La región se obtiene cruzando el cliente contra BASE MAPA. Los clientes sin coincidencia
+      quedan en «Sin región» y no se dibujan en el mapa.</p>`;
+}
+
 function _biRefreshDynamic(){
   const base = _biBaseList();
   const total = base.reduce((s,c)=>s+_biVal(c,'total'),0);
@@ -403,6 +572,8 @@ function _biRefreshDynamic(){
   }
 
   _biRenderTabla();
+  _biRenderMapa();
+  _biRenderRegTabla();
 }
 function biSearch(val){
   _biQuery = val;
@@ -578,6 +749,23 @@ function initBaseInstalada(){
   <!-- Cards por línea de negocio (2×3) -->
   <div class="sh" style="margin-bottom:.6rem"><h2>Por Línea de Negocio</h2><div class="sh-line"></div><span class="sh-tag">Distribución de equipos · top tipos · clientes · % con contrato activo</span></div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1.1rem" id="bi-linea-cards"></div>
+
+  <!-- Mapa de equipos por región + tabla resumen -->
+  <div class="sh" style="margin-bottom:.6rem"><h2>Distribución Geográfica</h2><div class="sh-line"></div>
+    <span class="sh-tag">Equipos de base instalada por región · el tamaño de la burbuja es proporcional a la cantidad</span></div>
+  <div style="display:grid;grid-template-columns:1fr 1.25fr;gap:.8rem;margin-bottom:1.1rem">
+    <div class="card">
+      <div class="ch"><span class="ct">Equipos por Región</span>
+        <span style="font-size:.55rem;color:var(--mut);margin-left:auto" id="bi-mapa-lbl">—</span></div>
+      <div class="cb" style="padding:.5rem">
+        <div id="biMapa" style="height:430px;border-radius:6px;overflow:hidden"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch"><span class="ct">Resumen por Región</span></div>
+      <div class="cb"><div id="bi-reg-tabla"></div></div>
+    </div>
+  </div>
 
   <!-- Distribución por Línea + Top tipos por línea -->
   <div class="g6040" style="margin-bottom:1rem">
