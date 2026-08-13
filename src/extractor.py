@@ -536,6 +536,14 @@ def read_bbdd(xlsx_path):
 
     ytd_cli_2025 = ytd_per_cli(ANO - 1, mes_corte)
     ytd_cli_2024 = ytd_per_cli(ANO - 2, mes_corte)
+    # Año en curso con la MISMA base (TS + Factura + los 3 catálogos de
+    # servicio). Es la que cuadra con "Ingresos Totales" de la hoja Analisis
+    # Facturación: excluye Provisión y los catálogos de venta de equipos
+    # (E./C. Esterilización), que no son ingreso de servicio.
+    ytd_cli_2026 = ytd_per_cli(ANO, mes_corte)
+    ytd_2026_tot = float(
+        df_ytd_base[(df_ytd_base[c_ano] == ANO) & (df_ytd_base[c_mes] <= mes_corte)][c_monto].sum()
+    )
 
     # YTD contratos 2024/2025: Vendedor (col T) empieza con "ST"
     c_vendedor = cols[19]
@@ -578,6 +586,8 @@ def read_bbdd(xlsx_path):
         "tipo_cli_map":          tipo_map,
         "ytd_cli_2025":          ytd_cli_2025,
         "ytd_cli_2024":          ytd_cli_2024,
+        "ytd_cli_2026":          ytd_cli_2026,
+        "ytd_2026_tot":          ytd_2026_tot,
         "ytd_contr_2024":        ytd_contr_2024,
         "ytd_contr_2025":        ytd_contr_2025,
         "mes_corte":             mes_corte,
@@ -2529,6 +2539,7 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
     tipo_map    = bbdd["tipo_cli_map"]
     ytd_cli_25  = bbdd["ytd_cli_2025"]
     ytd_cli_24  = bbdd["ytd_cli_2024"]
+    ytd_cli_26  = bbdd.get("ytd_cli_2026", {})
 
     # Clientes con contratos activos reales (para override de tiene_contrato)
     active_contract_clients = {c["cliente"] for c in contratos if c["estado"] == "Activado"}
@@ -2545,6 +2556,10 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         nom = p.get("nombre_analisis") or cli
         entry["real_ytd_2025"]    = round(ytd_cli_25.get(nom, ytd_cli_25.get(cli, 0)))
         entry["real_ytd_2024"]    = round(ytd_cli_24.get(nom, ytd_cli_24.get(cli, 0)))
+        # Facturación del año en curso con la misma base que "Ingresos
+        # Totales" de Analisis Facturación: la suma de todos los clientes
+        # cuadra con el KPI de portada.
+        entry["real_ytd_fac"]     = round(ytd_cli_26.get(nom, ytd_cli_26.get(cli, 0)))
         entry["fin_contrato"]     = fin_contrato_by_cli.get(cli, "")
         entry["fin_fmt"]          = fin_fmt_by_cli.get(cli, "")
         entry["inicio_fmt"]       = inicio_fmt_by_cli.get(cli, "")
@@ -2552,6 +2567,40 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         # Override: tiene_contrato = True solo si hay contrato ACTIVO en CONTRATOS TODOS
         entry["tiene_contrato"]   = cli in active_contract_clients
         panel.append(entry)
+
+    # ── Facturación del año por cliente, desde la BBDD ──────────────────────
+    # El panel viene de la hoja FACTURACION y trae 111 clientes; la BBDD
+    # factura además a clientes que no están ahí. Esta lista los incluye a
+    # todos, así su suma cuadra con "Ingresos Totales" de Analisis Facturación.
+    _norm = lambda s: " ".join(safe_str(s).strip().upper().split())
+    # cliente del panel (para tipo y contrato) indexado por nombre normalizado
+    _pan_idx = {}
+    for e in panel:
+        _pan_idx[_norm(e["cliente"])] = e
+        na = e.get("nombre_analisis")
+        if na:
+            _pan_idx.setdefault(_norm(na), e)
+    _contr_norm = {_norm(c) for c in active_contract_clients}
+
+    fact_clientes = []
+    for cli_bbdd, monto in bbdd.get("ytd_cli_2026", {}).items():
+        nom = safe_str(cli_bbdd).strip()
+        if not nom or nom.lower() in ("nan", "none") or not monto:
+            continue
+        k  = _norm(nom)
+        pe = _pan_idx.get(k)
+        fact_clientes.append({
+            "cliente":  pe["cliente"] if pe else nom,
+            "tipo_cli": (pe.get("tipo_cli") if pe else None)
+                        or safe_str(tipo_map.get(cli_bbdd, "")) or "Sin clasificar",
+            "contrato": bool(pe.get("tiene_contrato")) if pe else (k in _contr_norm),
+            "real":     round(float(monto)),
+            "en_panel": pe is not None,
+        })
+    fact_clientes.sort(key=lambda x: -x["real"])
+    _tot_fc = sum(x["real"] for x in fact_clientes)
+    print(f"       FACT CLIENTES: {len(fact_clientes)} clientes | MM${_tot_fc/1e6:,.1f} "
+          f"({sum(1 for x in fact_clientes if not x['en_panel'])} fuera del panel)")
 
     # Monthly arrays helper
     def to_arr(d, year):
@@ -2605,6 +2654,7 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         "ytd_contr_2024":   round(bbdd.get("ytd_contr_2024", 0)),
         "ytd_contr_2025":   round(bbdd.get("ytd_contr_2025", 0)),
         "panel":   panel,
+        "fact_clientes": fact_clientes,
         "mensual": {
             "total":        {str(y): to_arr(mt, y) for y in [ANO - 2, ANO - 1, ANO]},
             "facturado":    {str(y): to_arr(bbdd["mensual_facturado"], y) for y in [ANO - 2, ANO - 1, ANO]},
