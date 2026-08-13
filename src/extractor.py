@@ -2454,13 +2454,28 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
     #   - Líneas: misma lógica de ponderación que linea_month global
     #   - Otros: prorrateo proporcional de otros_total_month global
     # Así los totales suman exacto a la tabla de desglose.
-    cli_to_region = {}
-    if mapa_data:
-        for entry in mapa_data:
-            nombre = entry.get("n", "")
-            if nombre:
-                r = (entry.get("region") or "Sin región").strip() or "Sin región"
-                cli_to_region[nombre] = r
+    # Región por cliente. Antes se cruzaba por nombre exacto, así que un
+    # cliente escrito distinto entre FACTURACION y BASE MAPA caía en "Sin
+    # región" — dejaba MM$38,6 de contratos ahí contra MM$21,6 facturados.
+    # Ahora usa la misma normalización y búsqueda parcial que el lado de
+    # facturación, para que ambos asignen igual.
+    _reg_norm = {}
+    for entry in (mapa_data or []):
+        k = _norm_cli(entry.get("n", ""))
+        if k:
+            _reg_norm[k] = (entry.get("region") or "Sin región").strip() or "Sin región"
+
+    def _region_de(nombre):
+        k = _norm_cli(nombre)
+        if k in _reg_norm:
+            return _reg_norm[k]
+        if len(k) >= 8:
+            for mk, rg in _reg_norm.items():
+                if len(mk) >= 8 and (mk in k or k in mk):
+                    return rg
+        return "Sin región"
+
+    cli_to_region = {p["cliente"]: _region_de(p["cliente"]) for p in panel_raw}
 
     # Contratos y desglose por línea por región
     reg_con  = {}   # {region: [n floats]} contratos brutos
@@ -2507,22 +2522,6 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
     _mf = bbdd.get("mensual_facturado", {})
     def _tot_ano(y):
         return sum(v for m, v in _mf.get(y, {}).items() if m <= n)
-
-    _reg_norm = {}
-    for e in (mapa_data or []):
-        k = _norm_cli(e.get("n", ""))
-        if k:
-            _reg_norm[k] = (e.get("region") or "Sin región").strip() or "Sin región"
-
-    def _region_de(nombre):
-        k = _norm_cli(nombre)
-        if k in _reg_norm:
-            return _reg_norm[k]
-        if len(k) >= 8:
-            for mk, rg in _reg_norm.items():
-                if len(mk) >= 8 and (mk in k or k in mk):
-                    return rg
-        return "Sin región"
 
     aa_cfg = []
     for y, campo in ((ANO - 1, "contr_2025"), (ANO - 2, "contr_2024")):
