@@ -140,14 +140,17 @@ function _pfRenderDetalle(){
   const q = (pfSrch || '').trim().toLowerCase();
   if(q) filas = filas.filter(x => x.cliente.toLowerCase().includes(q));
 
+  const _mgPct = x => x.real ? (x.real - (x.costo || 0)) / x.real * 100 : 0;
   filas.sort(function(a, b){
-    const va = a[_pfDetSort], vb = b[_pfDetSort];
+    const va = _pfDetSort === 'margen' ? _mgPct(a) : a[_pfDetSort];
+    const vb = _pfDetSort === 'margen' ? _mgPct(b) : b[_pfDetSort];
     if(typeof va === 'string') return _pfDetAsc ? va.localeCompare(vb, 'es') : vb.localeCompare(va, 'es');
     if(typeof va === 'boolean') return _pfDetAsc ? (va ? 1 : 0) - (vb ? 1 : 0) : (vb ? 1 : 0) - (va ? 1 : 0);
     return _pfDetAsc ? va - vb : vb - va;
   });
 
   const tot  = filas.reduce((s, x) => s + x.real, 0);
+  const totK = filas.reduce((s, x) => s + (x.costo || 0), 0);
   const maxV = Math.max.apply(null, filas.map(x => x.real).concat([1]));
   const SEP  = 'border-right:1px solid var(--brd)';
   const th = (t, f, al) =>
@@ -160,16 +163,18 @@ function _pfRenderDetalle(){
     'font-size:.57rem;text-align:' + al + ';border-right:1px solid rgba(255,255,255,.18)">' + t + '</th>';
 
   const cuerpo = filas.map(function(x, i){
+    const mg  = _mgPct(x);
     const tb2 = x.tipo_cli === 'Público' ? 'pb' : x.tipo_cli === 'Privado' ? 'por' : 'pgr';
     const tl  = x.tipo_cli === 'Público' ? 'PÚB' : x.tipo_cli === 'Privado' ? 'PRIV' : 'N/D';
-    const fp  = x.en_panel ? '' :
-      '<span style="font-size:.5rem;color:var(--mut);margin-left:4px" title="No aparece en la hoja FACTURACION">· fuera de panel</span>';
     return '<tr style="background:' + (i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)') + '">' +
       '<td style="padding:.26rem .6rem;text-align:right;font-family:\'Roboto Mono\',monospace;font-size:.58rem;color:var(--mut);' + SEP + '">' + (i + 1) + '</td>' +
-      '<td style="padding:.26rem .6rem;font-size:.64rem;font-weight:600;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + SEP + '" title="' + x.cliente + '">' + x.cliente + fp + '</td>' +
+      '<td style="padding:.26rem .6rem;font-size:.64rem;font-weight:600;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + SEP + '" title="' + x.cliente + '">' + x.cliente + '</td>' +
       '<td style="padding:.26rem .6rem;' + SEP + '"><span class="pill ' + tb2 + '">' + tl + '</span></td>' +
       '<td style="padding:.26rem .6rem;text-align:center;' + SEP + '"><span class="pill ' + (x.contrato ? 'pg' : 'pgr') + '" style="font-size:.55rem">' + (x.contrato ? 'CON' : 'SIN') + '</span></td>' +
       '<td style="padding:.26rem .6rem;text-align:right;font-size:.65rem;font-weight:700;font-variant-numeric:tabular-nums;' + SEP + '">' + fmtMM(x.real) + '</td>' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-size:.63rem;color:var(--or);font-variant-numeric:tabular-nums;' + SEP + '">' + ((x.costo || 0) ? fmtMM(x.costo) : '<span style="color:var(--mut)">—</span>') + '</td>' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-size:.62rem;font-weight:700;font-variant-numeric:tabular-nums;color:' +
+        (mg >= 60 ? 'var(--gn)' : mg >= 35 ? 'var(--am)' : 'var(--rd)') + ';' + SEP + '">' + mg.toFixed(1).replace('.', ',') + '%</td>' +
       '<td style="padding:.26rem .6rem"><div style="display:flex;align-items:center;gap:5px">' +
         '<div style="flex:1;height:5px;background:var(--gy);border-radius:3px;overflow:hidden;min-width:36px">' +
         '<div style="height:100%;width:' + (x.real / maxV * 100) + '%;background:var(--az2)"></div></div>' +
@@ -182,12 +187,15 @@ function _pfRenderDetalle(){
     '<table style="width:100%;border-collapse:collapse;min-width:640px">' +
     '<thead><tr>' + thPlain('#', 'right') + th('CLIENTE / INSTITUCIÓN', 'cliente', 'left') +
       th('TIPO', 'tipo_cli', 'left') + th('CONTRATO', 'contrato', 'center') +
-      th('REAL FACTURADO A LA FECHA', 'real', 'right') + thPlain('% DEL TOTAL', 'right') +
+      th('REAL FACTURADO A LA FECHA', 'real', 'right') + th('COSTO TOTAL', 'costo', 'right') +
+      th('MARGEN', 'margen', 'right') + thPlain('% DEL TOTAL', 'right') +
     '</tr></thead><tbody>' + cuerpo + '</tbody>' +
     '<tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">' +
       '<td colspan="4" style="padding:.35rem .6rem;font-size:.64rem;' + SEP + '">TOTAL · ' + filas.length +
         ' clientes' + ((_pfDetFilt === 'todos' && !q) ? '' : ' (filtrado)') + '</td>' +
       '<td style="padding:.35rem .6rem;text-align:right;font-size:.65rem;font-variant-numeric:tabular-nums;' + SEP + '">' + fmtMM(tot) + '</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.63rem;font-variant-numeric:tabular-nums;' + SEP + '">' + fmtMM(totK) + '</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.62rem;' + SEP + '">' + (tot ? ((tot - totK) / tot * 100).toFixed(1).replace('.', ',') : '0') + '%</td>' +
       '<td style="padding:.35rem .6rem;text-align:right;font-size:.6rem">' + (tot / totGeneral * 100).toFixed(1) + '%</td>' +
     '</tr></tfoot></table></div>' +
     '<p style="font-size:.55rem;color:var(--mut);margin:.5rem 0 0;line-height:1.45">' +
@@ -195,10 +203,13 @@ function _pfRenderDetalle(){
     'mismos filtros que usa «Ingresos Totales» de Analisis Facturación: empresa <strong>TS</strong>, tipo de ' +
     'documento <strong>Factura</strong> y catálogos <strong>Servicio Técnico, REAS y Trazabilidad</strong>. ' +
     'Excluye provisiones y los catálogos de venta de equipos. Sin filtros, el total cuadra con el indicador ' +
-    'de la portada.</p>';
+    'de la portada. El costo es la suma de «Total Costo Linea» (columna Q) de esas mismas líneas, y el margen ' +
+    'es la diferencia sobre la venta.</p>';
 
   const lbl = document.getElementById('pf-det-lbl');
-  if(lbl) lbl.textContent = todos.length + ' clientes · ' + fmtMM(totGeneral) + ' facturado';
+  const kGeneral = todos.reduce((s, x) => s + (x.costo || 0), 0);
+  if(lbl) lbl.textContent = todos.length + ' clientes · ' + fmtMM(totGeneral) + ' facturado · ' +
+    fmtMM(kGeneral) + ' costo · margen ' + (totGeneral ? ((totGeneral - kGeneral) / totGeneral * 100).toFixed(1).replace('.', ',') : '0') + '%';
 }
 
 function initPanelFact(){

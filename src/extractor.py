@@ -429,6 +429,7 @@ def read_bbdd(xlsx_path):
     # Access by position to avoid encoding issues in header names
     c_cliente   = cols[7]    # H
     c_monto     = cols[18]   # S: Total Linea Venta
+    c_costo     = cols[16]   # Q: Total Costo Linea
     c_catalogo  = cols[36]   # AK: Catálogo
     c_tipodoc   = cols[37]   # AL: Tipo documento (Factura / Nota de crédito / etc.)
     c_mes       = cols[38]   # AM
@@ -442,6 +443,7 @@ def read_bbdd(xlsx_path):
     df_ts = df[df[c_emp2].astype(str).str.strip() == "TS"].copy()
 
     df_ts[c_monto] = pd.to_numeric(df_ts[c_monto], errors="coerce").fillna(0)
+    df_ts[c_costo] = pd.to_numeric(df_ts[c_costo], errors="coerce").fillna(0)
     df_ts[c_mes]   = pd.to_numeric(df_ts[c_mes],   errors="coerce")
     df_ts[c_ano]   = pd.to_numeric(df_ts[c_ano],   errors="coerce")
     df_ts = df_ts.dropna(subset=[c_mes, c_ano])
@@ -541,6 +543,9 @@ def read_bbdd(xlsx_path):
     # Facturación: excluye Provisión y los catálogos de venta de equipos
     # (E./C. Esterilización), que no son ingreso de servicio.
     ytd_cli_2026 = ytd_per_cli(ANO, mes_corte)
+    # Costo del año en curso por cliente, con la misma base
+    _sub26 = df_ytd_base[(df_ytd_base[c_ano] == ANO) & (df_ytd_base[c_mes] <= mes_corte)]
+    costo_cli_2026 = _sub26.groupby(c_cliente)[c_costo].sum().to_dict()
     ytd_2026_tot = float(
         df_ytd_base[(df_ytd_base[c_ano] == ANO) & (df_ytd_base[c_mes] <= mes_corte)][c_monto].sum()
     )
@@ -587,6 +592,7 @@ def read_bbdd(xlsx_path):
         "ytd_cli_2025":          ytd_cli_2025,
         "ytd_cli_2024":          ytd_cli_2024,
         "ytd_cli_2026":          ytd_cli_2026,
+        "costo_cli_2026":        costo_cli_2026,
         "ytd_2026_tot":          ytd_2026_tot,
         "ytd_contr_2024":        ytd_contr_2024,
         "ytd_contr_2025":        ytd_contr_2025,
@@ -2582,6 +2588,7 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
             _pan_idx.setdefault(_norm(na), e)
     _contr_norm = {_norm(c) for c in active_contract_clients}
 
+    costo_cli = bbdd.get("costo_cli_2026", {})
     fact_clientes = []
     for cli_bbdd, monto in bbdd.get("ytd_cli_2026", {}).items():
         nom = safe_str(cli_bbdd).strip()
@@ -2595,12 +2602,12 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
                         or safe_str(tipo_map.get(cli_bbdd, "")) or "Sin clasificar",
             "contrato": bool(pe.get("tiene_contrato")) if pe else (k in _contr_norm),
             "real":     round(float(monto)),
-            "en_panel": pe is not None,
+            "costo":    round(float(costo_cli.get(cli_bbdd, 0))),
         })
     fact_clientes.sort(key=lambda x: -x["real"])
     _tot_fc = sum(x["real"] for x in fact_clientes)
     print(f"       FACT CLIENTES: {len(fact_clientes)} clientes | MM${_tot_fc/1e6:,.1f} "
-          f"({sum(1 for x in fact_clientes if not x['en_panel'])} fuera del panel)")
+          f"| costo MM${sum(x['costo'] for x in fact_clientes)/1e6:,.1f}")
 
     # Monthly arrays helper
     def to_arr(d, year):
