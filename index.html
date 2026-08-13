@@ -2080,6 +2080,9 @@ footer{text-align:center;font-family:'Roboto Mono',monospace;font-size:.58rem;
 <div class="view" id="view-satisfaccion">
   <div class="sh"><h2>Satisfacción de Clientes</h2><div class="sh-line"></div>
     <span class="sh-tag">Encuestas de satisfacción · Análisis por institución (dominio de correo) · Calidad, tiempo respuesta y NPS</span>
+    <button id="sat-pdf-btn" onclick="satExportPDF()"
+      style="font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;border-radius:4px;
+             cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem;margin-left:auto"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar PDF</button>
   </div>
 
   <!-- KPI Globales -->
@@ -7854,6 +7857,137 @@ function _renderSatDetBI(){
   <div style="margin-top:.5rem;padding:.45rem .7rem;background:rgba(255,192,0,.08);border-left:3px solid var(--am);border-radius:4px;font-size:.6rem;color:var(--mut);line-height:1.5">
     ℹ️ <strong style="color:var(--am)">Nota Base Instalada:</strong> Los equipos mostrados consideran únicamente marcas con <strong>Potencial ST = Sí</strong>, es decir, marcas que TECSERVICE actualmente representa y para las cuales podría ofrecer servicios de mantención. Equipos de marcas no representadas quedan excluidos de este cruce.
   </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EXPORTAR RESUMEN A PDF — una sola hoja
+// Mismo enfoque que eerrExportPDF(): se mide el ancho natural del
+// contenido y se crea una pagina de esa medida exacta.
+// Los <canvas> no sobreviven a cloneNode(), asi que cada grafico se
+// convierte a <img> con toDataURL() antes de capturar.
+// ═══════════════════════════════════════════════════════════════
+async function satExportPDF(){
+  if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+    alert('Librerías PDF no cargadas. Verifique conexión a internet e intente de nuevo.');
+    return;
+  }
+  const btn = document.getElementById('sat-pdf-btn');
+  const SVG_ICON = '<svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar PDF';
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+
+  const txt = id => { const e = document.getElementById(id); return e ? e.textContent.trim() : '—'; };
+  const imgDe = (id, w, h) => {
+    const cv = document.getElementById(id);
+    if (!cv || !cv.toDataURL) return '';
+    try {
+      return '<img src="' + cv.toDataURL('image/png') + '" style="width:' + w + 'px;height:' + h +
+             'px;object-fit:contain;display:block">';
+    } catch (e) { return ''; }
+  };
+
+  let wrap = null;
+  try {
+    const S = (window.APP_DATA || {}).satisf || {};
+    const nps = S.nps || {};
+    const hoy = (window.APP_DATA || {}).hoy || '';
+
+    // ── KPIs ──
+    const kpi = (lbl, val, sub, col) =>
+      '<div style="flex:1;min-width:120px;background:#F4F6FB;border-top:3px solid ' + col +
+      ';border-radius:5px;padding:7px 10px">' +
+      '<div style="font-size:8px;text-transform:uppercase;letter-spacing:.06em;color:#6B7BA8">' + lbl + '</div>' +
+      '<div style="font-size:19px;font-weight:900;color:' + col + ';line-height:1.1;font-family:Arial,sans-serif">' + val + '</div>' +
+      '<div style="font-size:8px;color:#8892a8;margin-top:1px">' + sub + '</div></div>';
+
+    const kpis =
+      kpi('Total Encuestas',     txt('sat-k-n'),       txt('sat-k-n-sub'),  '#002D73') +
+      kpi('Calidad Promedio',    txt('sat-k-calidad'), 'escala 1 a 7',      '#33448D') +
+      kpi('Tiempo de Respuesta', txt('sat-k-tiempo'),  'escala 1 a 7',      '#0A5C8C') +
+      kpi('Recomendación',       txt('sat-k-recom'),   'escala 0 a 10',     '#28D2C3') +
+      kpi('NPS',                 txt('sat-k-nps'),     txt('sat-k-nps-sub'), (nps.nps || 0) >= 50 ? '#00832F' : (nps.nps || 0) >= 0 ? '#B8860B' : '#C00000');
+
+    // ── Tabla de detractores (solo las primeras filas, para que quepa) ──
+    const tbDet = document.getElementById('tb-sat-det');
+    let detHTML = '';
+    if (tbDet && tbDet.rows.length) {
+      const tabla = tbDet.closest('table').cloneNode(true);
+      tabla.querySelectorAll('*').forEach(n => {
+        n.style.position = 'static'; n.style.maxHeight = 'none'; n.style.overflow = 'visible';
+      });
+      const tb = tabla.querySelector('tbody');
+      const MAX = 14;
+      const sobran = tb.rows.length - MAX;
+      while (tb.rows.length > MAX) tb.deleteRow(MAX);
+      tabla.querySelectorAll('td,th').forEach(n => {
+        n.style.fontSize = '7.5px'; n.style.padding = '2px 5px';
+        n.style.whiteSpace = 'nowrap'; n.style.lineHeight = '1.25';
+      });
+      tabla.style.borderCollapse = 'collapse'; tabla.style.width = '100%';
+      detHTML = '<div style="font-size:9px;font-weight:700;color:#C00000;text-transform:uppercase;' +
+                'letter-spacing:.06em;margin:0 0 4px">Detractores · ' + txt('sat-det-count') + '</div>' +
+                tabla.outerHTML +
+                (sobran > 0 ? '<div style="font-size:7.5px;color:#8892a8;margin-top:3px">' +
+                 'Se muestran los ' + MAX + ' primeros de ' + (MAX + sobran) + '. El detalle completo está en el panel.</div>' : '');
+    }
+
+    const secLbl = t => '<div style="font-size:9px;font-weight:700;color:#002D73;text-transform:uppercase;' +
+                        'letter-spacing:.06em;margin:0 0 4px">' + t + '</div>';
+
+    wrap = document.createElement('div');
+    wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:1180px;' +
+      'padding:16px 22px 20px;font-family:Arial,sans-serif;color:#111;box-sizing:border-box';
+
+    wrap.innerHTML =
+      '<div style="border-bottom:2.5px solid #002D73;padding-bottom:6px;margin-bottom:10px">' +
+        '<span style="font-size:13px;font-weight:700;color:#002D73">TECSERVICE — Satisfacción de Clientes</span>' +
+        '&emsp;<span style="font-size:10px;color:#555">' + txt('sat-k-n') + ' encuestas respondidas' +
+        (hoy ? ' &nbsp;·&nbsp; Datos al ' + hoy : '') + '</span>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-bottom:12px">' + kpis + '</div>' +
+      '<div style="display:flex;gap:14px;margin-bottom:12px;align-items:flex-start">' +
+        '<div style="flex:1.5">' + secLbl('Evolución trimestral') + imgDe('cSatEvolutivo', 640, 200) + '</div>' +
+        '<div style="flex:1">' + secLbl('Distribución NPS') + imgDe('cSatNps', 440, 200) + '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:14px;align-items:flex-start">' +
+        '<div style="width:250px;flex-shrink:0">' + secLbl('¿Problema resuelto?') +
+          imgDe('cSatResuelto', 200, 170) +
+          '<div style="font-size:8px;color:#444;margin-top:4px;line-height:1.6">' +
+            '<div><span style="display:inline-block;width:8px;height:8px;background:#00832F;border-radius:2px;margin-right:4px"></span>Sí, totalmente <strong>' + txt('sat-res-si') + '</strong></div>' +
+            '<div><span style="display:inline-block;width:8px;height:8px;background:#FFC000;border-radius:2px;margin-right:4px"></span>Parcialmente <strong>' + txt('sat-res-par') + '</strong></div>' +
+            '<div><span style="display:inline-block;width:8px;height:8px;background:#C00000;border-radius:2px;margin-right:4px"></span>No resuelto <strong>' + txt('sat-res-no') + '</strong></div>' +
+          '</div></div>' +
+        '<div style="flex:1;min-width:0">' + detHTML + '</div>' +
+      '</div>';
+
+    document.body.appendChild(wrap);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    const realW = Math.ceil(wrap.getBoundingClientRect().width)  || wrap.offsetWidth;
+    const realH = Math.ceil(wrap.getBoundingClientRect().height) || wrap.offsetHeight;
+    if (!realW || !realH) throw new Error('No se pudo medir el contenido');
+
+    const canvas = await html2canvas(wrap, {
+      scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
+      width: realW, height: realH, windowWidth: realW, windowHeight: realH,
+    });
+
+    const { jsPDF } = window.jspdf;
+    const MM_PX = 25.4 / 96;
+    const pageW = realW * MM_PX, pageH = realH * MM_PX;
+    const pdf = new jsPDF({
+      orientation: pageW >= pageH ? 'landscape' : 'portrait',
+      unit: 'mm', format: [pageW, pageH],
+    });
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, pageW, pageH);
+    pdf.save('Satisfaccion_Clientes_TS_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
+
+  } catch (err) {
+    console.error('satExportPDF:', err);
+    alert('Error al generar PDF: ' + err.message);
+  } finally {
+    if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    if (btn) { btn.disabled = false; btn.innerHTML = SVG_ICON; }
+  }
 }
 </script>
 <script>
