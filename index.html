@@ -4835,9 +4835,10 @@ let _vgGarLinea = 'todas';
 let _vgGarSort  = 'val';
 let _vgGarAsc   = false;
 
-// Margen de contratos sin programa asignado. La hoja "Resumen Tipos
-// Programas" los agrupa como SIN PROGRAMA con 55%, igual que Basic.
-const _VG_MG_SIN_PROG = 0.55;
+// Margen para contratos sin programa asignado: 50%, un promedio entre los
+// tres planes (55%, 60% y 65%). No se usa el 55% de "SIN PROGRAMA" de la
+// hoja Resumen Tipos Programas porque no se sabe qué plan les corresponde.
+const _VG_MG_SIN_PROG = 0.50;
 const _VG_PLAN_LBL = {BASIC:'Basic', ADVANCED:'Advanced',
                       PROFESIONAL:'Profesional', INTEGRAL:'Integral'};
 
@@ -4896,6 +4897,9 @@ function _vgRenderGar(){
   const tV=filas.reduce((s,f)=>s+f.val,0);
   const tT=filas.reduce((s,f)=>s+f.costoT,0);
   const tR=filas.reduce((s,f)=>s+f.costoR,0);
+  const sinProg=filas.filter(f=>f.plan==='Sin programa');
+  const nSin=sinProg.length;
+  const valSin=sinProg.reduce((s,f)=>s+f.val,0);
   const SEP='border-right:1px solid var(--brd)';
   const th=(t,f,al)=>`<th onclick="vgGarSort('${f}')" style="position:sticky;top:0;z-index:2;background:var(--az1);
     color:#fff;padding:.35rem .5rem;font-size:.55rem;letter-spacing:.03em;text-align:${al};white-space:nowrap;
@@ -4951,11 +4955,17 @@ function _vgRenderGar(){
         </tr></tfoot>
       </table>
     </div>
-    <p style="font-size:.55rem;color:var(--mut);margin:.5rem 0 0;line-height:1.45">
-      El costo estimado aplica el margen de cada programa según la hoja «Resumen Tipos Programas»:
-      Basic 55%, Advanced 60%, Profesional 65% y Sin programa 55% — el costo es el complemento
-      (45%, 40%, 35% y 45%). El remanente descuenta el % ya consumido. Los días restantes se cuentan
-      desde la fecha de datos del panel hasta el término del contrato.</p>`;
+    <p style="font-size:.55rem;color:var(--mut);margin:.5rem 0 0;line-height:1.5">
+      <strong style="color:var(--az2)">Cómo se calcula el costo estimado.</strong>
+      Se aplica el margen de cada programa según la hoja «Resumen Tipos Programas» —
+      Basic 55%, Advanced 60%, Profesional 65% — y el costo es el complemento: 45%, 40% y 35%
+      respectivamente. El costo remanente descuenta el porcentaje ya consumido del contrato.
+      Los días restantes se cuentan desde la fecha de datos del panel hasta la fecha de término.
+      <br>
+      <strong style="color:var(--or)">Contratos sin programa asignado:</strong>
+      se les aplica un margen promedio de <strong>50%</strong> (costo 50%), por no conocerse el plan
+      que les corresponde. Son <strong>${nSin}</strong> de los ${filas.length} de esta vista
+      (${mm(valSin)} de cartera); asignarles su programa real en el Excel ajustaría su costo.</p>`;
 
   const lbl=document.getElementById('vg-gar-lbl');
   if(lbl) lbl.textContent=`${filas.length} contratos · ${mm(tV)} cartera · ${mm(tR)} costo por ejecutar`;
