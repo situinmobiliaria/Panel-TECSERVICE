@@ -188,6 +188,12 @@
         return `<td class="num" style="font-size:.55rem;font-weight:700;color:${c};padding:.2rem .38rem">${d>=0?'+':''}${fN1(d)}%</td>`;
       };
 
+      // Las 4 celdas de comparacion anual para una fila cualquiera.
+      // act = valor del ano en curso, a25/a24 = acumulados de los anos previos.
+      const cuatroAA = (act, a25, a24, opts={}) =>
+        celdaAA(a25, opts) + celdaVar(act, a25, opts) +
+        celdaAA(a24, opts) + celdaVar(act, a24, opts);
+
       function dataRow(lbl, arr, opts={}){
         const cells = Array.from({length:n+1},(_,j)=>cell(arr,j,opts)).join('');
         return `<tr style="${opts.bg?'background:'+opts.bg:''};${opts.rowX||''}">
@@ -197,19 +203,23 @@
       }
 
       const rows = list.map(r=>{
-        const rd  = regData[r] || {contratos:[],otros:[],total:[],lineas:{}};
+        const rd  = regData[r] || {contratos:[],otros:[],total:[],lineas:{},aa_2025:{},aa_2024:{}};
         const clr = PALETTE_REG[regiones.indexOf(r)%PALETTE_REG.length];
         const L   = rd.lineas || {};
+        const a25 = rd.aa_2025 || {};
+        const a24 = rd.aa_2024 || {};
         return [
           `<tr style="background:${clr}18">
             <td colspan="${n+2+4}" style="font-size:.61rem;font-weight:700;color:${clr};padding:.3rem .55rem .26rem;border-top:2px solid ${clr}30;border-left:4px solid ${clr}">${r}</td>
           </tr>`,
-          ...LINEAS.map(ln=>dataRow('  '+ln, L[ln]||[], {color:LCLR[ln]||'var(--mut)'})),
-          dataRow('Total Contratos', rd.contratos, {bold:true, color:'var(--az2)', bg:'rgba(0,160,220,.07)', sz:'.57rem'}),
-          dataRow('Otros Ingresos',  rd.otros,     {color:'#888'}),
+          ...LINEAS.map(ln=>dataRow('  '+ln, L[ln]||[], {color:LCLR[ln]||'var(--mut)',
+            aa: cuatroAA((L[ln]||[])[n]||0, (a25.lineas||{})[ln]||0, (a24.lineas||{})[ln]||0)})),
+          dataRow('Total Contratos', rd.contratos, {bold:true, color:'var(--az2)', bg:'rgba(0,160,220,.07)', sz:'.57rem',
+            aa: cuatroAA(rd.contratos[n]||0, a25.contratos||0, a24.contratos||0, {bold:true})}),
+          dataRow('Otros Ingresos',  rd.otros,     {color:'#888',
+            aa: cuatroAA(rd.otros[n]||0, a25.otros||0, a24.otros||0)}),
           dataRow('TOTAL FACTURACIÓN', rd.total,   {bold:true, color:'#fff', bg:'var(--az3)', bgL:'var(--az3)', sz:'.58rem',
-            aa: celdaAA(rd.acum_2025, {color:'#B8C1D8'}) + celdaVar(rd.total[n]||0, rd.acum_2025, {blanco:true}) +
-                celdaAA(rd.acum_2024, {color:'#B8C1D8'}) + celdaVar(rd.total[n]||0, rd.acum_2024, {blanco:true})}),
+            aa: cuatroAA(rd.total[n]||0, rd.acum_2025, rd.acum_2024, {bold:true, color:'#B8C1D8', blanco:true})}),
           `<tr style="height:4px"><td colspan="${n+2+4}"></td></tr>`,
         ].join('');
       });

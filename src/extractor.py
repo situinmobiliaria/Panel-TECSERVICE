@@ -2500,15 +2500,29 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
 
     aa_cfg = []
     for y, campo in ((ANO - 1, "contr_2025"), (ANO - 2, "contr_2024")):
-        con_reg = defaultdict(float)
+        con_reg = defaultdict(float)                       # contratos por región
+        lin_reg = defaultdict(lambda: defaultdict(float))  # contratos por región y línea
         con_tot = 0.0
         for p in panel_raw:
             rg = cli_to_region.get(p["cliente"], "Sin región")
             v  = float(p.get(campo) or 0)
+            if not v:
+                continue
             con_reg[rg] += v
             con_tot     += v
+            # Reparto por línea con el peso del valor anual de cada contrato,
+            # que es el mismo criterio de respaldo que usa el año en curso
+            # cuando no hay detalle mensual.
+            pesos = defaultdict(float)
+            for c in contratos_by_cli.get(p["cliente"], []):
+                pesos[c["linea_negocio"]] += c["val"]
+            tot_p = sum(pesos.values())
+            if tot_p <= 0:
+                pesos, tot_p = {"Esterilización": 1.0}, 1.0
+            for L, w in pesos.items():
+                lin_reg[rg][L] += v * (w / tot_p)
         tot_ano = _tot_ano(y)
-        aa_cfg.append((str(y), con_reg, con_tot, tot_ano, max(tot_ano - con_tot, 0.0)))
+        aa_cfg.append((str(y), con_reg, lin_reg, con_tot, tot_ano, max(tot_ano - con_tot, 0.0)))
 
     # Otros: prorrateo proporcional de otros_total_month global
     reg_out = {}
@@ -2521,15 +2535,26 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
         otr_mm  = to_mm(otr_arr)
         tot_mm  = [round(con_mm[m] + otr_mm[m], 3) for m in range(n)]
         rlm     = reg_lin.get(r, {L: [0.0]*n for L in LINEAS})
-        # Acumulados de años anteriores con el mismo prorrateo
+        # Acumulados de años anteriores con el mismo prorrateo, abiertos por
+        # línea, contratos, otros y total — igual que las filas del año actual.
         _aa = {}
-        for ystr, con_reg, con_tot, tot_ano, otros_tot in aa_cfg:
-            c_r = con_reg.get(r, 0.0)
+        for ystr, con_reg, lin_reg, con_tot, tot_ano, otros_tot in aa_cfg:
+            c_r  = con_reg.get(r, 0.0)
             prop = (c_r / con_tot) if con_tot > 1 else 0.0
-            _aa[ystr] = round((c_r + otros_tot * prop) / MM, 3)
+            o_r  = otros_tot * prop
+            _aa[ystr] = {
+                "contratos": round(c_r / MM, 3),
+                "otros":     round(o_r / MM, 3),
+                "total":     round((c_r + o_r) / MM, 3),
+                "lineas":    {L: round(lin_reg.get(r, {}).get(L, 0.0) / MM, 3) for L in LINEAS},
+            }
+        _a25 = _aa.get(str(ANO - 1), {})
+        _a24 = _aa.get(str(ANO - 2), {})
         reg_out[r] = {
-            "acum_2025": _aa.get(str(ANO - 1), 0.0),
-            "acum_2024": _aa.get(str(ANO - 2), 0.0),
+            "acum_2025":     _a25.get("total", 0.0),
+            "acum_2024":     _a24.get("total", 0.0),
+            "aa_2025":       _a25,
+            "aa_2024":       _a24,
             "contratos": with_total(con_mm),
             "otros":     with_total(otr_mm),
             "total":     with_total(tot_mm),
