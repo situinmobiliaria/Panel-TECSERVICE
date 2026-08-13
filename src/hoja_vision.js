@@ -353,6 +353,141 @@ function _renderProgTable(){
 }
 
 
+// ═══════════════════════════════════════════════════════════════
+// CONTRATOS DE GARANTÍA · COSTO ESTIMADO
+// El margen por programa sale de la hoja "Resumen Tipos Programas"
+// (col H, % Margen). El costo es el complemento: 1 − margen.
+// ═══════════════════════════════════════════════════════════════
+let _vgGarLinea = 'todas';
+let _vgGarSort  = 'val';
+let _vgGarAsc   = false;
+
+// Margen de contratos sin programa asignado. La hoja "Resumen Tipos
+// Programas" los agrupa como SIN PROGRAMA con 55%, igual que Basic.
+const _VG_MG_SIN_PROG = 0.55;
+const _VG_PLAN_LBL = {BASIC:'Basic', ADVANCED:'Advanced',
+                      PROFESIONAL:'Profesional', INTEGRAL:'Integral'};
+
+function _vgGarFilas(){
+  // Reutiliza PROG_MARGIN y _progKey() que ya usa el resto de la hoja, para
+  // no tener dos tablas de márgenes que puedan quedar desalineadas.
+  return DATA.filter(d=>d.tipo==='Garantia').map(d=>{
+    const k      = _progKey(d.programa);
+    const margen = (k && PROG_MARGIN[k] != null) ? PROG_MARGIN[k] : _VG_MG_SIN_PROG;
+    const costoT = d.val * (1 - margen);
+    const pct    = Math.max(0, Math.min(100, d.pct_consumido||0));
+    return {
+      cliente: d.cliente, ejec: d.vendedor||'—',
+      plan: k ? _VG_PLAN_LBL[k] : 'Sin programa',
+      linea: d.linea_negocio||'—', margen,
+      val: d.val, costoT, costoR: costoT * (1 - pct/100),
+      inicio: d.inicio_fmt||'—', fin: d.fin_fmt||'—',
+      pct, dias: d.dias_vence,
+    };
+  });
+}
+
+function vgGarSort(f){
+  _vgGarAsc = (_vgGarSort===f) ? !_vgGarAsc : false;
+  _vgGarSort = f;
+  _vgRenderGar();
+}
+function vgGarLinea(l){ _vgGarLinea = l; _vgRenderGar(); }
+
+function _vgRenderGar(){
+  const box = document.getElementById('vg-gar-tabla');
+  if(!box) return;
+  let filas = _vgGarFilas();
+  if(!filas.length){ box.innerHTML='<p style="padding:1.2rem;color:var(--mut);font-style:italic">Sin contratos de garantía.</p>'; return; }
+
+  // Segmentador por línea
+  const lineas = [...new Set(filas.map(f=>f.linea))].sort();
+  const segBox = document.getElementById('vg-gar-linea');
+  if(segBox){
+    segBox.innerHTML = ['todas'].concat(lineas).map(l=>{
+      const on = _vgGarLinea===l;
+      return `<button onclick="vgGarLinea(${JSON.stringify(l).replace(/"/g,'&quot;')})"
+        style="font-size:.58rem;padding:.2rem .55rem;border-radius:3px;cursor:pointer;
+        border:1px solid ${on?'var(--az1)':'var(--brd)'};background:${on?'var(--az1)':'var(--bg2)'};
+        color:${on?'#fff':'var(--txt)'};font-weight:${on?'700':'400'}">${l==='todas'?'Todas':l}</button>`;
+    }).join('');
+  }
+  if(_vgGarLinea!=='todas') filas = filas.filter(f=>f.linea===_vgGarLinea);
+
+  filas.sort((a,b)=>{
+    const va=a[_vgGarSort], vb=b[_vgGarSort];
+    if(typeof va==='string') return _vgGarAsc?va.localeCompare(vb,'es'):vb.localeCompare(va,'es');
+    return _vgGarAsc?((va||0)-(vb||0)):((vb||0)-(va||0));
+  });
+
+  const tV=filas.reduce((s,f)=>s+f.val,0);
+  const tT=filas.reduce((s,f)=>s+f.costoT,0);
+  const tR=filas.reduce((s,f)=>s+f.costoR,0);
+  const SEP='border-right:1px solid var(--brd)';
+  const th=(t,f,al)=>`<th onclick="vgGarSort('${f}')" style="position:sticky;top:0;z-index:2;background:var(--az1);
+    color:#fff;padding:.35rem .5rem;font-size:.55rem;letter-spacing:.03em;text-align:${al};white-space:nowrap;
+    cursor:pointer;border-right:1px solid rgba(255,255,255,.18)">${t}${_vgGarSort===f?(_vgGarAsc?' ▲':' ▼'):''}</th>`;
+  // Días restantes con el mismo semáforo que el resto del panel
+  const pillD=d=>{
+    if(d==null||isNaN(d)) return '<span style="color:var(--mut)">—</span>';
+    const c = d<0?'#7A0000' : d<=90?'#C00000' : d<=180?'#D46000' : d<=365?'#8B8200':'#00832F';
+    return `<span style="color:${c};font-weight:700">${d.toLocaleString('es-CL')}</span>`;
+  };
+
+  box.innerHTML=`
+    <div style="overflow-x:auto;max-height:520px;overflow-y:auto">
+      <table style="width:100%;border-collapse:collapse;min-width:1120px">
+        <thead><tr>
+          ${th('CLIENTE / INSTITUCIÓN','cliente','left')}${th('EJECUTIVO','ejec','left')}
+          ${th('PLAN','plan','left')}${th('LÍNEA','linea','left')}
+          ${th('MONTO TOTAL','val','right')}
+          ${th('COSTO ESTIMADO TOTAL','costoT','right')}
+          ${th('COSTO ESTIM. REMANENTE','costoR','right')}
+          ${th('INICIO','inicio','left')}${th('TÉRMINO','fin','left')}
+          ${th('% CONSUMIDO','pct','right')}${th('DÍAS REST.','dias','right')}
+        </tr></thead>
+        <tbody>${filas.map((f,i)=>`
+          <tr style="background:${i%2===0?'var(--bg2)':'var(--bg)'}">
+            <td style="padding:.26rem .5rem;font-size:.62rem;font-weight:600;${SEP}" title="${f.cliente}">${shortN(f.cliente)}</td>
+            <td style="padding:.26rem .5rem;font-size:.6rem;color:var(--mut);white-space:nowrap;${SEP}">${f.ejec}</td>
+            <td style="padding:.26rem .5rem;font-size:.6rem;${SEP}"
+                title="Margen ${(f.margen*100).toFixed(0)}% · costo ${((1-f.margen)*100).toFixed(0)}%">${f.plan}</td>
+            <td style="padding:.26rem .5rem;font-size:.6rem;color:var(--mut);${SEP}">${f.linea}</td>
+            <td style="padding:.26rem .5rem;text-align:right;font-size:.63rem;font-weight:700;
+                       font-variant-numeric:tabular-nums;${SEP}">${mm(f.val)}</td>
+            <td style="padding:.26rem .5rem;text-align:right;font-size:.62rem;color:var(--or);
+                       font-variant-numeric:tabular-nums;${SEP}">${mm(f.costoT)}</td>
+            <td style="padding:.26rem .5rem;text-align:right;font-size:.62rem;color:var(--rd);font-weight:600;
+                       font-variant-numeric:tabular-nums;${SEP}">${mm(f.costoR)}</td>
+            <td style="padding:.26rem .5rem;font-size:.58rem;color:var(--mut);white-space:nowrap;${SEP}">${f.inicio}</td>
+            <td style="padding:.26rem .5rem;font-size:.58rem;color:var(--mut);white-space:nowrap;${SEP}">${f.fin}</td>
+            <td style="padding:.26rem .5rem;${SEP}">
+              <div style="display:flex;align-items:center;gap:4px">
+                <div style="flex:1;height:5px;background:var(--gy);border-radius:3px;overflow:hidden;min-width:34px">
+                  <div style="height:100%;width:${f.pct}%;background:var(--az2)"></div></div>
+                <span style="font-size:.55rem;color:var(--mut);min-width:30px;text-align:right">${f.pct.toFixed(1)}%</span>
+              </div></td>
+            <td style="padding:.26rem .5rem;text-align:right;font-size:.6rem;font-variant-numeric:tabular-nums">${pillD(f.dias)}</td>
+          </tr>`).join('')}</tbody>
+        <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
+          <td colspan="4" style="padding:.32rem .5rem;font-size:.62rem;${SEP}">TOTAL · ${filas.length} contratos${_vgGarLinea==='todas'?'':' · '+_vgGarLinea}</td>
+          <td style="padding:.32rem .5rem;text-align:right;font-size:.63rem;font-variant-numeric:tabular-nums;${SEP}">${mm(tV)}</td>
+          <td style="padding:.32rem .5rem;text-align:right;font-size:.62rem;font-variant-numeric:tabular-nums;${SEP}">${mm(tT)}</td>
+          <td style="padding:.32rem .5rem;text-align:right;font-size:.62rem;font-variant-numeric:tabular-nums;${SEP}">${mm(tR)}</td>
+          <td colspan="4"></td>
+        </tr></tfoot>
+      </table>
+    </div>
+    <p style="font-size:.55rem;color:var(--mut);margin:.5rem 0 0;line-height:1.45">
+      El costo estimado aplica el margen de cada programa según la hoja «Resumen Tipos Programas»:
+      Basic 55%, Advanced 60%, Profesional 65% y Sin programa 55% — el costo es el complemento
+      (45%, 40%, 35% y 45%). El remanente descuenta el % ya consumido. Los días restantes se cuentan
+      desde la fecha de datos del panel hasta el término del contrato.</p>`;
+
+  const lbl=document.getElementById('vg-gar-lbl');
+  if(lbl) lbl.textContent=`${filas.length} contratos · ${mm(tV)} cartera · ${mm(tR)} costo por ejecutar`;
+}
+
 function initVision(){
   document.querySelectorAll('#vg-sort .btn').forEach(b=>{b.addEventListener('click',()=>{vgSortF=b.dataset.vs;vgSortCF='';document.querySelectorAll('#vg-sort .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
   document.querySelectorAll('#vg-filt .btn').forEach(b=>{b.addEventListener('click',()=>{vgFilt=b.dataset.vf;document.querySelectorAll('#vg-filt .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
@@ -360,5 +495,6 @@ function initVision(){
   document.querySelectorAll('#vg-prog-filt .btn').forEach(b=>{b.addEventListener('click',()=>{vgProgF=b.dataset.vpf;document.querySelectorAll('#vg-prog-filt .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');renderVG();});});
   document.getElementById('vg-srch').oninput=e=>{vgSrch=e.target.value.toLowerCase();renderVG();};
   renderVG();
+  _vgRenderGar();
   _renderProgTable();
 }
