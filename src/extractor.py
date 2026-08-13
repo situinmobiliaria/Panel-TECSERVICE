@@ -370,6 +370,8 @@ def read_facturacion(wb):
         real_2025  = to_float(row[4])
         real_2024  = to_float(row[5])
         contr_2026 = to_float(row[7])   # Columna H (Contr2026 YTD)
+        contr_2025 = to_float(row[8])   # Columna I (Contratos 2025)
+        contr_2024 = to_float(row[9])   # Columna J (Contratos 2024)
         # AZ-BK (idx 51-62): facturación contratos mes a mes 2026
         contr_meses = [to_float(row[51 + m]) if len(row) > 51 + m else 0.0 for m in range(12)]
         # BL (idx 63): flag "FACTURACIÓN < CONTRATOS" (SI/NO)
@@ -404,6 +406,8 @@ def read_facturacion(wb):
             "real_ytd_2024":     0,
             "presup_contr_anio": 0,                 # filled later from CONTRATOS
             "presup_contr_ytd":  contr_2026,
+            "contr_2025":        contr_2025,
+            "contr_2024":        contr_2024,
             "contr_meses_2026":  contr_meses,
             "_fac_menor_contr":  fac_menor_contr,
             "n_contratos":       n_contratos,
@@ -2483,6 +2487,29 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
                 if L in reg_lin[region]:
                     reg_lin[region][L][m] += real_m * (w / wsum)
 
+    # ── Acumulado Ene–mes_corte de 2025 y 2024 por región ───────────────────
+    # Se replica exactamente el método del año en curso: los contratos van a la
+    # región del cliente y "otros" se prorratea por el peso de contratos de cada
+    # región. Así las tres columnas son comparables entre sí; mezclarlas con la
+    # facturación real por cliente daría variaciones falsas.
+    # Totales del año anterior con la misma base que usa el Resumen
+    # (mensual_facturado = TS + Factura + los 3 catálogos de servicio).
+    _mf = bbdd.get("mensual_facturado", {})
+    def _tot_ano(y):
+        return sum(v for m, v in _mf.get(y, {}).items() if m <= n)
+
+    aa_cfg = []
+    for y, campo in ((ANO - 1, "contr_2025"), (ANO - 2, "contr_2024")):
+        con_reg = defaultdict(float)
+        con_tot = 0.0
+        for p in panel_raw:
+            rg = cli_to_region.get(p["cliente"], "Sin región")
+            v  = float(p.get(campo) or 0)
+            con_reg[rg] += v
+            con_tot     += v
+        tot_ano = _tot_ano(y)
+        aa_cfg.append((str(y), con_reg, con_tot, tot_ano, max(tot_ano - con_tot, 0.0)))
+
     # Otros: prorrateo proporcional de otros_total_month global
     reg_out = {}
     for r, con_arr in reg_con.items():
@@ -2494,7 +2521,15 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
         otr_mm  = to_mm(otr_arr)
         tot_mm  = [round(con_mm[m] + otr_mm[m], 3) for m in range(n)]
         rlm     = reg_lin.get(r, {L: [0.0]*n for L in LINEAS})
+        # Acumulados de años anteriores con el mismo prorrateo
+        _aa = {}
+        for ystr, con_reg, con_tot, tot_ano, otros_tot in aa_cfg:
+            c_r = con_reg.get(r, 0.0)
+            prop = (c_r / con_tot) if con_tot > 1 else 0.0
+            _aa[ystr] = round((c_r + otros_tot * prop) / MM, 3)
         reg_out[r] = {
+            "acum_2025": _aa.get(str(ANO - 1), 0.0),
+            "acum_2024": _aa.get(str(ANO - 2), 0.0),
             "contratos": with_total(con_mm),
             "otros":     with_total(otr_mm),
             "total":     with_total(tot_mm),

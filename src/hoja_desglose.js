@@ -174,11 +174,25 @@
       function cell(arr, j, opts={}){
         return `<td class="num" style="font-size:.56rem;${opts.bold?'font-weight:700;':''}color:${opts.color||'inherit'};padding:.2rem .38rem">${fmm((arr||[])[j]||0)}</td>`;
       }
+      // 4 columnas de comparación anual. Sólo se llenan en la fila de total
+      // de cada región; en el resto van vacías para mantener la grilla.
+      const EXTRA = 4;
+      const vacias = (bg) => Array.from({length:EXTRA},()=>
+        `<td style="padding:.2rem .38rem;${bg?'background:'+bg+';':''}"></td>`).join('');
+      const celdaAA = (v, opts={}) =>
+        `<td class="num" style="font-size:.56rem;${opts.bold?'font-weight:700;':''}color:${opts.color||'var(--mut)'};padding:.2rem .38rem">${v?fmm(v):'—'}</td>`;
+      const celdaVar = (act, ant, opts={}) => {
+        if(!ant) return `<td class="num" style="font-size:.54rem;color:${opts.mut||'var(--mut)'};padding:.2rem .38rem">s/d</td>`;
+        const d = (act-ant)/ant*100;
+        const c = opts.blanco ? (d>=0?'#7BFFB0':'#FFB0B0') : (d>=0?'var(--gn)':'var(--rd)');
+        return `<td class="num" style="font-size:.55rem;font-weight:700;color:${c};padding:.2rem .38rem">${d>=0?'+':''}${fN1(d)}%</td>`;
+      };
+
       function dataRow(lbl, arr, opts={}){
         const cells = Array.from({length:n+1},(_,j)=>cell(arr,j,opts)).join('');
         return `<tr style="${opts.bg?'background:'+opts.bg:''};${opts.rowX||''}">
           <td style="font-size:${opts.sz||'.56rem'};${opts.bold?'font-weight:700;':''}color:${opts.color||'inherit'};padding:.2rem .5rem;white-space:nowrap;${opts.bgL?'background:'+opts.bgL+';':''}">${lbl}</td>
-          ${cells}
+          ${cells}${opts.aa || vacias(opts.bg)}
         </tr>`;
       }
 
@@ -188,13 +202,15 @@
         const L   = rd.lineas || {};
         return [
           `<tr style="background:${clr}18">
-            <td colspan="${n+2}" style="font-size:.61rem;font-weight:700;color:${clr};padding:.3rem .55rem .26rem;border-top:2px solid ${clr}30;border-left:4px solid ${clr}">${r}</td>
+            <td colspan="${n+2+4}" style="font-size:.61rem;font-weight:700;color:${clr};padding:.3rem .55rem .26rem;border-top:2px solid ${clr}30;border-left:4px solid ${clr}">${r}</td>
           </tr>`,
           ...LINEAS.map(ln=>dataRow('  '+ln, L[ln]||[], {color:LCLR[ln]||'var(--mut)'})),
           dataRow('Total Contratos', rd.contratos, {bold:true, color:'var(--az2)', bg:'rgba(0,160,220,.07)', sz:'.57rem'}),
           dataRow('Otros Ingresos',  rd.otros,     {color:'#888'}),
-          dataRow('TOTAL FACTURACIÓN', rd.total,   {bold:true, color:'#fff', bg:'var(--az3)', bgL:'var(--az3)', sz:'.58rem'}),
-          `<tr style="height:4px"><td colspan="${n+2}"></td></tr>`,
+          dataRow('TOTAL FACTURACIÓN', rd.total,   {bold:true, color:'#fff', bg:'var(--az3)', bgL:'var(--az3)', sz:'.58rem',
+            aa: celdaAA(rd.acum_2025, {color:'#B8C1D8'}) + celdaVar(rd.total[n]||0, rd.acum_2025, {blanco:true}) +
+                celdaAA(rd.acum_2024, {color:'#B8C1D8'}) + celdaVar(rd.total[n]||0, rd.acum_2024, {blanco:true})}),
+          `<tr style="height:4px"><td colspan="${n+2+4}"></td></tr>`,
         ].join('');
       });
 
@@ -208,13 +224,24 @@
           <thead><tr>
             <th style="${H};text-align:left;min-width:140px;position:sticky;left:0;top:0;z-index:3">Concepto</th>
             ${thM}
-            <th style="${Ht};position:sticky;top:0;z-index:2">TOTAL</th>
+            <th style="${Ht};position:sticky;top:0;z-index:2">TOTAL<br><span style="font-weight:400;font-size:.5rem">${ANO_ACTUAL}</span></th>
+            <th style="${Ht};position:sticky;top:0;z-index:2" title="Acumulado Ene–${meses[n-1]} ${ANO_ACTUAL-1}">ACUM.<br><span style="font-weight:400;font-size:.5rem">${ANO_ACTUAL-1}</span></th>
+            <th style="${Ht};position:sticky;top:0;z-index:2" title="Variación ${ANO_ACTUAL} vs ${ANO_ACTUAL-1}">VAR.<br><span style="font-weight:400;font-size:.5rem">vs ${ANO_ACTUAL-1}</span></th>
+            <th style="${Ht};position:sticky;top:0;z-index:2" title="Acumulado Ene–${meses[n-1]} ${ANO_ACTUAL-2}">ACUM.<br><span style="font-weight:400;font-size:.5rem">${ANO_ACTUAL-2}</span></th>
+            <th style="${Ht};position:sticky;top:0;z-index:2" title="Variación ${ANO_ACTUAL} vs ${ANO_ACTUAL-2}">VAR.<br><span style="font-weight:400;font-size:.5rem">vs ${ANO_ACTUAL-2}</span></th>
           </tr></thead>
           <tbody>
             ${rows.join('')}
             <tr class="desg-azul" style="background:var(--az3)">
               <td style="font-size:.6rem;font-weight:700;color:#fff;padding:.3rem .55rem;position:sticky;left:0;background:var(--az3);white-space:nowrap">${selReg?selReg+' · TOTAL':'TOTAL GENERAL'}</td>
               ${grandCells}
+              ${(function(){
+                const g26 = list.reduce((s2,r)=>s2+((regData[r]&&regData[r].total[n])||0),0);
+                const g25 = list.reduce((s2,r)=>s2+((regData[r]&&regData[r].acum_2025)||0),0);
+                const g24 = list.reduce((s2,r)=>s2+((regData[r]&&regData[r].acum_2024)||0),0);
+                return celdaAA(g25,{bold:true,color:'#B8C1D8'}) + celdaVar(g26,g25,{blanco:true}) +
+                       celdaAA(g24,{bold:true,color:'#B8C1D8'}) + celdaVar(g26,g24,{blanco:true});
+              })()}
             </tr>
           </tbody>
         </table>
