@@ -1225,6 +1225,16 @@ _BI_REGION_ALIAS = {
 }
 
 
+def _norm_cli(s):
+    """Normaliza nombres de cliente para cruzarlos entre hojas:
+    mayúsculas, espacios colapsados y sin tildes."""
+    if not s:
+        return ""
+    t = " ".join(str(s).strip().upper().split())
+    return "".join(c for c in unicodedata.normalize("NFD", t)
+                   if unicodedata.category(c) != "Mn")
+
+
 def _norm_region(s):
     """Deja el nombre de región tal como lo usa el resto del panel."""
     t = safe_str(s).strip()
@@ -2498,6 +2508,22 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
     def _tot_ano(y):
         return sum(v for m, v in _mf.get(y, {}).items() if m <= n)
 
+    _reg_norm = {}
+    for e in (mapa_data or []):
+        k = _norm_cli(e.get("n", ""))
+        if k:
+            _reg_norm[k] = (e.get("region") or "Sin región").strip() or "Sin región"
+
+    def _region_de(nombre):
+        k = _norm_cli(nombre)
+        if k in _reg_norm:
+            return _reg_norm[k]
+        if len(k) >= 8:
+            for mk, rg in _reg_norm.items():
+                if len(mk) >= 8 and (mk in k or k in mk):
+                    return rg
+        return "Sin región"
+
     aa_cfg = []
     for y, campo in ((ANO - 1, "contr_2025"), (ANO - 2, "contr_2024")):
         con_reg = defaultdict(float)                       # contratos por región
@@ -2521,27 +2547,47 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
                 pesos, tot_p = {"Esterilización": 1.0}, 1.0
             for L, w in pesos.items():
                 lin_reg[rg][L] += v * (w / tot_p)
+        # Facturación real por región de ese año, desde la BBDD por cliente:
+        # mismo criterio que el año en curso, sin prorrateo.
+        fac_reg = defaultdict(float)
+        for cli_b, v2 in bbdd.get("ytd_cli_" + str(y), {}).items():
+            fac_reg[_region_de(cli_b)] += float(v2 or 0)
         tot_ano = _tot_ano(y)
-        aa_cfg.append((str(y), con_reg, lin_reg, con_tot, tot_ano, max(tot_ano - con_tot, 0.0)))
+        aa_cfg.append((str(y), con_reg, lin_reg, con_tot, tot_ano, fac_reg))
 
-    # Otros: prorrateo proporcional de otros_total_month global
+    # ── "Otros Ingresos" a la región REAL de cada cliente ────────────────────
+    # Antes se prorrateaba entre regiones según su peso en contratos, lo que
+    # distorsionaba fuerte: Araucanía factura MM$242,6 casi todo fuera de
+    # contrato y aparecía con MM$41,3, mientras Metropolitana se inflaba.
+    # Ahora cada peso va donde se facturó, igual que hace el Mapa de Clientes.
+    # Facturación mensual real por cliente (misma base que el resto del panel)
+    _mpc = bbdd.get("mensual_por_cliente", {})
+    reg_fac = defaultdict(lambda: [0.0] * n)
+    for cli_b, arr in _mpc.items():
+        rg = _region_de(cli_b)
+        for m in range(n):
+            reg_fac[rg][m] += arr[m] if m < len(arr) else 0.0
+    for rg in reg_fac:
+        reg_con.setdefault(rg, [0.0] * n)
+        reg_lin.setdefault(rg, {L: [0.0] * n for L in LINEAS})
+
     reg_out = {}
     for r, con_arr in reg_con.items():
         con_mm = to_mm(con_arr)
-        otr_arr = []
-        for m in range(n):
-            prop = (con_arr[m] / contr_real_monthly[m]) if (m < len(contr_real_monthly) and contr_real_monthly[m] > 1) else 0.0
-            otr_arr.append(otros_total_month[m] * prop if m < len(otros_total_month) else 0.0)
+        # Otros = facturación real de la región − sus contratos. Sin recortar
+        # en cero: si los contratos devengados superan lo facturado el residuo
+        # es negativo, y recortarlo inflaría el total de la región.
+        fac_r   = reg_fac.get(r, [0.0] * n)
+        otr_arr = [fac_r[m] - con_arr[m] for m in range(n)]
         otr_mm  = to_mm(otr_arr)
         tot_mm  = [round(con_mm[m] + otr_mm[m], 3) for m in range(n)]
         rlm     = reg_lin.get(r, {L: [0.0]*n for L in LINEAS})
         # Acumulados de años anteriores con el mismo prorrateo, abiertos por
         # línea, contratos, otros y total — igual que las filas del año actual.
         _aa = {}
-        for ystr, con_reg, lin_reg, con_tot, tot_ano, otros_tot in aa_cfg:
-            c_r  = con_reg.get(r, 0.0)
-            prop = (c_r / con_tot) if con_tot > 1 else 0.0
-            o_r  = otros_tot * prop
+        for ystr, con_reg, lin_reg, con_tot, tot_ano, fac_reg in aa_cfg:
+            c_r = con_reg.get(r, 0.0)
+            o_r = fac_reg.get(r, 0.0) - c_r
             _aa[ystr] = {
                 "contratos": round(c_r / MM, 3),
                 "otros":     round(o_r / MM, 3),
