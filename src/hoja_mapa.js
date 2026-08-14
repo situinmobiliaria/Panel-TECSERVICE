@@ -69,7 +69,7 @@ function _regOpts(){
 
 function _mapaHTML(){
   return `
-  <div class="sh"><h2>Mapa de Clientes · Chile</h2><div class="sh-line"></div>
+  <div class="sh"><h2>Mapa Clientes Actuales</h2><div class="sh-line"></div>
     <span class="sh-tag" id="mapa-sh-tag">Clientes · base instalada, contratos y potencial</span></div>
 
   <div class="sumstrip" style="margin-bottom:.75rem">
@@ -177,7 +177,7 @@ function _bindMapaCtrl(){
   document.getElementById('mp-reg').addEventListener('change',e=>{
     _mapaFiltroReg=e.target.value;_renderMarkers();
     if(_mapaLeaflet&&_mapaFiltroReg!=='todas'){
-      const pts=_filtrados();
+      const pts=_filtrados().filter(c=>c.lat!=null&&c.lon!=null);
       if(pts.length>0)_mapaLeaflet.fitBounds(L.latLngBounds(pts.map(c=>[c.lat,c.lon])),{padding:[30,30]});
     }
   });
@@ -205,7 +205,9 @@ function _renderMarkers(){
   _mapaLayer.clearLayers();
   const filt=_filtrados();
   const mx=Math.max(...filt.map(c=>_metVal(c)),1);
-  filt.forEach(c=>{
+  // Los clientes sin coordenadas cargadas no se dibujan, pero sí cuentan en
+  // los KPI y en la tabla por región.
+  filt.filter(c=>c.lat!=null&&c.lon!=null).forEach(c=>{
     const circ=L.circleMarker([c.lat,c.lon],{
       radius:_mapaR(c,mx),fillColor:_mapaCol(c),color:'#fff',
       weight:1.5,opacity:.9,fillOpacity:.82
@@ -342,12 +344,35 @@ function _showRegPanel(){
     </div>`).join('');
 }
 
+// Clientes que facturan y no tienen fila en BASE MAPA: sin coordenadas no
+// pueden ir en el mapa, así que su ingreso se agrega como «Otros clientes»
+// para que el total cuadre con el del Resumen. El monto se calcula como
+// residuo contra el total del panel, así el cuadre no depende de que los
+// nombres coincidan letra por letra entre las dos fuentes.
+function _mapaOtrosFac(){
+  const fc=((window.APP_DATA||{}).fact_clientes)||[];
+  if(!fc.length||!MAPA_DATA.length) return {n:0,monto:0,tot:0};
+  const nrm=s=>String(s||'').trim().toUpperCase().replace(/\s+/g,' ')
+    .normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const enMapa=new Set(MAPA_DATA.map(c=>nrm(c.n)));
+  const tot=fc.reduce((s,c)=>s+(c.real||0),0);
+  const totMapa=MAPA_DATA.reduce((s,c)=>s+(c.ingreso_2026||0),0);
+  const fuera=fc.filter(c=>!enMapa.has(nrm(c.cliente))&&(c.real||0)>0);
+  return {n:fuera.length, monto:tot-totMapa, tot:tot, clientes:fuera};
+}
+// Sólo aplica sobre el universo completo y cuando la métrica incluye 2026.
+function _mapaResidual(data){
+  if(_mapaIngrYear==='2025') return 0;
+  if(data.length!==MAPA_DATA.length) return 0;
+  return _mapaOtrosFac().monto;
+}
+
 function _kpis(data){
   const s=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
   s('mk-tot',data.length);
   s('mk-cc',data.filter(c=>c.cc).length);
   s('mk-bi',data.reduce((s,c)=>s+c.bi,0));
-  s('mk-ing',_fMM(data.reduce((s,c)=>s+_getIngreso(c),0)));
+  s('mk-ing',_fMM(data.reduce((s,c)=>s+_getIngreso(c),0)+_mapaResidual(data)));
   s('mk-pot',_fMM(data.reduce((s,c)=>s+c.pot,0)));
   const ingLbl=document.getElementById('mk-ing-lbl');
   if(ingLbl)ingLbl.textContent=_mapaIngrYear==='ambos'?'Ingreso 2025+2026':_mapaIngrYear==='2025'?'Ingreso 2025':'Ingreso 2026';
@@ -367,6 +392,10 @@ function _renderRegTable(){
   const tot={n:0,cc:0,bi:0,ing:0,pot_eq:0,pot_st:0,pot_st_gar:0,pot_st_contr:0};
   sorted.forEach(([,d])=>{tot.n+=d.n;tot.cc+=d.cc;tot.bi+=d.bi;tot.ing+=d.ing;tot.pot_eq+=d.pot_eq;tot.pot_st+=d.pot_st;
     tot.pot_st_gar+=d.pot_st_gar;tot.pot_st_contr+=d.pot_st_contr;});
+  // Fila de cierre con los clientes que facturan y no están en BASE MAPA
+  const resid=_mapaResidual(filt);
+  const otros=resid?_mapaOtrosFac():null;
+  if(resid){tot.ing+=resid;tot.n+=otros.n;}
   const pctFmt=d=>d.n>0?(d.cc/d.n*100).toFixed(0)+'%':'—';
   tbody.innerHTML=sorted.map(([reg,d])=>`
     <tr>
@@ -381,7 +410,17 @@ function _renderRegTable(){
       <td class="num" style="color:var(--az2)">${_fT(d.pot_st_contr)}</td>
       <td class="num" style="color:var(--teal);font-weight:700">${_fT(d.pot_st)}</td>
       <td class="num" style="color:var(--mut)">${d.n>0?_fT(d.pot_st/d.n):'—'}</td>
-    </tr>`).join('')+`
+    </tr>`).join('')+(resid?`
+    <tr style="background:var(--gy)" title="${otros.clientes.map(c=>c.cliente).join('\n').replace(/"/g,'&quot;')}">
+      <td><strong style="color:var(--mut)">Otros clientes</strong>
+        <span style="font-size:.57rem;color:var(--mut)"> · sin fila en Base Mapa</span></td>
+      <td class="num" style="color:var(--mut)">${otros.n}</td>
+      <td colspan="3" style="text-align:center;font-size:.57rem;color:var(--mut);font-style:italic">facturan pero no tienen ubicación cargada</td>
+      <td class="num" style="color:var(--az2)">${_fT(resid)}</td>
+      <td class="num" style="color:var(--mut)">—</td><td class="num" style="color:var(--mut)">—</td>
+      <td class="num" style="color:var(--mut)">—</td><td class="num" style="color:var(--mut)">—</td>
+      <td class="num" style="color:var(--mut)">—</td>
+    </tr>`:'')+`
     <tr style="background:rgba(30,90,200,.08);font-weight:800;border-top:2px solid var(--az2)">
       <td><strong>TOTAL</strong></td>
       <td class="num">${tot.n}</td>
@@ -479,7 +518,7 @@ function _geoArea(latlngs){
 
 function _mostrarResumenPoligono(latlngs){
   const area=_geoArea(latlngs);
-  const dentro=MAPA_DATA.filter(c=>_ptInPoly(c.lat,c.lon,latlngs));
+  const dentro=MAPA_DATA.filter(c=>c.lat!=null&&c.lon!=null&&_ptInPoly(c.lat,c.lon,latlngs));
   const r=document.getElementById('mp-poly-result');
   const b=document.getElementById('mp-poly-body');
   const t=document.getElementById('mp-poly-title');

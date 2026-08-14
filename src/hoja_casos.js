@@ -17,7 +17,7 @@ function initCasos() {
 function _casosHTML() {
   return `
   <div class="sh">
-    <h2>Casos Relevantes · Equipos Detenidos</h2>
+    <h2>Equipos Detenidos · Casos Relevantes</h2>
     <div class="sh-line"></div>
     <span class="sh-tag" id="casos-tag">Información actualizada desde Excel · Hoja "Casos Relevantes"</span>
   </div>
@@ -40,35 +40,30 @@ function _casosHTML() {
     </div>
   </div>
 
-  <!-- Tabla 1: Casos Relevantes -->
+  <!-- Resumen por comentario de la coordinadora -->
   <div class="card" style="margin-bottom:.9rem">
-    <div class="ch" style="background:linear-gradient(135deg,rgba(192,0,0,.18),rgba(192,0,0,.06));flex-wrap:wrap;gap:.5rem">
-      <span class="ct" style="color:#000">Casos Relevantes</span>
-      <span style="font-size:.58rem;color:var(--mut)" id="cas-t1-count">—</span>
-      <div style="display:flex;align-items:center;gap:.45rem;margin-left:auto;flex-wrap:wrap">
-        <span class="ctrl-lbl">Coordinador</span>
-        <select id="cas-sel-coord" style="font-size:.62rem;border:1px solid var(--brd);border-radius:5px;padding:.25rem .5rem;background:#fff;color:var(--txt);font-family:'Roboto',sans-serif" onchange="renderCasos()">
-          <option value="">Todos</option>
-        </select>
-        <span class="ctrl-lbl" style="margin-left:.3rem">Responsable</span>
-        <select id="cas-sel-resp" style="font-size:.62rem;border:1px solid var(--brd);border-radius:5px;padding:.25rem .5rem;background:#fff;color:var(--txt);font-family:'Roboto',sans-serif" onchange="renderCasos()">
-          <option value="">Todos</option>
-        </select>
-      </div>
+    <div class="ch" style="background:linear-gradient(135deg,rgba(255,160,0,.18),rgba(255,160,0,.06));flex-wrap:wrap;gap:.4rem">
+      <span class="ct" style="color:var(--am)">Resumen por Comentario de Coordinadora</span>
+      <span style="font-size:.58rem;color:var(--mut)" id="cas-t0-count">—</span>
+      <span style="font-size:.55rem;color:var(--mut);margin-left:auto">en qué está detenido cada equipo</span>
     </div>
     <div style="overflow-x:auto">
-      <table class="tbl" id="cas-table1" style="min-width:900px">
+      <table class="tbl" id="cas-table0" style="min-width:920px">
         <thead><tr>
-          <th style="min-width:110px">Coordinador</th>
-          <th style="min-width:160px">Cliente</th>
-          <th style="min-width:200px">Problema</th>
-          <th style="min-width:120px">Responsable</th>
-          <th style="min-width:320px">Comentario</th>
-          <th style="min-width:120px">Salesforce</th>
+          <th style="min-width:210px">Comentario Coordinadora</th>
+          <th style="min-width:100px">N° Equipos</th>
+          <th style="min-width:130px">% de los equipos</th>
+          <th style="min-width:100px">N° Contratos</th>
+          <th style="min-width:110px">Equipos sin contrato</th>
+          <th style="min-width:90px">Clientes</th>
+          <th style="min-width:130px">Fact. Anual Esperada</th>
+          <th style="min-width:125px">Fact. a la Fecha</th>
         </tr></thead>
-        <tbody id="cas-tbody1"></tbody>
+        <tbody id="cas-tbody0"></tbody>
+        <tfoot id="cas-tfoot0"></tfoot>
       </table>
     </div>
+    <div style="padding:.4rem .9rem;background:var(--gy);border-top:1px solid var(--brd);font-size:.56rem;color:var(--mut);line-height:1.5" id="cas-nota0">—</div>
   </div>
 
   <!-- Tabla 2: Equipos Detenidos -->
@@ -83,7 +78,7 @@ function _casosHTML() {
       </div>
     </div>
     <div style="overflow-x:auto">
-      <table class="tbl" id="cas-table2" style="min-width:1800px">
+      <table class="tbl" id="cas-table2" style="min-width:1950px">
         <thead><tr>
           <th style="min-width:120px">Modelo</th>
           <th style="min-width:200px">Nombre Activo</th>
@@ -91,6 +86,7 @@ function _casosHTML() {
           <th style="min-width:90px">Marca</th>
           <th style="min-width:100px">Estado</th>
           <th style="min-width:110px">Coordinadora</th>
+          <th style="min-width:150px">Tipo de Comentario</th>
           <th style="min-width:260px">Comentario Coordinadora</th>
           <th style="min-width:90px">N° Contrato</th>
           <th style="min-width:120px">Estado Garantía</th>
@@ -128,7 +124,67 @@ function _casosHTML() {
         <tfoot id="cas-tfoot3"></tfoot>
       </table>
     </div>
+  </div>
+
+  <!-- Tabla 1: Casos Relevantes -->
+  <div class="card" style="margin-top:.9rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(192,0,0,.18),rgba(192,0,0,.06));flex-wrap:wrap;gap:.5rem">
+      <span class="ct" style="color:#000">Casos Relevantes</span>
+      <span style="font-size:.58rem;color:var(--mut)" id="cas-t1-count">—</span>
+      <div style="display:flex;align-items:center;gap:.45rem;margin-left:auto;flex-wrap:wrap">
+        <span class="ctrl-lbl">Coordinador</span>
+        <select id="cas-sel-coord" style="font-size:.62rem;border:1px solid var(--brd);border-radius:5px;padding:.25rem .5rem;background:#fff;color:var(--txt);font-family:'Roboto',sans-serif" onchange="renderCasos()">
+          <option value="">Todos</option>
+        </select>
+        <span class="ctrl-lbl" style="margin-left:.3rem">Responsable</span>
+        <select id="cas-sel-resp" style="font-size:.62rem;border:1px solid var(--brd);border-radius:5px;padding:.25rem .5rem;background:#fff;color:var(--txt);font-family:'Roboto',sans-serif" onchange="renderCasos()">
+          <option value="">Todos</option>
+        </select>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="cas-table1" style="min-width:900px">
+        <thead><tr>
+          <th style="min-width:110px">Coordinador</th>
+          <th style="min-width:160px">Cliente</th>
+          <th style="min-width:200px">Problema</th>
+          <th style="min-width:120px">Responsable</th>
+          <th style="min-width:320px">Comentario</th>
+          <th style="min-width:120px">Salesforce</th>
+        </tr></thead>
+        <tbody id="cas-tbody1"></tbody>
+      </table>
+    </div>
   </div>`;
+}
+
+// ── CATEGORÍA DE COMENTARIO ───────────────────────────────────────
+// La hoja trae dos columnas: P es texto libre de la coordinadora y Q la
+// versión categorizada. El resumen usa Q, unificando las dos variantes
+// que sólo difieren en redacción.
+const _CAT_NORM = {
+  'DIAGNOSTICO':   'EN ESPERA DE DIAGNÓSTICO',
+  'DIAGNÓSTICO':   'EN ESPERA DE DIAGNÓSTICO',
+  'EN REPARACION': 'REPARACIÓN',
+  'EN REPARACIÓN': 'REPARACIÓN'
+};
+const _CAT_COLOR = {
+  'EN ESPERA DE OC':          '#C00000',
+  'EN ESPERA DE REPUESTOS':   '#D46000',
+  'EN ESPERA DE DIAGNÓSTICO': '#8B8200',
+  'REPARACIÓN':               '#0A5C8C',
+  'OTROS':                    '#6B7BA8'
+};
+function _catComentario(e) {
+  const raw = (e.comentario_cat || e.comentario_coord || '').trim().toUpperCase();
+  if (!raw) return 'SIN COMENTARIO';
+  return _CAT_NORM[raw] || raw;
+}
+// Alguna fila trae en la columna de categoría el comentario largo en vez de
+// una categoría; se recorta para que no reviente la tabla y el texto completo
+// queda en el tooltip.
+function _catCorto(k) {
+  return k.length > 46 ? k.slice(0, 45) + '…' : k;
 }
 
 // ── BIND CONTROLES ────────────────────────────────────────────────
@@ -272,7 +328,8 @@ function renderCasos() {
         : !e.garantia.toUpperCase().includes('VIGENTE');
     if (!garOk) return false;
     if (!busq) return true;
-    return (e.modelo + e.nombre + e.marca + e.coordinadora + e.comentario_coord + e.comentario_mat)
+    return (e.modelo + e.nombre + e.serie + e.marca + e.coordinadora +
+            e.comentario_coord + (e.comentario_cat || '') + e.comentario_mat + (e.nombre_cliente || ''))
       .toLowerCase().includes(busq);
   });
 
@@ -310,6 +367,12 @@ function renderCasos() {
         <td><span style="font-size:.62rem">${_escH(e.marca)}</span></td>
         <td style="text-align:center">${estadoBadge}</td>
         <td><span style="font-size:.62rem;color:var(--az3)">${_escH(e.coordinadora)||'—'}</span></td>
+        <td style="text-align:center">${(() => {
+          const k = _catComentario(e), col = _CAT_COLOR[k] || '#6B7BA8';
+          return `<span title="${_escH(k)}" style="background:${col}1A;color:${col};border:1px solid ${col}55;
+                    padding:.08rem .35rem;border-radius:3px;font-size:.53rem;font-weight:700;
+                    white-space:nowrap">${_escH(_catCorto(k))}</span>`;
+        })()}</td>
         <td><div style="font-size:.6rem;line-height:1.5;max-width:280px;color:#111;font-weight:600">${_escH(e.comentario_coord)||_dash}</div></td>
         <td style="text-align:center">${contrNum}</td>
         <td style="text-align:center">${garBadge}</td>
@@ -321,6 +384,84 @@ function renderCasos() {
         <td style="text-align:center">${finCell}</td>
       </tr>`;
     }).join('');
+  }
+
+  // ── Tabla 0: Resumen por Comentario de Coordinadora ─────────────
+  // Los montos se acumulan por contrato distinto, no por fila: varios
+  // equipos detenidos comparten el mismo contrato y sumarlos por equipo
+  // multiplicaría la facturación.
+  const tbody0 = document.getElementById('cas-tbody0');
+  const tfoot0 = document.getElementById('cas-tfoot0');
+  if (tbody0) {
+    const _fmtM0 = v => v > 0 ? 'MM$' + fN1(v / 1e6) : '—';
+    const g0 = {};
+    eqFilt.forEach(e => {
+      const k = _catComentario(e);
+      if (!g0[k]) g0[k] = { eq: 0, sin: 0, ctr: {}, cli: new Set() };
+      const g = g0[k];
+      g.eq++;
+      if (e.contrato_num) {
+        g.ctr[e.contrato_num] = { anual: e.fac_anual || 0, ytd: e.fac_ytd || 0 };
+        if (e.nombre_cliente) g.cli.add(e.nombre_cliente);
+      } else g.sin++;
+    });
+
+    const cats = Object.keys(g0).sort((a, b) => g0[b].eq - g0[a].eq);
+    const totEq = eqFilt.length || 1;
+    const ctrAll = {};
+    let tEq = 0, tSin = 0;
+    const cliAll = new Set();
+
+    tbody0.innerHTML = cats.map(k => {
+      const g = g0[k];
+      const nCtr = Object.keys(g.ctr).length;
+      const anual = Object.values(g.ctr).reduce((s, v) => s + v.anual, 0);
+      const ytd   = Object.values(g.ctr).reduce((s, v) => s + v.ytd, 0);
+      const pct   = g.eq / totEq * 100;
+      const col   = _CAT_COLOR[k] || '#6B7BA8';
+      tEq += g.eq; tSin += g.sin;
+      Object.assign(ctrAll, g.ctr);
+      g.cli.forEach(c => cliAll.add(c));
+      return `<tr>
+        <td title="${_escH(k)}"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${col};margin-right:.4rem"></span>
+            <strong style="font-size:.63rem;color:${col}">${_escH(_catCorto(k))}</strong></td>
+        <td style="text-align:center;font-size:.65rem;font-weight:700">${g.eq}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:.4rem">
+            <div style="flex:1;height:7px;background:var(--gy);border-radius:3px;overflow:hidden;min-width:50px">
+              <div style="height:100%;width:${pct}%;background:${col}"></div></div>
+            <span style="font-size:.6rem;color:var(--mut);min-width:34px;text-align:right">${fN1(pct)}%</span>
+          </div></td>
+        <td style="text-align:center;font-size:.62rem;color:var(--az2);font-weight:700">${nCtr || '—'}</td>
+        <td style="text-align:center;font-size:.62rem;color:var(--mut)">${g.sin || '—'}</td>
+        <td style="text-align:center;font-size:.62rem">${g.cli.size || '—'}</td>
+        <td style="text-align:right;font-size:.62rem;font-weight:700;color:var(--az2)">${_fmtM0(anual)}</td>
+        <td style="text-align:right;font-size:.62rem;font-weight:700;color:var(--teal)">${_fmtM0(ytd)}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="8" style="text-align:center;padding:1.2rem;color:var(--mut)">Sin equipos para los filtros seleccionados</td></tr>';
+
+    if (tfoot0) {
+      tfoot0.innerHTML = cats.length ? `<tr>
+        <td style="padding:.4rem .7rem;font-size:.62rem">Total · ${cats.length} tipo${cats.length !== 1 ? 's' : ''} de comentario</td>
+        <td style="text-align:center;font-size:.65rem">${tEq}</td>
+        <td style="text-align:right;font-size:.62rem;padding-right:.7rem">100,0%</td>
+        <td style="text-align:center;font-size:.65rem">${Object.keys(ctrAll).length}</td>
+        <td style="text-align:center;font-size:.65rem">${tSin}</td>
+        <td style="text-align:center;font-size:.65rem">${cliAll.size}</td>
+        <td style="text-align:right;font-size:.65rem">${_fmtM0(Object.values(ctrAll).reduce((s, v) => s + v.anual, 0))}</td>
+        <td style="text-align:right;font-size:.65rem">${_fmtM0(Object.values(ctrAll).reduce((s, v) => s + v.ytd, 0))}</td>
+      </tr>` : '';
+    }
+
+    const t0c = document.getElementById('cas-t0-count');
+    if (t0c) t0c.textContent = cats.length + ' tipo' + (cats.length !== 1 ? 's' : '') + ' · ' + tEq + ' equipo' + (tEq !== 1 ? 's' : '');
+
+    const nota0 = document.getElementById('cas-nota0');
+    if (nota0) nota0.textContent =
+      'Agrupado por la columna «Comentario Coordinadora 2» de la hoja, que categoriza el texto libre de la coordinadora. ' +
+      '«Diagnóstico» y «En espera de diagnóstico» se cuentan juntos, igual que «Reparación» y «En reparación». ' +
+      'La facturación se acumula por contrato distinto y no por equipo, porque varios equipos detenidos comparten contrato; ' +
+      'los ' + tSin + ' equipos sin contrato asociado no aportan monto.';
   }
 
   // ── Tabla 3: Resumen por Familia de Equipo/Marca ────────────────

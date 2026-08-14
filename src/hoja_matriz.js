@@ -45,7 +45,7 @@ function _regOptsM(){
 
 function _matrizHTML(){
   return `
-  <div class="sh"><h2>Matriz · Base Instalada, Contratos y Potencial</h2><div class="sh-line"></div>
+  <div class="sh"><h2>Matriz BI, Contratos y Potencial Clientes Actuales</h2><div class="sh-line"></div>
     <span class="sh-tag" id="mtz-tag">Clientes foco = mayor potencial + menor satisfacción</span>
   </div>
 
@@ -285,7 +285,11 @@ function renderMatriz(){
   }).join('');
 
   const totBi=data.reduce((s,c)=>s+c.bi,0);
-  const totIng=data.reduce((s,c)=>s+(c.ingreso_2026||c.ingreso||0),0);
+  // Sobre el universo completo se suma el ingreso de los clientes que facturan
+  // y no tienen fila en BASE MAPA, para cerrar en el mismo total del Resumen.
+  const residIng=(data.length===MAPA_DATA.length&&typeof _mapaOtrosFac==='function')
+    ? _mapaOtrosFac().monto : 0;
+  const totIng=data.reduce((s,c)=>s+(c.ingreso_2026||c.ingreso||0),0)+residIng;
   const totPotEq=data.reduce((s,c)=>s+(c.pot_eq||0),0);
   const totPotSt=data.reduce((s,c)=>s+(c.pot_st||0),0);
   const totPotStGar=data.reduce((s,c)=>s+(c.pot_st_gar||0),0);
@@ -297,7 +301,7 @@ function renderMatriz(){
 
   const foot=document.getElementById('mtz-foot');
   if(foot)foot.innerHTML=`
-    <td class="flab">TOTAL · ${data.length} clientes</td><td></td><td></td>
+    <td class="flab">TOTAL · ${data.length} clientes${residIng?' · +'+_mapaOtrosFac().n+' sin fila en Base Mapa':''}</td><td></td><td></td>
     <td class="num">${totBi}</td><td class="num">${totCC}</td>
     <td class="num" style="color:var(--teal)">${_fMMz(totIng)}</td>
     <td class="num" style="color:var(--am)">${_fMMz(totPotEq)}</td>

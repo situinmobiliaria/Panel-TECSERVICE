@@ -19,8 +19,16 @@ function _pfReal(p){
 function pfSortCol(col){_pfSortAsc=(_pfSortCol===col)?!_pfSortAsc:false;_pfSortCol=col;renderPanelFact();}
 let _chPfBar=null,_chPfDist=null;
 
+// Universo de la hoja: panel_fact deduplica las filas alias de FACTURACION y
+// suma los clientes que sólo aparecen en la BBDD, de modo que el KPI de arriba
+// cuadre con la tabla de abajo y con Ingresos Totales de la portada.
+function pfUniverso(){
+  return (APP_DATA.panel_fact && APP_DATA.panel_fact.length)
+    ? APP_DATA.panel_fact : APP_DATA.panel;
+}
+
 function pfDataFiltrada(){
-  return APP_DATA.panel.filter(p=>{
+  return pfUniverso().filter(p=>{
     if(pfTipo!=='todos'&&p.tipo_cli!==pfTipo)return false;
     if(pfContr==='con'&&!p.tiene_contrato)return false;
     if(pfContr==='sin'&&p.tiene_contrato)return false;

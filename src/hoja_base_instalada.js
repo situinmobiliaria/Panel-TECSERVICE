@@ -11,19 +11,78 @@ let _biSortCol=2, _biSortAsc=false;
 let _biAllClientes=[]; // lista completa para re-filtrar con potencial
 
 // Lookup maps cruzados con panel (facturación) y DATA (contratos activos)
-let _biPanelMap={}, _biContratoMap={};
+let _biPanelMap={}, _biContratoMap={}, _biFacRes={};
 
 function _biNorm(s){ return s?s.trim().toUpperCase().replace(/\s+/g,' ').normalize('NFD').replace(/[̀-ͯ]/g,''):''; }
-function _biLookupPanel(nombre){
-  const k=_biNorm(nombre);
-  if(_biPanelMap[k]) return _biPanelMap[k];
-  // búsqueda parcial (uno contiene al otro, mínimo 8 chars)
-  if(k.length>=8){
-    const found=Object.keys(_biPanelMap).find(pk=>pk.includes(k)||k.includes(pk));
-    if(found) return _biPanelMap[found];
-  }
-  return null;
+
+// Resolución 1:1 entre cliente de Base Instalada y cliente de facturación.
+// El match parcial suelto confundía hospitales distintos que comparten
+// prefijo — «Hospital San José» calzaba además con los de Maipú, Melipilla
+// y Casablanca, y su facturación se contaba cuatro veces (MM$51,6 de más).
+// Ahora el match exacto reclama primero y el parcial sólo toma entradas
+// libres y sin ambigüedad: si dos clientes BI se disputan la misma entrada,
+// ninguno se la queda.
+function _biResolverFac(clientes){
+  _biFacRes={};
+  const tomadas=new Set(), pendientes=[];
+  (clientes||[]).forEach(c=>{
+    const k=_biNorm(c.nombre);
+    if(!k) return;
+    if(_biPanelMap[k]){ _biFacRes[k]=_biPanelMap[k]; tomadas.add(k); }
+    else if(k.length>=8) pendientes.push(k);
+  });
+  const cand={};
+  pendientes.forEach(k=>{
+    const hit=Object.keys(_biPanelMap).filter(pk=>
+      pk.length>=8 && !tomadas.has(pk) && (pk.includes(k)||k.includes(pk)));
+    if(hit.length===1){ (cand[hit[0]]=cand[hit[0]]||[]).push(k); }
+  });
+  Object.keys(cand).forEach(pk=>{
+    if(cand[pk].length===1) _biFacRes[cand[pk][0]]=_biPanelMap[pk];
+  });
 }
+function _biLookupPanel(nombre){ return _biFacRes[_biNorm(nombre)]||null; }
+
+// Facturación de una lista de clientes BI contando cada cliente una sola vez.
+// BASE INSTALADA trae algún nombre repetido (Corporación Municipal de
+// Providencia aparece dos veces), y sumar por fila inflaba el total.
+function _biFacUnicos(list){
+  const usados = new Set();
+  let monto = 0;
+  (list||[]).forEach(c=>{
+    const p = _biLookupPanel(c.nombre);
+    if(!p || usados.has(p.cliente)) return;
+    usados.add(p.cliente);
+    monto += _biFac(p);
+  });
+  return { monto: monto, usados: usados };
+}
+
+// Clientes que facturan y no tienen ninguna fila en la base instalada. Van
+// como fila «Otros clientes» al pie de la tabla para que la columna Fac. 2026
+// cierre en el mismo total que el resto del panel. El monto se calcula como
+// residuo contra ese total, así el cuadre no depende de que los nombres
+// coincidan entre las dos fuentes.
+function _biOtrosFac(){
+  const facCli = APP_DATA.fact_clientes || [];
+  const totPanel = facCli.reduce((s,c)=>s+(c.real||0),0);
+  const { monto: cruz, usados } = _biFacUnicos(_biAllClientes);
+  const fuera = facCli.filter(c=>!usados.has(c.cliente) && (c.real||0)>0);
+  return { n: fuera.length, monto: totPanel - cruz, clientes: fuera,
+           cruz: cruz, tot: totPanel, usados: usados };
+}
+
+// La fila «Otros clientes» sólo tiene sentido sobre el universo completo: con
+// un filtro activo el pie muestra el subconjunto y agregarla lo desvirtuaría.
+function _biSinFiltros(){
+  return _biFiltPotencial==='todos' && _biFiltEstado==='todos' &&
+         _biFiltRelacion==='todos'  && _biFiltLinea==='todos'  && !_biQuery;
+}
+
+// Facturación del año del cliente. real_ytd_fac viene de la BBDD y es la
+// misma base que «Ingresos Totales» de la portada; real_ytd sale de la hoja
+// FACTURACION y no cuadra con el resto del panel.
+function _biFac(p){ return p ? (p.real_ytd_fac!==undefined?(p.real_ytd_fac||0):(p.real_ytd||0)) : 0; }
 function _biLookupContrato(nombre){
   const k=_biNorm(nombre);
   if(_biContratoMap[k]) return _biContratoMap[k];
@@ -52,6 +111,28 @@ const _BI_TARIFA = {
 
 function _biPotAnual(c){
   return Object.keys(_BI_TARIFA).reduce((s,k)=>s+_biVal(c,k)*_BI_TARIFA[k],0);
+}
+
+// Potencial ST por región. Se calcula sumando el potencial de los mismos
+// clientes que muestra la tabla de Detalle por Cliente y excluyendo a los que
+// ya tienen contrato o garantía vigente, igual que el total de esa tabla; si
+// se multiplicaran los equipos de la región por la tarifa, el número no
+// calzaría porque incluiría a los clientes ya capturados.
+// Cada cliente se atribuye a la región donde tiene la mayoría de sus equipos.
+let _biRegPotMap = null;
+function _biRegPotCalc(){
+  _biRegPotMap = {};
+  (_biAllClientes||[]).forEach(c=>{
+    const p = _biLookupPanel(c.nombre), d = _biLookupContrato(c.nombre);
+    if((d && d.n > 0) || (p && p.tiene_contrato)) return;   // ya capturado
+    const r = c.region || 'Sin región';
+    _biRegPotMap[r] = (_biRegPotMap[r] || 0) + _biPotAnual(c);
+  });
+  return _biRegPotMap;
+}
+function _biRegPot(d){
+  if(!_biRegPotMap) _biRegPotCalc();
+  return _biRegPotMap[d.region] || 0;
 }
 
 // Celda de la columna "Potencial ST Anual": si el cliente ya tiene contrato
@@ -182,7 +263,7 @@ function _biRenderTabla(){
     tb.innerHTML = list.map((c,i)=>{
       const p=_biLookupPanel(c.nombre);
       const d=_biLookupContrato(c.nombre);
-      const fac2026=p?(mm(p.real_ytd||0)):'—';
+      const fac2026=p?(mm(_biFac(p))):'—';
       const facContr=p?(mm(p.presup_contr_ytd||0)):'—';
       return `<tr>
       <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">${i+1}</td>
@@ -200,6 +281,24 @@ function _biRenderTabla(){
       <td style="text-align:right">${_biPotCelda(c,p,d)}</td>
     </tr>`;
     }).join('');
+
+    // Fila de cierre: lo que facturan los clientes sin base instalada
+    const otros = _biSinFiltros() ? _biOtrosFac() : null;
+    if(otros && otros.n){
+      const nom = otros.clientes.slice(0,25).map(c=>c.cliente).join('\n');
+      tb.innerHTML += `<tr style="background:var(--gy);border-top:2px solid var(--brd)">
+        <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">—</td>
+        <td title="${(nom+(otros.n>25?'\n…y '+(otros.n-25)+' más':'')).replace(/"/g,'&quot;')}">
+          <strong style="font-size:.7rem;color:var(--mut)">Otros clientes</strong>
+          <span style="font-size:.58rem;color:var(--mut)"> · ${otros.n} sin base instalada cargada</span></td>
+        <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--mut)">—</td>
+        <td colspan="7" style="text-align:center;font-size:.58rem;color:var(--mut);font-style:italic">
+          facturan sin equipos registrados en esta hoja</td>
+        <td style="text-align:right;color:var(--az1);font-weight:700">${mm(otros.monto)}</td>
+        <td style="text-align:right;color:var(--mut)">—</td>
+        <td style="text-align:right;color:var(--mut)">—</td>
+      </tr>`;
+    }
   }
 
   // Footer
@@ -212,7 +311,10 @@ function _biRenderTabla(){
     const endo = list.reduce((s,c)=>s+_biVal(c,'endoscopia'),0);
     const mob  = list.reduce((s,c)=>s+_biVal(c,'mobiliario'),0);
     const mmq  = list.reduce((s,c)=>s+_biVal(c,'mmq_reas'),0);
-    const facTotal = list.reduce((s,c)=>{const p=_biLookupPanel(c.nombre);return s+(p&&p.real_ytd?p.real_ytd:0);},0);
+    // Sin filtros, el pie incluye la fila «Otros clientes» para que Fac. 2026
+    // cierre en el mismo total que la portada.
+    const otrosF = _biSinFiltros() ? _biOtrosFac() : { n:0, monto:0 };
+    const facTotal = _biFacUnicos(list).monto + otrosF.monto;
     const conContr = list.filter(c=>{const d=_biLookupContrato(c.nombre);return d&&d.n>0;}).length;
     // Sólo suma el potencial de quienes NO tienen contrato: en los que ya lo
     // tienen no hay nada que capturar.
@@ -222,7 +324,7 @@ function _biRenderTabla(){
       return s2+_biPotAnual(c);
     },0);
     const st='text-align:right;font-family:\'Roboto Mono\',monospace;color:rgba(255,255,255,.75)';
-    foot.innerHTML = `<td colspan="2" style="font-weight:700;font-size:.62rem;color:rgba(255,255,255,.85)">${list.length} clientes · ${conContr} con contrato activo</td>
+    foot.innerHTML = `<td colspan="2" style="font-weight:700;font-size:.62rem;color:rgba(255,255,255,.85)">${list.length} clientes · ${conContr} con contrato activo${otrosF.n?' · +'+otrosF.n+' sin base instalada':''}</td>
       <td style="${st};font-weight:700;color:#fff">${tot.toLocaleString('es-CL')}</td>
       <td style="${st}">${dent}</td><td style="${st}">${este}</td>
       <td style="${st}">${inc}</td><td style="${st}">${endo}</td>
@@ -386,6 +488,7 @@ window._biMapRefresh = function(){
 function _biRenderRegTabla(){
   const box = document.getElementById('bi-reg-tabla');
   if(!box) return;
+  _biRegPotMap = null;   // el potencial depende del segmentador, se recalcula
   const datos = _biRegData();
   if(!datos.length){ box.innerHTML=''; return; }
   const totG = datos.reduce((s,d)=>s+d.total,0);
@@ -408,6 +511,7 @@ function _biRenderRegTabla(){
           ${th('REGIÓN','left')}${th('EQUIPOS','right')}${th('%','right')}
           ${cols.map(c=>th(String(c).toUpperCase().slice(0,11),'right')).join('')}
           ${th('CLIENTES','right')}
+          ${th('POTENCIAL ST','right')}
         </tr></thead>
         <tbody>${datos.map((d,i)=>{
           const m = Object.fromEntries(d.lineas);
@@ -423,7 +527,9 @@ function _biRenderRegTabla(){
               </div></td>
             ${cols.map(c=>`<td style="padding:.28rem .5rem;text-align:right;font-size:.61rem;
               font-variant-numeric:tabular-nums;color:${m[c]?_biLineaColor(String(c).toUpperCase()):'var(--mut)'};${SEP}">${m[c]?m[c].toLocaleString('es-CL'):'—'}</td>`).join('')}
-            <td style="padding:.28rem .5rem;text-align:right;font-size:.61rem;color:var(--mut)">${d.n_clientes}</td>
+            <td style="padding:.28rem .5rem;text-align:right;font-size:.61rem;color:var(--mut);${SEP}">${d.n_clientes}</td>
+            <td style="padding:.28rem .5rem;text-align:right;font-size:.64rem;font-weight:700;color:var(--am);
+                       font-variant-numeric:tabular-nums">${_biRegPot(d)?mm(_biRegPot(d)):'—'}</td>
           </tr>`;}).join('')}</tbody>
         <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
           <td style="padding:.32rem .5rem;font-size:.63rem;${SEP}">TOTAL · ${datos.length} regiones</td>
@@ -431,14 +537,24 @@ function _biRenderRegTabla(){
           <td style="padding:.32rem .5rem;text-align:right;font-size:.58rem;${SEP}">100%</td>
           ${cols.map(c=>`<td style="padding:.32rem .5rem;text-align:right;font-size:.61rem;
             font-variant-numeric:tabular-nums;${SEP}">${acum[c].toLocaleString('es-CL')}</td>`).join('')}
-          <td style="padding:.32rem .5rem;text-align:right;font-size:.61rem">${datos.reduce((s,d)=>s+d.n_clientes,0)}</td>
+          <td style="padding:.32rem .5rem;text-align:right;font-size:.61rem;${SEP}">${datos.reduce((s,d)=>s+d.n_clientes,0)}</td>
+          <td style="padding:.32rem .5rem;text-align:right;font-size:.64rem;
+                     font-variant-numeric:tabular-nums">${mm(datos.reduce((s,d)=>s+_biRegPot(d),0))}</td>
         </tr></tfoot>
       </table>
     </div>
-    <p style="font-size:.55rem;color:var(--mut);margin:.45rem 0 0;line-height:1.4">
+    <p style="font-size:.55rem;color:var(--mut);margin:.45rem 0 0;line-height:1.55">
       La región viene de la columna «Región» de la hoja BASE INSTALADA. Los equipos que en el Excel
       figuran sin región, con «Sin Información» o con error quedan agrupados en «Sin región» y no se
-      dibujan en el mapa.</p>`;
+      dibujan en el mapa.<br>
+      <strong>Potencial ST</strong> suma el potencial de los mismos clientes de la tabla Detalle por Cliente,
+      <strong>excluyendo a los que ya tienen contrato o garantía vigente</strong>, por lo que su total coincide
+      con el de esa tabla. Tarifas anuales de mantención por equipo:
+      Esterilización <strong>50 UF</strong> (${mm(_BI_TARIFA.esterilizacion)}),
+      Endoscopía <strong>22 UF</strong> (${mm(_BI_TARIFA.endoscopia)}) y
+      Dental <strong>15 UF</strong> (${mm(_BI_TARIFA.dental)}); las demás líneas no valorizan.
+      Respeta el segmentador de Potencial ST del inicio de la hoja. Cada cliente se atribuye a la región
+      donde tiene la mayoría de sus equipos.</p>`;
 }
 
 function _biRefreshDynamic(){
@@ -580,6 +696,27 @@ function _biRefreshDynamic(){
   _biRenderTabla();
   _biRenderMapa();
   _biRenderRegTabla();
+  _biNotaFac();
+}
+
+// Conciliación de la columna Fac. 2026 contra el total del panel. La hoja
+// sólo puede sumar a los clientes que tienen equipos registrados, así que
+// deja explícito cuánto factura el resto en vez de aparentar un descuadre.
+function _biNotaFac(){
+  const el = document.getElementById('bi-fac-nota');
+  if(!el) return;
+  const otros = _biOtrosFac();
+  const totPanel = otros.tot, cruz = otros.cruz;
+  const nCruz = otros.usados ? otros.usados.size : 0;
+  if(!totPanel){ el.textContent=''; return; }
+  el.innerHTML =
+    `<strong>Fac. 2026</strong> es la facturación del año de cada cliente, con la misma base que «Ingresos Totales» `+
+    `de la portada. Los clientes con equipos registrados suman <strong>${mm(cruz)}</strong> en ${nCruz} filas y la `+
+    `fila <strong>Otros clientes</strong> recoge los ${otros.n} que facturan sin base instalada cargada `+
+    `(<strong>${mm(otros.monto)}</strong>), de modo que el total cierra en los ${mm(totPanel)} del panel. `+
+    `Cada cliente se cuenta una sola vez: el cruce por nombre exige coincidencia exacta o una única coincidencia `+
+    `parcial sin ambigüedad. Al aplicar cualquier filtro la fila «Otros clientes» se oculta y el pie pasa a mostrar `+
+    `sólo el subconjunto seleccionado.`;
 }
 function biSearch(val){
   _biQuery = val;
@@ -606,11 +743,15 @@ function initBaseInstalada(){
   const total     = bi.total || 0;
 
   // ── Construir mapas cruzados con panel y DATA ─────────────────────────────
+  // panel_fact deduplica las filas alias de FACTURACION y suma los clientes
+  // que sólo aparecen en la BBDD; panel se deja como respaldo.
   _biPanelMap = {};
-  (APP_DATA.panel||[]).forEach(p=>{
+  ((APP_DATA.panel_fact && APP_DATA.panel_fact.length)
+      ? APP_DATA.panel_fact : (APP_DATA.panel||[])).forEach(p=>{
     const k=_biNorm(p.cliente);
     if(k) _biPanelMap[k]=p;
   });
+  _biResolverFac(_biAllClientes);
   _biContratoMap = {};
   (typeof DATA!=='undefined'?DATA:[]).forEach(d=>{
     const k=_biNorm(d.cliente);
@@ -626,7 +767,7 @@ function initBaseInstalada(){
   // Clientes BI que tienen contrato activo en DATA
   const biConContratoActivo = clientes.filter(c=>{ const d=_biLookupContrato(c.nombre); return d&&d.n>0; }).length;
   // Facturación 2026 de clientes BI que están en el panel
-  const facBITotal = clientes.reduce((s,c)=>{ const p=_biLookupPanel(c.nombre); return s+(p&&p.real_ytd?p.real_ytd:0); },0);
+  const facBITotal = _biFacUnicos(clientes).monto;
 
   // ── Helpers de líneas para cards ─────────────────────────────────────────
   const _LINEAS_DEF = [
@@ -829,14 +970,15 @@ function initBaseInstalada(){
         <th onclick="biSortCol(7,this)" class="num" style="color:#C0A0F0">Mobil.</th>
         <th onclick="biSortCol(8,this)" class="num" style="color:#80D080">MMQ/REAS</th>
         <th onclick="biSortCol(9,this)">Estado BI</th>
-        <th onclick="biSortCol(10,this)" class="num" style="color:#FFC000">Fac. 2026</th>
+        <th onclick="biSortCol(10,this)" class="num" style="color:#FFC000" title="Facturación del año del cliente, misma base que «Ingresos Totales» de la portada.&#10;Sólo cubre a los clientes de la base instalada: los que facturan sin tener equipos registrados aquí no aparecen.">Fac. 2026</th>
         <th class="num">F. Contr.</th>
         <th class="num" style="color:#FFC000" title="Potencial de servicio técnico anual sobre la base instalada.&#10;&#10;Tarifa anual de mantención por equipo:&#10;  · Esterilización   50 UF   ($2.043.239)&#10;  · Endoscopía       22 UF   ($898.585)&#10;  · Dental           15 UF   ($612.671)&#10;&#10;Se valorizan sólo los equipos con Potencial ST = Sí, según el filtro del inicio de la hoja.&#10;Los clientes con contrato vigente se marcan como Contrato activo y no suman al total.">Potencial ST Anual<br><span style="font-weight:400;font-size:.55rem">(Mantenimiento BI)</span></th>
       </tr></thead>
       <tbody id="tb-bi-cli"></tbody>
       <tfoot><tr id="tfoot-bi-cli" style="background:var(--az3);font-size:.62rem"></tr></tfoot>
     </table>
-  </div>`;
+  </div>
+  <p id="bi-fac-nota" style="font-size:.6rem;color:var(--mut);margin:.5rem .2rem 0;line-height:1.6"></p>`;
 
   // KPIs, cards por línea, gráficos y tabla se delegan a _biRefreshDynamic
   // para que reaccionen al filtro Potencial ST

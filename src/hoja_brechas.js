@@ -297,41 +297,106 @@
   }
 
   // Repuestos que más bloquean, cruzados con el stock en bodega
-  function stProductos() {
+  // ── Repuestos que bloquean ventas ────────────────────────────
+  // Todos los SKU en brecha, cruzados contra bodega y contra las OC ya
+  // puestas al proveedor. Por Comprar = solicitadas − stock − back order.
+  let _prodQ = '', _prodSoloComprar = false;
+  window._brProdQ = function (v) { _prodQ = v; stProductos(true); };
+  window._brProdF = function () { _prodSoloComprar = !_prodSoloComprar; stProductos(); };
+
+  function stProductos(mantenerFoco) {
     const box = document.getElementById('br-st-prod');
     if (!box) return;
-    // Índice SKU -> stock actual, desde la hoja Inventario TS
+    // Índice SKU -> stock actual, desde la hoja Inventario Bodega
     const stockSku = {};
     Object.values(INV.data || {}).forEach(d => (d.items || []).forEach(i => {
       stockSku[i.sku] = (stockSku[i.sku] || 0) + i.st;
     }));
-    const g = (ST.productos || []).slice(0, 15);
+
+    const filas = (ST.productos || []).map(p => {
+      const s   = stockSku[p.cod];
+      const bo  = p.bo || 0;
+      const cmp = Math.max(p.cant - (s || 0) - bo, 0);
+      return Object.assign({}, p, { stock: s, bo: bo, comprar: cmp });
+    });
+
+    const q = _prodQ.trim().toUpperCase();
+    const g = filas.filter(p =>
+      (!q || p.cod.toUpperCase().includes(q) || (p.prod || '').toUpperCase().includes(q)) &&
+      (!_prodSoloComprar || p.comprar > 0));
+
+    const tot = k => g.reduce((a, p) => a + (p[k] || 0), 0);
+    const nCob = filas.filter(p => p.comprar === 0).length;
+    const nBO  = filas.filter(p => p.bo > 0).length;
+
     box.innerHTML = `
-      <div style="overflow-x:auto;max-height:300px;overflow-y:auto">
-        <table style="width:100%;border-collapse:collapse;min-width:520px">
+      <div style="display:flex;gap:.5rem;margin-bottom:.5rem;flex-wrap:wrap;align-items:center">
+        <input id="br-prod-q" value="${esc(_prodQ)}" placeholder="Buscar SKU o producto…"
+          oninput="window._brProdQ(this.value)"
+          style="font-size:.6rem;padding:.2rem .45rem;border:1px solid var(--brd);border-radius:3px;
+                 background:var(--bg2);color:var(--txt);width:190px">
+        <button onclick="window._brProdF()" style="font-size:.58rem;padding:.18rem .5rem;border-radius:3px;cursor:pointer;
+          border:1px solid ${_prodSoloComprar ? '#C00000' : 'var(--brd)'};
+          background:${_prodSoloComprar ? '#C0000018' : 'var(--bg2)'};
+          color:${_prodSoloComprar ? '#C00000' : 'var(--txt)'};font-weight:${_prodSoloComprar ? 700 : 400}">
+          Sólo con compra pendiente</button>
+        <span style="font-size:.58rem;color:var(--mut)">
+          ${g.length} de ${filas.length} SKU · ${nBO} con back order · ${nCob} ya cubiertos entre stock y OC</span>
+      </div>
+      <div style="overflow-x:auto;max-height:460px;overflow-y:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:760px">
           <thead><tr>${th('SKU', 'left')}${th('PRODUCTO', 'left')}${th('OPS', 'right')}
-            ${th('UN', 'right')}${th('MONTO', 'right')}${th('STOCK', 'right')}</tr></thead>
+            ${th('UN SOLIC.', 'right')}${th('MONTO', 'right')}${th('STOCK', 'right')}
+            ${th('BACK ORDER', 'right')}${th('POR COMPRAR', 'right')}</tr></thead>
           <tbody>${g.map((p, i) => {
-            const s = stockSku[p.cod];
-            const hay = s !== undefined && s > 0;
+            const s = p.stock, hay = s !== undefined && s > 0;
             return `<tr style="background:${i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)'}">
               <td style="padding:.28rem .6rem;font-size:.6rem;font-family:'Roboto Mono',monospace;${SEP}">${esc(p.cod)}</td>
               <td style="padding:.28rem .6rem;font-size:.62rem;color:var(--mut);${SEP}"
-                  title="${esc(p.prod)}">${esc(p.prod.length > 34 ? p.prod.slice(0, 33) + '…' : p.prod)}</td>
-              <td style="padding:.28rem .6rem;text-align:right;font-size:.62rem;${SEP}">${p.n}</td>
+                  title="${esc(p.prod)}">${esc(p.prod.length > 40 ? p.prod.slice(0, 39) + '…' : p.prod)}</td>
+              <td style="padding:.28rem .6rem;text-align:right;font-size:.62rem;${SEP}"
+                  title="${p.n_cli} cliente(s)">${p.n}</td>
               <td style="padding:.28rem .6rem;text-align:right;font-size:.62rem;color:var(--mut);${SEP}">${nUn(p.cant)}</td>
               <td style="padding:.28rem .6rem;text-align:right;font-size:.63rem;font-weight:600;
                          font-variant-numeric:tabular-nums;${SEP}">${nCLP(p.monto)}</td>
-              <td style="padding:.28rem .6rem;text-align:right;font-size:.6rem;
+              <td style="padding:.28rem .6rem;text-align:right;font-size:.6rem;${SEP};
                          color:${hay ? 'var(--gn)' : 'var(--rd)'};font-weight:700">
                 ${s === undefined ? 'no está' : nUn(s)}</td>
+              <td style="padding:.28rem .6rem;text-align:right;font-size:.6rem;${SEP};
+                         color:${p.bo > 0 ? '#1F6FB2' : 'var(--mut)'};font-weight:${p.bo > 0 ? 700 : 400}"
+                  title="${p.bo > 0 ? nUn(p.bo) + ' un. solicitadas al proveedor'
+                                    : 'sin órdenes de compra para este SKU'}">
+                ${p.bo > 0 ? nUn(p.bo) : '—'}</td>
+              <td style="padding:.28rem .6rem;text-align:right;font-size:.63rem;font-weight:700;
+                         font-variant-numeric:tabular-nums;color:${p.comprar > 0 ? '#C00000' : 'var(--gn)'}">
+                ${p.comprar > 0 ? nUn(p.comprar) : '0'}</td>
             </tr>`;
           }).join('')}</tbody>
+          <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
+            <td colspan="2" style="padding:.35rem .6rem;font-size:.62rem;${SEP}">TOTAL · ${g.length} SKU</td>
+            <td style="padding:.35rem .6rem;text-align:right;font-size:.6rem;${SEP}">${tot('n')}</td>
+            <td style="padding:.35rem .6rem;text-align:right;font-size:.6rem;${SEP}">${nUn(tot('cant'))}</td>
+            <td style="padding:.35rem .6rem;text-align:right;font-size:.62rem;
+                       font-variant-numeric:tabular-nums;${SEP}">${nCLP(tot('monto'))}</td>
+            <td style="padding:.35rem .6rem;text-align:right;font-size:.6rem;${SEP}">
+              ${nUn(g.reduce((a, p) => a + (p.stock || 0), 0))}</td>
+            <td style="padding:.35rem .6rem;text-align:right;font-size:.6rem;${SEP}">${nUn(tot('bo'))}</td>
+            <td style="padding:.35rem .6rem;text-align:right;font-size:.62rem;
+                       font-variant-numeric:tabular-nums">${nUn(tot('comprar'))}</td>
+          </tr></tfoot>
         </table>
       </div>
-      <p style="font-size:.55rem;color:var(--mut);margin:.45rem 0 0;line-height:1.4">
-        «Stock» es la existencia actual de ese SKU en bodega según la hoja Inventario Bodega.
-        «no está» significa que el código no aparece en el inventario de repuestos.</p>`;
+      <p style="font-size:.55rem;color:var(--mut);margin:.45rem 0 0;line-height:1.5">
+        <strong>Por Comprar = Un. Solicitadas − Stock − Back Order</strong>, con piso en cero: si stock y
+        OC ya cubren la brecha del SKU queda en 0, no en negativo.
+        «Stock» es la existencia actual en bodega (hoja Inventario Bodega); «no está» significa que el
+        código no aparece en el inventario y se computa como cero.
+        «Back Order» es la Cantidad Solicitada de la hoja Back Order cruzada por SKU, sumando todas las
+        órdenes de compra sin distinguir su estatus.</p>`;
+    if (mantenerFoco) {
+      const inp = document.getElementById('br-prod-q');
+      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+    }
   }
 
   // Detalle con filtro por línea de negocio y por antigüedad
@@ -501,13 +566,158 @@
     initSnapshot();
   }
 
+
+  // ── Brecha por cliente, expandible al detalle de SKU ─────────
+  // Colapsada muestra monto y la mezcla de rotacion de los SKU faltantes;
+  // al abrir un cliente aparece cada SKU con su rotacion y espera.
+  const ROT_COLOR = {
+    'Alta Rotacion': '#00832F', 'Alta Rotación': '#00832F',
+    'Mediana Rotacion': '#8B8200', 'Mediana Rotación': '#8B8200',
+    'Baja Rotacion': '#D46000', 'Baja Rotación': '#D46000',
+    'Sin Rotacion': '#C00000', 'Sin Rotación': '#C00000',
+    'Sin Información': '#B8C1D8', 'Sin informacion': '#B8C1D8',
+  };
+  const rotColor = r => ROT_COLOR[r] || '#B8C1D8';
+  // Gris claro necesita texto oscuro; el resto de los tonos aguanta blanco
+  const rotTxt = r => (rotColor(r) === '#B8C1D8' ? '#1B2A5B' : '#fff');
+
+  const _stOpen = new Set();
+  window._brCli = function (c) {
+    if (_stOpen.has(c)) _stOpen.delete(c); else _stOpen.add(c);
+    stClientes();
+  };
+  window._brCliTodos = function (abrir) {
+    _stOpen.clear();
+    if (abrir) (ST.clientes_det || []).forEach(x => _stOpen.add(x.cliente));
+    stClientes();
+  };
+
+  function stClientes() {
+    const box = document.getElementById('br-st-cli');
+    if (!box) return;
+    const dat = ST.clientes_det || [];
+    if (!dat.length) { box.innerHTML = ''; return; }
+    const maxV = Math.max(...dat.map(d => d.monto), 1);
+
+    // Barra apilada con la mezcla de rotacion, proporcional al valorizado.
+    // El % va dentro del segmento; los muy angostos lo omiten y quedan en el tooltip.
+    const barraRot = (rot, alto) => {
+      const partes = Object.entries(rot || {});
+      if (!partes.length) return '';
+      const h = alto || 15;
+      return `<div style="display:flex;height:${h}px;border-radius:3px;overflow:hidden;min-width:120px">` +
+        partes.map(([k, v]) =>
+          `<div style="width:${v.pct}%;background:${rotColor(k)};color:${rotTxt(k)};
+             display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:700;
+             line-height:1;overflow:hidden" title="${esc(k)}: ${nCLP(v.monto)} · ${v.pct}% del valorizado · ${v.n} SKU"
+           >${v.pct >= 7 ? v.pct.toString().replace('.', ',') + '%' : ''}</div>`
+        ).join('') + '</div>';
+    };
+
+    // Mezcla global, misma forma que el `rot` de cada cliente
+    const rotTotal = {};
+    (ST.por_rotacion || []).forEach(r => {
+      rotTotal[r.k] = { monto: r.monto, n: r.n, pct: r.pct_monto };
+    });
+
+    let rows = '';
+    dat.forEach((d, i) => {
+      const open  = _stOpen.has(d.cliente);
+      const zebra = i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)';
+      rows += `<tr style="background:${zebra};cursor:pointer;border-left:3px solid #C00000"
+          onclick="window._brCli(${JSON.stringify(d.cliente).replace(/"/g, '&quot;')})">
+        <td style="padding:.3rem .6rem;font-size:.64rem;font-weight:600;${SEP}" title="${esc(d.cliente)}">
+          <span style="display:inline-block;width:.8rem;font-size:.52rem;color:var(--mut);
+            transform:rotate(${open ? 90 : 0}deg);transition:transform .15s">&#9654;</span>${esc(d.cliente)}
+        </td>
+        <td style="padding:.3rem .6rem;text-align:right;font-size:.62rem;color:var(--mut);${SEP}">${d.n}</td>
+        <td style="padding:.3rem .6rem;text-align:right;font-size:.65rem;font-weight:700;
+                   font-variant-numeric:tabular-nums;${SEP}">${nCLP(d.monto)}</td>
+        <td style="padding:.3rem .6rem;text-align:right;font-size:.6rem;color:var(--mut);${SEP}">${pc(d.monto, ST.total)}</td>
+        <td style="padding:.3rem .6rem;${SEP}">
+          <div style="display:flex;align-items:center;gap:5px">
+            <div style="flex:1;height:6px;background:var(--gy);border-radius:3px;overflow:hidden;min-width:40px">
+              <div style="height:100%;width:${d.monto / maxV * 100}%;background:#C00000"></div></div>
+          </div></td>
+        <td style="padding:.3rem .6rem;width:34%">${barraRot(d.rot)}</td>
+      </tr>`;
+
+      if (open) {
+        rows += `<tr style="background:var(--bg)"><td colspan="6" style="padding:0">
+          <table style="width:100%;border-collapse:collapse;background:var(--bg)">
+            <thead><tr>
+              ${['SKU','PRODUCTO','LÍNEA','CANT','MONTO','ROTACIÓN','ESPERA'].map((t, k) =>
+                `<th style="background:var(--gy);color:var(--az1);padding:.2rem .5rem;font-size:.53rem;
+                  text-align:${k >= 3 && k <= 4 ? 'right' : 'left'};border-right:1px solid var(--brd)">${t}</th>`).join('')}
+            </tr></thead>
+            <tbody>${(d.skus || []).map(x => {
+              const dc = x.dias == null ? '#B8C1D8'
+                : x.dias <= 30 ? '#00832F' : x.dias <= 60 ? '#8B8200'
+                : x.dias <= 90 ? '#D46000' : x.dias <= 180 ? '#C00000' : '#7A0000';
+              return `<tr>
+                <td style="padding:.22rem .5rem .22rem 1.6rem;font-size:.57rem;
+                           font-family:'Roboto Mono',monospace;${SEP}">${esc(x.cod)}</td>
+                <td style="padding:.22rem .5rem;font-size:.59rem;color:var(--mut);max-width:260px;overflow:hidden;
+                           text-overflow:ellipsis;white-space:nowrap;${SEP}" title="${esc(x.prod)}">${esc(x.prod)}</td>
+                <td style="padding:.22rem .5rem;font-size:.55rem;color:var(--mut);${SEP}"
+                    title="${esc(x.oport)}">${esc(String(x.linea).slice(0, 26))}</td>
+                <td style="padding:.22rem .5rem;text-align:right;font-size:.58rem;${SEP}">${nUn(x.cant)}</td>
+                <td style="padding:.22rem .5rem;text-align:right;font-size:.6rem;font-weight:600;
+                           font-variant-numeric:tabular-nums;${SEP}">${nCLP(x.monto)}</td>
+                <td style="padding:.22rem .5rem;${SEP}">
+                  <span style="background:${rotColor(x.rot)}22;color:${rotColor(x.rot)};
+                    border:1px solid ${rotColor(x.rot)}55;padding:.04rem .3rem;border-radius:3px;
+                    font-size:.53rem;font-weight:700;white-space:nowrap">${esc(x.rot)}</span></td>
+                <td style="padding:.22rem .5rem;font-size:.56rem;color:${dc};font-weight:700">
+                  ${x.dias == null ? '—' : x.dias + ' d'}</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table></td></tr>`;
+      }
+    });
+
+    // Leyenda de rotacion, con el peso global de cada tipo
+    const leyenda = (ST.por_rotacion || []).map(r =>
+      `<span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.56rem;margin-right:.8rem">
+         <span style="width:9px;height:9px;border-radius:2px;background:${rotColor(r.k)}"></span>
+         ${esc(r.k)} <strong>${r.pct_monto}%</strong>
+         <span style="color:var(--mut)">· ${r.n} SKU</span></span>`).join('');
+
+    box.innerHTML = `
+      <div style="display:flex;gap:.5rem;margin-bottom:.5rem;flex-wrap:wrap;align-items:center">
+        <button onclick="window._brCliTodos(true)" style="font-size:.58rem;padding:.18rem .5rem;border:1px solid var(--brd);
+          border-radius:3px;background:var(--bg2);color:var(--txt);cursor:pointer">Expandir todo</button>
+        <button onclick="window._brCliTodos(false)" style="font-size:.58rem;padding:.18rem .5rem;border:1px solid var(--brd);
+          border-radius:3px;background:var(--bg2);color:var(--txt);cursor:pointer">Colapsar todo</button>
+        <span style="font-size:.58rem;color:var(--mut)">${dat.length} clientes · clic para ver los SKU faltantes</span>
+      </div>
+      <div style="padding:.3rem 0 .5rem;border-bottom:1px solid var(--brd);margin-bottom:.4rem">${leyenda}</div>
+      <div style="overflow-x:auto;max-height:420px;overflow-y:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:620px">
+          <thead><tr>
+            ${th('CLIENTE', 'left')}${th('SKU', 'right')}${th('MONTO', 'right')}${th('%', 'right')}
+            ${th('', 'left')}${th('MEZCLA DE ROTACIÓN (% DEL VALORIZADO)', 'left')}
+          </tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
+            <td style="padding:.35rem .6rem;font-size:.63rem;${SEP}">TOTAL · ${dat.length} clientes</td>
+            <td style="padding:.35rem .6rem;text-align:right;font-size:.6rem;${SEP}">${dat.reduce((s2, d) => s2 + d.n, 0)}</td>
+            <td style="padding:.35rem .6rem;text-align:right;font-size:.63rem;font-variant-numeric:tabular-nums;${SEP}">${nCLP(ST.total)}</td>
+            <td style="padding:.35rem .6rem;text-align:right;font-size:.6rem;${SEP}">100%</td>
+            <td style="${SEP}"></td>
+            <td style="padding:.3rem .6rem">${barraRot(rotTotal, 17)}</td>
+          </tr></tfoot>
+        </table>
+      </div>`;
+  }
+
   window.initBrechas = function () {
     if (!OP.total && !ST.total && !CT.total) return;
     kpis(); barraComp();
     opProp(); tablaGrupo('br-op-cli', OP.por_cliente || [], OP.total, 'CLIENTE', { color: '#33448D' });
     opDetalle();
     stKPIs(); stAging(); stLinea(); stMes();
-    tablaGrupo('br-st-cli', ST.por_cliente || [], ST.total, 'CLIENTE', { color: '#C00000' });
+    stClientes();
     stProductos(); stFiltro(); stDetalle();
   };
 })();

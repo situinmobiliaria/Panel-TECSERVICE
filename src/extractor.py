@@ -81,7 +81,7 @@ JS_FILES = [
     "hoja_facturacion.js", "hoja_panelfact.js", "hoja_base_instalada.js", "hoja_satisfaccion.js",
     "hoja_visitas.js", "hoja_mapa.js", "hoja_matriz.js", "hoja_casos.js", "hoja_alerta.js",
     "hoja_pdf.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js",
-    "hoja_brechas.js",
+    "hoja_cli_rel.js", "hoja_pipeline.js", "hoja_brechas.js",
 ]
 
 ANO   = date.today().year
@@ -1103,12 +1103,14 @@ def read_base_instalada(wb):
                 "lineas_si": defaultdict(int),
                 "lineas_no": defaultdict(int),
                 "estados": defaultdict(int),
+                "regiones": defaultdict(int),
                 "_potencial_st": False,
             }
         d = cli_map[nombre_analisis]
         d["total"]          += 1
         d["lineas"][linea]  += 1
         d["estados"][estado] += 1
+        d["regiones"][region] += 1
         if es_potencial:
             d["_potencial_st"]     = True
             d["total_si"]          += 1
@@ -1131,6 +1133,12 @@ def read_base_instalada(wb):
             estado_cli = max(d["estados"], key=lambda e: d["estados"][e])
         else:
             estado_cli = "Sin clasificar"
+
+        # Región del cliente: la de la mayoría de sus equipos. Sólo un cliente
+        # de 1.501 (CESFAM Colbún) tiene equipos repartidos en dos regiones,
+        # así que asignar la dominante no distorsiona el resumen regional.
+        region_cli = (max(d["regiones"], key=lambda r: d["regiones"][r])
+                      if d["regiones"] else "Sin región")
 
         mmq_reas = ls.get("MMQ", 0) + ls.get("REAS", 0)
         lineas_conocidas = {"DENTAL", "ESTERILIZACIÓN", "ESTERILIZACION", "INCARDIA", "ENDOSCOPIA", "MOBILIARIO CLINICO", "MMQ", "REAS"}
@@ -1169,6 +1177,7 @@ def read_base_instalada(wb):
             "otros":             otros,
             "otros_si":          otros_si,
             "otros_no":          otros_no,
+            "region":            region_cli,
             "estado":            estado_cli,
             "con_contrato":      estado_cli in ("Contrato", "Garantia"),
             "potencial_st":      d.get("_potencial_st", False),
@@ -1401,10 +1410,13 @@ def read_mapa(wb):
         nombre = safe_str(row[0])
         if not nombre:
             continue
+        # Latitud/longitud pueden venir vacías: el cliente igual entra al
+        # panel — con su ingreso, región y potencial — y sólo se queda fuera
+        # de las burbujas del mapa, que son las únicas que necesitan el punto.
         lat = to_float(row[24], None)   # col Y
         lon = to_float(row[25], None)   # col Z
-        if lat is None or lon is None or lat == 0 or lon == 0:
-            continue
+        if lat == 0 or lon == 0:
+            lat = lon = None
         region_raw = safe_str(row[14])
         region = region_raw.replace("Región ", "").replace("Region ", "").strip()
 
@@ -1457,8 +1469,8 @@ def read_mapa(wb):
             "comuna":       safe_str(row[15]),
             "contratos":    0,                 # enrich_mapa_data
             "pipe":         pot_eq,
-            "lat":          round(lat, 7),
-            "lon":          round(lon, 7),
+            "lat":          round(lat, 7) if lat is not None else None,
+            "lon":          round(lon, 7) if lon is not None else None,
             "cc":           cc,                # desde col AA del Excel
             "margen":       0,
             "sat":          sat,               # desde col AB del Excel
@@ -1520,14 +1532,19 @@ def read_casos(wb):
             def _no_asoc(v):
                 s = safe_str(v) if v is not None else ""
                 return "" if "NO ASOCIADO" in s.upper() else s
+            # Índices según los encabezados reales de la hoja:
+            #   J=Modelo  K=Nombre de activo  L=N° de serie  M=Marca  N=Estado
+            #   O=COORDINADORA  P=COMENTARIO COORDINADORA (texto libre)
+            #   Q=COMENTARIO COORDINADORA 2 (categoría)  R=COMENTARIO MATILDE
             equipos.append({
                 "modelo":           modelo,
-                "nombre":           safe_str(row[11]) if len(row) > 11 else "",
-                "serie":            safe_str(str(row[12])) if len(row) > 12 and row[12] else "",
-                "marca":            safe_str(row[13]) if len(row) > 13 else "",
-                "estado":           safe_str(row[14]) if len(row) > 14 else "",
-                "coordinadora":     safe_str(row[15]) if len(row) > 15 else "",
-                "comentario_coord": safe_str(row[16]) if len(row) > 16 else "",
+                "nombre":           safe_str(row[10]) if len(row) > 10 else "",
+                "serie":            safe_str(str(row[11])) if len(row) > 11 and row[11] else "",
+                "marca":            safe_str(row[12]) if len(row) > 12 else "",
+                "estado":           safe_str(row[13]) if len(row) > 13 else "",
+                "coordinadora":     safe_str(row[14]) if len(row) > 14 else "",
+                "comentario_coord": safe_str(row[15]) if len(row) > 15 else "",
+                "comentario_cat":   safe_str(row[16]) if len(row) > 16 else "",
                 "comentario_mat":   safe_str(row[17]) if len(row) > 17 else "",
                 "contrato_num":     safe_str(str(row[18])) if len(row) > 18 and row[18] else "",
                 "garantia":         safe_str(row[19]) if len(row) > 19 else "",
@@ -1669,6 +1686,7 @@ def read_brecha_stock(wb):
             "cant":     round(to_float(row[11]), 2),
             "pu":       round(to_float(row[12])),
             "monto":    round(monto),
+            "rot":      safe_str(row[15]).strip() if len(row) > 15 and row[15] else "Sin información",
             "dias":     (TODAY - f).days if f else None,
         })
 
@@ -1719,12 +1737,70 @@ def read_brecha_stock(wb):
         if not e[3]:
             e[3] = it["prod"]
         e[4].add(it["cliente"])
+    # Back order: unidades ya pedidas al proveedor para ese SKU.
+    # Hoja "Back Order", col G = SKU, col K = Cantidad Solicitada. Se suman
+    # todas las filas sin mirar "Estatus OC": ese campo indica si la orden
+    # está pagada, no si la mercadería llegó, así que no hay doble conteo
+    # contra el stock de bodega.
+    bo_sol = defaultdict(float)
+    ws_bo = next((wb[n] for n in wb.sheetnames if n.strip().lower() == "back order"), None)
+    if ws_bo is not None:
+        for row in ws_bo.iter_rows(min_row=2, values_only=True):
+            if not row or len(row) < 11:
+                continue
+            sku = safe_str(row[6]).strip()
+            if sku:
+                bo_sol[sku] += to_float(row[10])
+
     productos = [{"cod": k, "prod": v[3], "monto": round(v[0]), "n": v[1],
-                  "cant": round(v[2], 2), "n_cli": len(v[4])}
-                 for k, v in sorted(g_prod.items(), key=lambda x: -x[1][0])][:25]
+                  "cant": round(v[2], 2), "n_cli": len(v[4]),
+                  "bo": round(bo_sol.get(k, 0.0), 2)}
+                 for k, v in sorted(g_prod.items(), key=lambda x: -x[1][0])]
+
+    # Rotación del SKU (col P). Se usa para el resumen general y para el
+    # desglose por cliente de la tabla expandible.
+    rot_g = defaultdict(lambda: [0.0, 0])
+    for it in items:
+        rot_g[it["rot"]][0] += it["monto"]
+        rot_g[it["rot"]][1] += 1
+    _tm = sum(v[0] for v in rot_g.values()) or 1
+    _tn = sum(v[1] for v in rot_g.values()) or 1
+    por_rotacion = [
+        {"k": k, "monto": round(v[0]), "n": v[1],
+         "pct_monto": round(v[0] / _tm * 100, 1), "pct_n": round(v[1] / _tn * 100, 1)}
+        for k, v in sorted(rot_g.items(), key=lambda x: -x[1][0])
+    ]
+
+    # Clientes con su detalle de SKU y su mezcla de rotación
+    cli_det = defaultdict(lambda: {"monto": 0.0, "n": 0, "cant": 0.0,
+                                   "rot": defaultdict(lambda: [0.0, 0]), "skus": []})
+    for it in items:
+        d = cli_det[it["cliente"]]
+        d["monto"] += it["monto"]
+        d["n"]     += 1
+        d["cant"]  += it["cant"]
+        d["rot"][it["rot"]][0] += it["monto"]
+        d["rot"][it["rot"]][1] += 1
+        d["skus"].append({k: it[k] for k in
+                          ("cod", "prod", "cant", "pu", "monto", "rot", "dias", "fecha_fmt", "linea", "oport")})
+    clientes_det = []
+    for c, d in sorted(cli_det.items(), key=lambda x: -x[1]["monto"]):
+        d["skus"].sort(key=lambda x: -x["monto"])
+        clientes_det.append({
+            "cliente": c,
+            "monto":   round(d["monto"]),
+            "n":       d["n"],
+            "cant":    round(d["cant"], 2),
+            "rot":     {k: {"monto": round(v[0]), "n": v[1],
+                            "pct": round(v[0] / d["monto"] * 100, 1) if d["monto"] else 0}
+                        for k, v in sorted(d["rot"].items(), key=lambda x: -x[1][0])},
+            "skus":    d["skus"],
+        })
 
     dias_val = [i["dias"] for i in items if i["dias"] is not None]
     return {
+        "por_rotacion":  por_rotacion,
+        "clientes_det":  clientes_det,
         "total":           round(sum(i["monto"] for i in items)),
         "n":               len(items),
         "n_ov":            len({i["ov"] for i in items if i["ov"]}),
@@ -1974,6 +2050,238 @@ def read_repuestos_vendidos(wb):
         "tot_cant_g":  sum(tot_cant),
         "n_clientes":  len(todos_cli),
         "cli_serie":   cli_out,
+    }
+
+
+def read_pipeline_st(wb):
+    """Pipeline comercial de equipos, para el potencial de ST por garantías.
+
+    Fuente: las hojas "PIPELINE Esterilización", "PIPELINE Dental" y
+    "PIPELINE Endoscopía". Las tres tienen la misma estructura:
+      A=Nombre Cliente  B=Productos  C=Probabilidad de venta (decimal 0–1)
+      D=Monto Negocio   E=Mes probable de facturación  F=Nombre Analisis
+      G=Año
+
+    Sólo se leen las filas crudas; el porcentaje de garantía por línea y el
+    margen se aplican en hoja_pipeline.js, igual que las tarifas UF de la
+    Base Instalada, para que queden a la vista y sean fáciles de ajustar.
+    """
+    MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+             "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+    MES_IDX = {_norm_cli(m): i + 1 for i, m in enumerate(MESES)}
+    HOJAS = [("esteriliz", "Esterilización"), ("dental", "Dental"), ("endoscop", "Endoscopía")]
+
+    items, lineas, anios, meses_vistos = [], [], set(), set()
+    for clave, linea in HOJAS:
+        ws = None
+        for name in wb.sheetnames:
+            n = _norm_cli(name)
+            if n.startswith("PIPELINE") and _norm_cli(clave) in n:
+                ws = wb[name]
+                break
+        if ws is None:
+            print(f"  ADVERTENCIA: no se encontró la hoja PIPELINE de {linea}.")
+            continue
+        lineas.append(linea)
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row or len(row) < 7:
+                continue
+            cli = safe_str(row[0]).strip()
+            monto = to_float(row[3])
+            if not cli and monto == 0:
+                continue
+            anio = safe_str(row[6]).strip()
+            try:
+                anio = str(int(float(anio)))
+            except (TypeError, ValueError):
+                anio = anio or "Sin año"
+            mes_txt = safe_str(row[4]).strip()
+            mes_n = MES_IDX.get(_norm_cli(mes_txt), 0)
+            if mes_n:
+                mes_txt = MESES[mes_n - 1]
+            else:
+                mes_txt = mes_txt or "Sin definir"
+            na = safe_str(row[5]).strip()
+            if na in ("0", "0.0"):
+                na = ""
+            # La probabilidad viene como decimal con ruido de coma flotante
+            # (0.30000000000000004); se redondea a punto porcentual.
+            prob = round(to_float(row[2]) * 100)
+            anios.add(anio)
+            meses_vistos.add(mes_txt)
+            items.append({
+                "cli":    cli or "(sin cliente)",
+                "na":     na,
+                "prod":   safe_str(row[1]).strip() or "—",
+                "prob":   max(0, min(100, prob)),
+                "monto":  round(monto),
+                "mes":    mes_txt,
+                "mes_n":  mes_n,
+                "anio":   anio,
+                "linea":  linea,
+            })
+
+    if not items:
+        return {}
+    items.sort(key=lambda x: -x["monto"])
+    return {
+        "lineas": lineas,
+        "anios":  sorted(anios),
+        "meses":  MESES,
+        "items":  items,
+        "n":      len(items),
+        "n_clientes": len({_norm_cli(i["cli"]) for i in items}),
+        "monto_tot":  round(sum(i["monto"] for i in items)),
+    }
+
+
+def read_back_order_idx(wb):
+    """Unidades pedidas al proveedor por SKU.
+
+    Hoja "Back Order": col G = SKU, col K = Cantidad Solicitada. Se suman
+    todas las filas sin mirar "Estatus OC" — ese campo indica si la orden
+    está pagada, no si la mercadería llegó, así que no hay doble conteo
+    contra el stock de bodega.
+    """
+    idx = defaultdict(float)
+    ws = next((wb[n] for n in wb.sheetnames if n.strip().lower() == "back order"), None)
+    if ws is None:
+        return {}
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 11:
+            continue
+        sku = safe_str(row[6]).strip()
+        if sku:
+            idx[sku] += to_float(row[10])
+    return {k: round(v, 2) for k, v in idx.items() if v}
+
+
+def read_clientes_relevantes(wb):
+    """Venta de repuestos por cliente y SKU en ventanas móviles de 6 y 12 meses.
+
+    Alimenta la hoja "Clientes Relevantes": el top de clientes por compra de
+    repuestos y la tabla de fill rate, que dimensiona el stock objetivo a
+    partir de lo que cada cliente consumió en el período.
+
+    Fuente: hoja "Repuestos Vendidas". Columnas C=cliente, M=cantidad,
+    N=nombre producto, P=precio de venta, R=año, S=mes, T=Marca 2,
+    U=SKU 2 (normalizado, viene lleno en todas las filas), V=Equipo Asociado.
+
+    Las ventanas se cuentan hacia atrás desde el último mes con datos, no
+    desde la fecha de hoy: si el Excel se actualiza con rezago, "últimos 6
+    meses" sigue significando los 6 meses efectivamente cargados.
+    """
+    MESES_ABR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+                 "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    ws = None
+    for name in wb.sheetnames:
+        n = name.strip().lower()
+        if "repuesto" in n and "vend" in n:
+            ws = wb[name]
+            break
+    if ws is None:
+        return {}
+
+    filas = []
+    periodos = set()
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 21:
+            continue
+        try:
+            mes = int(row[18])
+        except (TypeError, ValueError):
+            continue
+        if not (1 <= mes <= 12):
+            continue
+        try:
+            anio = int(safe_str(row[17]).strip())
+        except (TypeError, ValueError):
+            continue
+        sku = safe_str(row[20]).strip() or safe_str(row[11]).strip()
+        if not sku:
+            continue
+        periodos.add((anio, mes))
+        filas.append((
+            safe_str(row[2]).strip() or "(sin cliente)",
+            sku,
+            safe_str(row[13]).strip(),
+            safe_str(row[19]).strip().upper() or "SIN MARCA",
+            safe_str(row[21]).strip().upper() if len(row) > 21 else "SIN CLASIFICAR",
+            anio, mes,
+            to_float(row[12]),
+            to_float(row[15]),
+        ))
+    if not filas:
+        return {}
+
+    per = sorted(periodos)
+    ult = per[-12:]                       # ventana larga = base de todo
+    idx = {p: i for i, p in enumerate(ult)}
+    n = len(ult)
+    corte6 = max(0, n - 6)                # índice desde el que empieza la ventana corta
+    lbl = lambda p: MESES_ABR[p[1] - 1] + " " + str(p[0])[2:]
+
+    # agg[(cliente, sku)] = [prod, marca, familia, [cant x n], [monto x n]]
+    agg = {}
+    for cli, sku, prod, marca, fam, a, m, q, v in filas:
+        if (a, m) not in idx:
+            continue
+        i = idx[(a, m)]
+        k = (cli, sku)
+        e = agg.get(k)
+        if e is None:
+            e = agg[k] = [prod, marca, fam, [0.0] * n, [0.0] * n]
+        if prod and not e[0]:
+            e[0] = prod
+        e[3][i] += q
+        e[4][i] += v
+
+    # Vuelca a estructura por cliente, con los totales de cada ventana ya hechos
+    cli = {}
+    for (c, sku), (prod, marca, fam, qs, vs) in agg.items():
+        d = cli.get(c)
+        if d is None:
+            d = cli[c] = {"cliente": c, "skus": [], "serie_m": [0.0] * n, "serie_q": [0.0] * n}
+        q12, v12 = sum(qs), sum(vs)
+        q6,  v6  = sum(qs[corte6:]), sum(vs[corte6:])
+        d["skus"].append({
+            "sku":   sku,
+            "prod":  prod or sku,
+            "marca": marca,
+            "fam":   fam,
+            "q6":  round(q6, 2),  "v6":  round(v6),
+            "q12": round(q12, 2), "v12": round(v12),
+        })
+        for i in range(n):
+            d["serie_m"][i] += vs[i]
+            d["serie_q"][i] += qs[i]
+
+    clientes = []
+    for c, d in cli.items():
+        s6  = [x for x in d["skus"] if x["q6"] > 0 or x["v6"] > 0]
+        s12 = d["skus"]
+        d["skus"].sort(key=lambda x: -x["v12"])
+        clientes.append({
+            "cliente": c,
+            "m6":  round(sum(x["v6"]  for x in s12)), "q6":  round(sum(x["q6"]  for x in s12), 2),
+            "m12": round(sum(x["v12"] for x in s12)), "q12": round(sum(x["q12"] for x in s12), 2),
+            "n6":  len(s6), "n12": len(s12),
+            "serie_m": [round(x) for x in d["serie_m"]],
+            "serie_q": [round(x, 2) for x in d["serie_q"]],
+            "skus": s12,
+        })
+    clientes.sort(key=lambda x: -x["m12"])
+
+    tot = lambda k: round(sum(c[k] for c in clientes), 2)
+    return {
+        "meses":     [lbl(p) for p in ult],
+        "corte6":    corte6,
+        "periodo6":  lbl(ult[corte6]) + " – " + lbl(ult[-1]),
+        "periodo12": lbl(ult[0]) + " – " + lbl(ult[-1]),
+        "clientes":  clientes,
+        "tot_m6":  tot("m6"),  "tot_q6":  tot("q6"),
+        "tot_m12": tot("m12"), "tot_q12": tot("q12"),
+        "n_clientes": len(clientes),
     }
 
 
@@ -2655,6 +2963,14 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
     # Clientes con contratos activos reales (para override de tiene_contrato)
     active_contract_clients = {c["cliente"] for c in contratos if c["estado"] == "Activado"}
 
+    # Índice de facturación del año normalizado. El match exacto perdía
+    # clientes por diferencias de tipografía entre FACTURACION y la BBDD
+    # ("JOHNSON & JOHNSON" vs "Johnson y Johnson", "SPA" vs "S.p.A").
+    _norm = _norm_cli
+    _ytd26_idx = {}
+    for _k, _v in bbdd.get("ytd_cli_2026", {}).items():
+        _ytd26_idx[_norm(_k)] = _v
+
     # Build panel (enrich with CONTRATOS + BBDD data)
     panel = []
     for p in panel_raw:
@@ -2670,7 +2986,8 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         # Facturación del año en curso con la misma base que "Ingresos
         # Totales" de Analisis Facturación: la suma de todos los clientes
         # cuadra con el KPI de portada.
-        entry["real_ytd_fac"]     = round(ytd_cli_26.get(nom, ytd_cli_26.get(cli, 0)))
+        entry["real_ytd_fac"]     = round(_ytd26_idx.get(_norm(nom),
+                                          _ytd26_idx.get(_norm(cli), 0)))
         entry["fin_contrato"]     = fin_contrato_by_cli.get(cli, "")
         entry["fin_fmt"]          = fin_fmt_by_cli.get(cli, "")
         entry["inicio_fmt"]       = inicio_fmt_by_cli.get(cli, "")
@@ -2683,7 +3000,6 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
     # El panel viene de la hoja FACTURACION y trae 111 clientes; la BBDD
     # factura además a clientes que no están ahí. Esta lista los incluye a
     # todos, así su suma cuadra con "Ingresos Totales" de Analisis Facturación.
-    _norm = lambda s: " ".join(safe_str(s).strip().upper().split())
     # cliente del panel (para tipo y contrato) indexado por nombre normalizado
     _pan_idx = {}
     for e in panel:
@@ -2713,6 +3029,67 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
     _tot_fc = sum(x["real"] for x in fact_clientes)
     print(f"       FACT CLIENTES: {len(fact_clientes)} clientes | MM${_tot_fc/1e6:,.1f} "
           f"| costo MM${sum(x['costo'] for x in fact_clientes)/1e6:,.1f}")
+
+    # ── Universo de la hoja Panel Facturación Cliente ───────────────────────
+    # No sirve sumar `panel` directamente: la hoja FACTURACION trae filas
+    # alias que apuntan al mismo cliente de la BBDD (CORPORACION DE
+    # DESARROLLO SOCIAL DE BUIN → HOSPITAL SAN LUIS BUIN) y su facturación
+    # se contaría dos veces, y además no cubre a todos los clientes que
+    # factura la BBDD. Aquí se deduplica por el nombre con que la BBDD
+    # identifica al cliente y se agregan los que faltan, para que el KPI de
+    # la hoja dé los mismos MM$1.622,9 que la portada y que su propia tabla.
+    pf_idx, panel_fact = {}, []
+    for e in panel:
+        k = _norm(e.get("nombre_analisis") or e["cliente"])
+        prev = pf_idx.get(k)
+        if prev is None:
+            ent = dict(e)
+            pf_idx[k] = ent
+            pf_idx.setdefault(_norm(e["cliente"]), ent)
+            panel_fact.append(ent)
+            continue
+        # Fila alias: los presupuestos se acumulan, la facturación es la
+        # misma cifra de la BBDD y se deja una sola vez. Se conserva como
+        # nombre visible el de la fila con más facturación propia.
+        pf_idx.setdefault(_norm(e["cliente"]), prev)
+        for f in ("presup_contr_ytd", "presup_contr_anio"):
+            prev[f] = round((prev.get(f) or 0) + (e.get(f) or 0), 2)
+        prev["tiene_contrato"] = bool(prev.get("tiene_contrato") or e.get("tiene_contrato"))
+        if (e.get("real_ytd") or 0) > (prev.get("real_ytd") or 0):
+            prev["cliente"] = e["cliente"]
+            prev["tipo_cli"] = e.get("tipo_cli") or prev.get("tipo_cli")
+        prev["real_ytd"] = max(prev.get("real_ytd") or 0, e.get("real_ytd") or 0)
+        prev["real_ytd_fac"] = max(prev.get("real_ytd_fac") or 0, e.get("real_ytd_fac") or 0)
+
+    # Clientes que factura la BBDD y que no tienen fila en FACTURACION
+    for c in fact_clientes:
+        if _norm(c["cliente"]) in pf_idx:
+            continue
+        ent = {
+            "cliente":            c["cliente"],
+            "nombre_analisis":    c["cliente"],
+            "tipo_cli":           c["tipo_cli"],
+            "tiene_contrato":     c["contrato"],
+            "real_ytd_fac":       c["real"],
+            "real_ytd":           c["real"],
+            "real_ytd_2025":      0,
+            "real_ytd_2024":      0,
+            "presup_contr_ytd":   0.0,
+            "presup_contr_anio":  0.0,
+            "coord":              "Sin contrato",
+            "fin_fmt":            "",
+            "inicio_fmt":         "",
+            "sin_fila_fact":      True,
+        }
+        pf_idx[_norm(c["cliente"])] = ent
+        panel_fact.append(ent)
+
+    _tot_pf = sum(e.get("real_ytd_fac", 0) for e in panel_fact)
+    print(f"       PANEL FACT   : {len(panel_fact)} clientes | MM${_tot_pf/1e6:,.1f}"
+          f" (panel crudo {len(panel)} = MM${sum(e.get('real_ytd_fac',0) for e in panel)/1e6:,.1f})")
+    if abs(_tot_pf - _tot_fc) > 1:
+        print(f"       ADVERTENCIA: panel_fact MM${_tot_pf/1e6:,.1f} != "
+              f"fact_clientes MM${_tot_fc/1e6:,.1f}")
 
     # Monthly arrays helper
     def to_arr(d, year):
@@ -2766,6 +3143,7 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
         "ytd_contr_2024":   round(bbdd.get("ytd_contr_2024", 0)),
         "ytd_contr_2025":   round(bbdd.get("ytd_contr_2025", 0)),
         "panel":   panel,
+        "panel_fact": panel_fact,
         "fact_clientes": fact_clientes,
         "mensual": {
             "total":        {str(y): to_arr(mt, y) for y in [ANO - 2, ANO - 1, ANO]},
@@ -3178,6 +3556,9 @@ def main():
     rep_vend = read_repuestos_vendidos(wb2)
     br_oport = read_brecha_oport(wb2)
     br_stock = read_brecha_stock(wb2)
+    cli_rel  = read_clientes_relevantes(wb2)
+    back_ord = read_back_order_idx(wb2)
+    pipe_st  = read_pipeline_st(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -3185,7 +3566,9 @@ def main():
     ts_ytd = analisis_fac.get("ts_total_ytd", 0)
     ts_ing = analisis_fac.get("ts_ingresos", 0)
     print(f"       Analisis Fac: Ingresos TS MM${ts_ing/1e6:.1f} | Total YTD MM${ts_ytd/1e6:.1f}")
-    print(f"       BASE MAPA: {len(mapa_data)} clientes con coordenadas")
+    _sin_geo = sum(1 for c in mapa_data if c.get("lat") is None or c.get("lon") is None)
+    print(f"       BASE MAPA: {len(mapa_data)} clientes"
+          + (f" ({_sin_geo} sin coordenadas, no se dibujan en el mapa)" if _sin_geo else ""))
 
     # ── Construir estructuras de datos ───────────────────────────────────────
     print("[6/6] Construyendo estructuras de datos...")
@@ -3199,6 +3582,18 @@ def main():
     app_data["rep_vend"] = rep_vend
     app_data["br_oport"] = br_oport
     app_data["br_stock"] = br_stock
+    app_data["cli_rel"]  = cli_rel
+    app_data["back_order"] = back_ord
+    app_data["pipeline_st"] = pipe_st
+    if pipe_st:
+        print(f"       PIPELINE ST: {pipe_st['n']} oportunidades | {pipe_st['n_clientes']} clientes | "
+              f"{len(pipe_st['lineas'])} lineas | anios {','.join(pipe_st['anios'])} | "
+              f"MM${pipe_st['monto_tot']/1e6:,.1f}")
+    if cli_rel:
+        print(f"       CLIENTES RELEVANTES: {cli_rel['n_clientes']} clientes | "
+              f"6m ({cli_rel['periodo6']}) MM${cli_rel['tot_m6']/1e6:,.1f} | "
+              f"12m ({cli_rel['periodo12']}) MM${cli_rel['tot_m12']/1e6:,.1f} | "
+              f"back order {len(back_ord)} SKU")
     if inv_ts:
         print(f"       INVENTARIO TS: {inv_ts['n_marcas']} marcas | {inv_ts['total_skus']} SKUs | "
               f"{inv_ts['total_stock']:,.0f} un | MM${inv_ts['total_costo']/1e6:,.1f}")
