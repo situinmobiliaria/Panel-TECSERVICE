@@ -34,6 +34,7 @@
   const nCLP = v => '$' + Math.round(v || 0).toLocaleString('es-CL');
   const nMM  = v => 'MM$' + ((v || 0) / 1e6).toLocaleString('es-CL',
                     { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const pcN  = v => (v || 0).toFixed(1).replace('.', ',') + '%';
   const pc   = (a, b) => b ? ((a / b) * 100).toFixed(1).replace('.', ',') + '%' : '—';
   const esc  = s => String(s == null ? '' : s).replace(/&/g, '&amp;')
                     .replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -66,16 +67,38 @@
   // ── Necesidad de stock de un SKU para el fill rate elegido ──────
   // Se valoriza al precio de venta promedio observado en la ventana,
   // que es el único precio disponible para todos los SKU.
+  // «Por comprar» es la demanda a cubrir del SKU: lo que habría que tener en
+  // stock para atender a ese cliente en el fill rate elegido. No descuenta
+  // existencias ni órdenes en curso; esas van aparte, en la cobertura.
+  // La cobertura se topa en 100% por SKU antes de agregar, para que un
+  // excedente en un repuesto no tape el quiebre de otro.
   function nec(s, f) {
     const cf = FILL[f];
     const q  = skuQ(s, cf.vent) * cf.mult;
     const v  = skuV(s, cf.vent) * cf.mult;
     const st = stockSku[s.sku];
     const bo = BO[s.sku] || 0;
-    const comprar = Math.max(q - (st || 0) - bo, 0);
-    const pu = skuQ(s, cf.vent) > 0 ? skuV(s, cf.vent) / skuQ(s, cf.vent) : 0;
-    return { q: q, v: v, st: st, bo: bo, comprar: comprar,
-             vComprar: comprar * pu, enInv: st !== undefined };
+    const disp = (st || 0) + bo;
+    const cub  = Math.min(disp, q);
+    const frac = q > 0 ? cub / q : 0;
+    // vCub = la parte del valorizado del SKU que queda cubierta. Agregando por
+    // valor y no por unidades, un repuesto caro pesa lo que corresponde: 10
+    // tornillos cubiertos no compensan una tarjeta electrónica en quiebre.
+    return { q: q, v: v, st: st, bo: bo, disp: disp, cub: cub, vCub: frac * v,
+             pct: frac * 100, enInv: st !== undefined };
+  }
+
+  // Barra de cobertura: qué parte de la demanda ya está cubierta entre el
+  // stock en bodega y lo que viene en camino.
+  function barraCob(pct, claro) {
+    const p = Math.max(0, Math.min(100, pct || 0));
+    const col = p >= 99.95 ? '#00832F' : p >= 60 ? '#8B8200' : p >= 25 ? '#D46000' : '#C00000';
+    return `<div style="display:flex;align-items:center;gap:6px;min-width:110px">
+      <div style="flex:1;height:9px;background:${claro ? 'rgba(255,255,255,.25)' : 'var(--gy)'};
+        border-radius:5px;overflow:hidden">
+        <div style="height:100%;width:${p}%;background:${claro ? '#fff' : col}"></div></div>
+      <span style="font-size:.64rem;font-weight:700;min-width:42px;text-align:right;
+        color:${claro ? '#fff' : col}">${p.toFixed(1).replace('.', ',')}%</span></div>`;
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -285,7 +308,7 @@
     if (!t.length) { box.innerHTML = '<div style="padding:1rem;color:var(--mut);font-size:.7rem">Sin datos.</div>'; return; }
     const TD = 'padding:.4rem .7rem;white-space:nowrap';
 
-    let rows = '', tQ = 0, tV = 0, tSt = 0, tBo = 0, tC = 0, tVC = 0, tSku = 0;
+    let rows = '', tQ = 0, tV = 0, tSt = 0, tBo = 0, tVCub = 0, tSku = 0;
     t.forEach((c, i) => {
       const sk = c.skus.filter(s => skuQ(s, cf.vent) > 0)
                        .map(s => Object.assign({ _s: s }, nec(s, _fill)))
@@ -294,10 +317,10 @@
       const aV  = sk.reduce((a, s) => a + s.v, 0);
       const aSt = sk.reduce((a, s) => a + (s.st || 0), 0);
       const aBo = sk.reduce((a, s) => a + s.bo, 0);
-      const aC  = sk.reduce((a, s) => a + s.comprar, 0);
-      const aVC = sk.reduce((a, s) => a + s.vComprar, 0);
-      const cub = sk.filter(s => s.comprar === 0).length;
-      tQ += aQ; tV += aV; tSt += aSt; tBo += aBo; tC += aC; tVC += aVC; tSku += sk.length;
+      const aVCub = sk.reduce((a, s) => a + s.vCub, 0);
+      const aPct  = aV > 0 ? aVCub / aV * 100 : 0;
+      const nOk   = sk.filter(s => s.pct >= 99.95).length;
+      tQ += aQ; tV += aV; tSt += aSt; tBo += aBo; tVCub += aVCub; tSku += sk.length;
 
       const open = _openFill.has(c.cliente);
       rows += `<tr style="background:${i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)'};cursor:pointer;
@@ -315,21 +338,18 @@
                    font-variant-numeric:tabular-nums;${SEP}">${nMM(aV)}</td>
         <td style="${TD};text-align:right;font-size:.68rem;color:var(--gn);${SEP}">${nUn(aSt)}</td>
         <td style="${TD};text-align:right;font-size:.68rem;color:#1F6FB2;${SEP}">${aBo > 0 ? nUn(aBo) : '—'}</td>
-        <td style="${TD};text-align:right;font-size:.73rem;font-weight:700;font-variant-numeric:tabular-nums;
-                   color:${aC > 0 ? '#C00000' : 'var(--gn)'};${SEP}">${nUn(aC)}</td>
-        <td style="${TD};text-align:right;font-size:.72rem;font-weight:600;font-variant-numeric:tabular-nums;
-                   color:${aVC > 0 ? '#C00000' : 'var(--gn)'};${SEP}">${nMM(aVC)}</td>
+        <td style="padding:.4rem .7rem;${SEP}">${barraCob(aPct)}</td>
         <td style="${TD};text-align:right;font-size:.66rem;color:var(--mut)">
-          ${sk.length ? cub + '/' + sk.length : '—'}</td>
+          ${sk.length ? nOk + '/' + sk.length : '—'}</td>
       </tr>`;
 
       if (open) {
         const TDD = 'padding:.25rem .7rem;font-size:.66rem;white-space:nowrap';
-        rows += `<tr style="background:var(--bg)"><td colspan="10" style="padding:0">
+        rows += `<tr style="background:var(--bg)"><td colspan="9" style="padding:0">
           <table style="width:100%;border-collapse:collapse">
-            <thead><tr>${thd('SKU')}${thd('PRODUCTO')}${thd('MARCA')}${thd('NECESARIO', 'right')}
-              ${thd('VALORIZADO', 'right')}${thd('STOCK', 'right')}${thd('BACK ORDER', 'right')}
-              ${thd('POR COMPRAR', 'right')}${thd('$ POR COMPRAR', 'right')}</tr></thead>
+            <thead><tr>${thd('SKU')}${thd('PRODUCTO')}${thd('MARCA')}${thd('POR COMPRAR', 'right')}
+              ${thd('$ POR COMPRAR', 'right')}${thd('STOCK', 'right')}${thd('BACK ORDER', 'right')}
+              ${thd('% STOCK DISPONIBLE')}</tr></thead>
             <tbody>${sk.map(s => `<tr>
               <td style="${TDD};padding-left:1.9rem;${SEP}">
                 <span style="font-family:'Roboto Mono',monospace;font-size:.63rem;background:var(--bg2);
@@ -337,7 +357,7 @@
               <td style="${TDD};color:var(--mut);max-width:280px;overflow:hidden;
                          text-overflow:ellipsis;${SEP}" title="${esc(s._s.prod)}">${esc(s._s.prod)}</td>
               <td style="${TDD};color:var(--mut);${SEP}">${esc(s._s.marca)}</td>
-              <td style="${TDD};text-align:right;font-weight:600;font-variant-numeric:tabular-nums;${SEP}"
+              <td style="${TDD};text-align:right;font-weight:700;font-variant-numeric:tabular-nums;${SEP}"
                   title="${nUn(skuQ(s._s, cf.vent))} un. en ${cf.vent} meses × ${String(cf.mult).replace('.', ',')}">${nUn(s.q)}</td>
               <td style="${TDD};text-align:right;font-variant-numeric:tabular-nums;${SEP}">${nCLP(s.v)}</td>
               <td style="${TDD};text-align:right;font-variant-numeric:tabular-nums;${SEP};
@@ -345,11 +365,7 @@
                 ${s.enInv ? nUn(s.st) : 'no está'}</td>
               <td style="${TDD};text-align:right;font-variant-numeric:tabular-nums;${SEP};
                          color:${s.bo > 0 ? '#1F6FB2' : 'var(--mut)'}">${s.bo > 0 ? nUn(s.bo) : '—'}</td>
-              <td style="${TDD};text-align:right;font-weight:700;font-variant-numeric:tabular-nums;${SEP};
-                         color:${s.comprar > 0 ? '#C00000' : 'var(--gn)'}">${nUn(s.comprar)}</td>
-              <td style="${TDD};text-align:right;font-variant-numeric:tabular-nums;
-                         color:${s.vComprar > 0 ? '#C00000' : 'var(--gn)'}">
-                ${s.vComprar > 0 ? nCLP(s.vComprar) : '—'}</td>
+              <td style="padding:.25rem .7rem">${barraCob(s.pct)}</td>
             </tr>`).join('')}</tbody>
           </table></td></tr>`;
       }
@@ -358,9 +374,9 @@
     box.innerHTML = `
       <div style="overflow-x:auto;max-height:560px;overflow-y:auto">
         <table style="width:100%;border-collapse:collapse;min-width:1080px">
-          <thead><tr>${th('#', 'right')}${th('CLIENTE')}${th('SKU', 'right')}${th('NECESARIO', 'right')}
-            ${th('VALORIZADO', 'right')}${th('STOCK', 'right')}${th('BACK ORDER', 'right')}
-            ${th('POR COMPRAR', 'right')}${th('$ POR COMPRAR', 'right')}${th('CUBIERTOS', 'right')}
+          <thead><tr>${th('#', 'right')}${th('CLIENTE')}${th('SKU', 'right')}${th('POR COMPRAR', 'right')}
+            ${th('$ POR COMPRAR', 'right')}${th('STOCK', 'right')}${th('BACK ORDER', 'right')}
+            ${th('% STOCK DISPONIBLE PARA CUBRIR CLIENTE')}${th('SKU CUBIERTOS', 'right')}
           </tr></thead>
           <tbody>${rows}</tbody>
           <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
@@ -372,41 +388,46 @@
                        font-variant-numeric:tabular-nums;${SEP}">${nMM(tV)}</td>
             <td style="padding:.45rem .7rem;text-align:right;font-size:.68rem;${SEP}">${nUn(tSt)}</td>
             <td style="padding:.45rem .7rem;text-align:right;font-size:.68rem;${SEP}">${nUn(tBo)}</td>
-            <td style="padding:.45rem .7rem;text-align:right;font-size:.72rem;
-                       font-variant-numeric:tabular-nums;${SEP}">${nUn(tC)}</td>
-            <td style="padding:.45rem .7rem;text-align:right;font-size:.72rem;
-                       font-variant-numeric:tabular-nums;${SEP}">${nMM(tVC)}</td>
+            <td style="padding:.4rem .7rem;${SEP}">${barraCob(tV > 0 ? tVCub / tV * 100 : 0, true)}</td>
             <td></td>
           </tr></tfoot>
         </table>
       </div>
       <p style="font-size:.62rem;color:var(--mut);margin:.55rem 0 0;line-height:1.6">
-        <strong>Fill rate ${cf.lbl}</strong> = tener en stock ${cf.desc}. La cantidad necesaria de cada SKU es
-        lo que ese cliente consumió en la ventana${cf.mult !== 1 ? ', multiplicado por ' + String(cf.mult).replace('.', ',') : ''};
-        el valorizado usa el precio de venta promedio observado en el mismo período.
-        <strong>Por Comprar = Necesario − Stock − Back Order</strong>, con piso en cero.
-        «Stock» es la existencia actual en bodega (hoja Inventario Bodega) y «no está» significa que el código
-        no aparece en el inventario, por lo que se computa como cero.
+        <strong>Fill rate ${cf.lbl}</strong> = tener en stock ${cf.desc}.
+        <strong>Por Comprar</strong> es esa demanda: lo que habría que tener de cada SKU para atender al
+        cliente${cf.mult !== 1 ? ', multiplicado por ' + String(cf.mult).replace('.', ',') : ''}.
+        No descuenta existencias ni órdenes en curso; el valorizado usa el precio de venta promedio del
+        mismo período.
+        <strong>% Stock Disponible</strong> es qué parte de esa demanda ya está cubierta entre el stock en
+        bodega y el back order. Por SKU es (Stock + Back Order) ÷ Por Comprar, topado en 100%; al resumir
+        por cliente se <strong>pondera por el valorizado de cada SKU</strong>, no por unidades, para que un
+        repuesto caro en quiebre pese lo que corresponde y no lo compensen muchas piezas baratas cubiertas.
+        «Stock» es la existencia actual en bodega (hoja Inventario Bodega) y «no está» significa que el
+        código no aparece en el inventario, por lo que se computa como cero.
         «Back Order» es la Cantidad Solicitada de la hoja Back Order cruzada por SKU.
-        Las cantidades no se suman entre clientes: un mismo SKU en stock puede servir a varios, así que el total
-        por comprar es el techo del requerimiento y no una orden de compra consolidada.</p>`;
+        Las cantidades no se suman entre clientes: un mismo SKU en stock puede servir a varios, así que el
+        total es el techo del requerimiento y no una orden de compra consolidada.</p>`;
   }
 
   function frKPIs() {
     const cf = FILL[_fill], t = top();
-    let nec_ = 0, val = 0, comp = 0, vcomp = 0;
+    let nec_ = 0, val = 0, cub = 0, nInc = 0, nSku = 0;
     const skus = new Set();
     t.forEach(c => c.skus.forEach(s => {
       if (skuQ(s, cf.vent) <= 0) return;
       const r = nec(s, _fill);
-      nec_ += r.q; val += r.v; comp += r.comprar; vcomp += r.vComprar; skus.add(s.sku);
+      nec_ += r.q; val += r.v; cub += r.vCub; skus.add(s.sku);
+      nSku++; if (r.pct < 99.95) nInc++;
     }));
+    const pctCob = val > 0 ? cub / val * 100 : 0;
     const el = document.getElementById('cr-fr-kpi');
     if (el) el.innerHTML =
-      kpiHTML('Stock Objetivo', nUn(nec_), nUn(skus.size) + ' SKU distintos', cf.col) +
+      kpiHTML('Por Comprar', nUn(nec_), nUn(skus.size) + ' SKU distintos', cf.col) +
       kpiHTML('Valorizado', nMM(val), 'a precio de venta', '#33448D') +
-      kpiHTML('Por Comprar', nUn(comp), pc(comp, nec_) + ' del objetivo', '#C00000') +
-      kpiHTML('Inversión Estimada', nMM(vcomp), 'para cerrar la brecha', '#C00000');
+      kpiHTML('% Stock Disponible', pcN(pctCob), 'stock en bodega + back order',
+              pctCob >= 60 ? '#00832F' : pctCob >= 25 ? '#D46000' : '#C00000') +
+      kpiHTML('SKU sin Cubrir', nUn(nInc), 'de ' + nUn(nSku) + ' líneas cliente-SKU', '#C00000');
 
     const d = document.getElementById('cr-fr-def');
     if (d) d.textContent = 'Objetivo: tener en stock ' + cf.desc + '.';

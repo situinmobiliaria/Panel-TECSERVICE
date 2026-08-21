@@ -131,7 +131,7 @@ function _pfRenderDetalle(){
   const fb = document.getElementById('pf-det-filt');
   if(fb){
     const opts = [['todos','Todos'],['Público','Públicos'],['Privado','Privados'],
-                  ['con','Con contrato'],['sin','Sin contrato']];
+                  ['con','Con contrato'],['sin','Sin contrato'],['solocosto','Sin facturación']];
     fb.innerHTML = opts.map(function(o){
       const k = o[0], t = o[1], on = _pfDetFilt === k;
       return '<button onclick="pfDetFiltro(\'' + k + '\')" style="font-size:.57rem;padding:.18rem .5rem;' +
@@ -144,11 +144,20 @@ function _pfRenderDetalle(){
   let filas = todos.slice();
   if(_pfDetFilt === 'con')        filas = filas.filter(x => x.contrato);
   else if(_pfDetFilt === 'sin')   filas = filas.filter(x => !x.contrato);
+  else if(_pfDetFilt === 'solocosto') filas = filas.filter(x => x.solo_costo);
   else if(_pfDetFilt !== 'todos') filas = filas.filter(x => x.tipo_cli === _pfDetFilt);
   const q = (pfSrch || '').trim().toLowerCase();
   if(q) filas = filas.filter(x => x.cliente.toLowerCase().includes(q));
 
-  const _mgPct = x => x.real ? (x.real - (x.costo || 0)) / x.real * 100 : 0;
+  const _mgPct = x => x.real ? (x.real - (x.costo || 0)) / x.real * 100 : (x.costo ? -100 : 0);
+  // Tooltip: para la fila consolidada lista los clientes que la componen
+  const _pfTip = function(x){
+    if(!x.detalle || !x.detalle.length) return x.cliente;
+    const top = x.detalle.slice(0, 30)
+      .map(d => d.cliente + ': ' + fmtMM(d.costo)).join('\n');
+    return x.cliente + ' (' + x.detalle.length + ')\n' + top +
+      (x.detalle.length > 30 ? '\n…y ' + (x.detalle.length - 30) + ' más' : '');
+  };
   filas.sort(function(a, b){
     const va = _pfDetSort === 'margen' ? _mgPct(a) : a[_pfDetSort];
     const vb = _pfDetSort === 'margen' ? _mgPct(b) : b[_pfDetSort];
@@ -176,13 +185,17 @@ function _pfRenderDetalle(){
     const tl  = x.tipo_cli === 'Público' ? 'PÚB' : x.tipo_cli === 'Privado' ? 'PRIV' : 'N/D';
     return '<tr style="background:' + (i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)') + '">' +
       '<td style="padding:.26rem .6rem;text-align:right;font-family:\'Roboto Mono\',monospace;font-size:.58rem;color:var(--mut);' + SEP + '">' + (i + 1) + '</td>' +
-      '<td style="padding:.26rem .6rem;font-size:.64rem;font-weight:600;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + SEP + '" title="' + x.cliente + '">' + x.cliente + '</td>' +
+      '<td style="padding:.26rem .6rem;font-size:.64rem;font-weight:600;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + SEP + '" title="' + _pfTip(x) + '">' + x.cliente +
+        (x.solo_costo ? '<span style="font-size:.52rem;background:var(--rd2);color:var(--rd);border-radius:3px;padding:.05rem .3rem;margin-left:.3rem;font-weight:700">' + (x.n_sc || 0) + ' CLIENTES</span>' : '') + '</td>' +
       '<td style="padding:.26rem .6rem;' + SEP + '"><span class="pill ' + tb2 + '">' + tl + '</span></td>' +
       '<td style="padding:.26rem .6rem;text-align:center;' + SEP + '"><span class="pill ' + (x.contrato ? 'pg' : 'pgr') + '" style="font-size:.55rem">' + (x.contrato ? 'CON' : 'SIN') + '</span></td>' +
       '<td style="padding:.26rem .6rem;text-align:right;font-size:.65rem;font-weight:700;font-variant-numeric:tabular-nums;' + SEP + '">' + fmtMM(x.real) + '</td>' +
       '<td style="padding:.26rem .6rem;text-align:right;font-size:.63rem;color:var(--or);font-variant-numeric:tabular-nums;' + SEP + '">' + ((x.costo || 0) ? fmtMM(x.costo) : '<span style="color:var(--mut)">—</span>') + '</td>' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-size:.64rem;font-weight:700;font-variant-numeric:tabular-nums;color:' +
+        ((x.real - (x.costo || 0)) >= 0 ? 'var(--gn)' : 'var(--rd)') + ';' + SEP + '">' + fmtMM(x.real - (x.costo || 0)) + '</td>' +
       '<td style="padding:.26rem .6rem;text-align:right;font-size:.62rem;font-weight:700;font-variant-numeric:tabular-nums;color:' +
-        (mg >= 60 ? 'var(--gn)' : mg >= 35 ? 'var(--am)' : 'var(--rd)') + ';' + SEP + '">' + mg.toFixed(1).replace('.', ',') + '%</td>' +
+        (mg >= 60 ? 'var(--gn)' : mg >= 35 ? 'var(--am)' : 'var(--rd)') + ';' + SEP + '">' +
+        (x.real ? mg.toFixed(1).replace('.', ',') + '%' : '<span style="color:var(--mut)">—</span>') + '</td>' +
       '<td style="padding:.26rem .6rem"><div style="display:flex;align-items:center;gap:5px">' +
         '<div style="flex:1;height:5px;background:var(--gy);border-radius:3px;overflow:hidden;min-width:36px">' +
         '<div style="height:100%;width:' + (x.real / maxV * 100) + '%;background:var(--az2)"></div></div>' +
@@ -192,17 +205,18 @@ function _pfRenderDetalle(){
 
   box.innerHTML =
     '<div style="overflow-x:auto;max-height:520px;overflow-y:auto">' +
-    '<table style="width:100%;border-collapse:collapse;min-width:640px">' +
+    '<table style="width:100%;border-collapse:collapse;min-width:760px">' +
     '<thead><tr>' + thPlain('#', 'right') + th('CLIENTE / INSTITUCIÓN', 'cliente', 'left') +
       th('TIPO', 'tipo_cli', 'left') + th('CONTRATO', 'contrato', 'center') +
       th('REAL FACTURADO A LA FECHA', 'real', 'right') + th('COSTO TOTAL', 'costo', 'right') +
-      th('MARGEN', 'margen', 'right') + thPlain('% DEL TOTAL', 'right') +
+      thPlain('MARGEN BRUTO', 'right') + th('% MARGEN', 'margen', 'right') + thPlain('% DEL TOTAL', 'right') +
     '</tr></thead><tbody>' + cuerpo + '</tbody>' +
     '<tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">' +
       '<td colspan="4" style="padding:.35rem .6rem;font-size:.64rem;' + SEP + '">TOTAL · ' + filas.length +
         ' clientes' + ((_pfDetFilt === 'todos' && !q) ? '' : ' (filtrado)') + '</td>' +
       '<td style="padding:.35rem .6rem;text-align:right;font-size:.65rem;font-variant-numeric:tabular-nums;' + SEP + '">' + fmtMM(tot) + '</td>' +
       '<td style="padding:.35rem .6rem;text-align:right;font-size:.63rem;font-variant-numeric:tabular-nums;' + SEP + '">' + fmtMM(totK) + '</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.65rem;font-variant-numeric:tabular-nums;' + SEP + '">' + fmtMM(tot - totK) + '</td>' +
       '<td style="padding:.35rem .6rem;text-align:right;font-size:.62rem;' + SEP + '">' + (tot ? ((tot - totK) / tot * 100).toFixed(1).replace('.', ',') : '0') + '%</td>' +
       '<td style="padding:.35rem .6rem;text-align:right;font-size:.6rem">' + (tot / totGeneral * 100).toFixed(1) + '%</td>' +
     '</tr></tfoot></table></div>' +
@@ -211,8 +225,15 @@ function _pfRenderDetalle(){
     'mismos filtros que usa «Ingresos Totales» de Analisis Facturación: empresa <strong>TS</strong>, tipo de ' +
     'documento <strong>Factura</strong> y catálogos <strong>Servicio Técnico, REAS y Trazabilidad</strong>. ' +
     'Excluye provisiones y los catálogos de venta de equipos. Sin filtros, el total cuadra con el indicador ' +
-    'de la portada. El costo es la suma de «Total Costo Linea» (columna Q) de esas mismas líneas, y el margen ' +
-    'es la diferencia sobre la venta.</p>';
+    'de la portada.<br>' +
+    'El <strong>costo total</strong> es la suma de «Costo Total» (columna R) de la hoja <strong>GD</strong>, ' +
+    'que registra los repuestos consumidos en cada cliente, agrupada por nombre de cliente. El ' +
+    '<strong>margen bruto</strong> es la facturación menos ese costo. Los clientes sin movimientos en GD ' +
+    'aparecen con costo cero, por lo que su margen es todo lo facturado.<br>' +
+    'La fila <strong>Clientes sin Facturación</strong> agrupa a los que consumieron repuestos y no registran ' +
+    'facturación en el período, por lo que su margen bruto es todo negativo; el detalle de quiénes son está ' +
+    'en el tooltip de esa fila. El grupo se rearma en cada actualización: si alguno empieza a facturar sale ' +
+    'y pasa a tener su propia fila, y si aparecen otros se incorporan solos.</p>';
 
   const lbl = document.getElementById('pf-det-lbl');
   const kGeneral = todos.reduce((s, x) => s + (x.costo || 0), 0);

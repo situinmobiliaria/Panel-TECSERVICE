@@ -1513,13 +1513,17 @@ def read_casos(wb):
         # Tabla izquierda: fila de caso si hay cliente (col B = índice 1)
         cliente = safe_str(row[1]) if len(row) > 1 and row[1] else ""
         if cliente:
+            # A=coordinador B=Cliente C=Problema D=ESTADO E=Responsable
+            # F=Comentario G=Registro en Salesforce H=Acciones
             casos.append({
                 "coordinador": last_coord,
                 "cliente":     cliente,
                 "problema":    safe_str(row[2]) if len(row) > 2 else "",
-                "responsable": safe_str(row[3]) if len(row) > 3 else "",
-                "comentario":  safe_str(row[4]) if len(row) > 4 else "",
-                "salesforce":  safe_str(row[5]) if len(row) > 5 else "",
+                "estado":      safe_str(row[3]) if len(row) > 3 else "",
+                "responsable": safe_str(row[4]) if len(row) > 4 else "",
+                "comentario":  safe_str(row[5]) if len(row) > 5 else "",
+                "salesforce":  safe_str(row[6]) if len(row) > 6 else "",
+                "acciones":    safe_str(row[7]) if len(row) > 7 else "",
             })
 
         # Tabla derecha: fila de equipo si hay modelo (col J = índice 9)
@@ -1643,6 +1647,25 @@ def read_brecha_oport(wb):
     }
 
 
+# Etiquetas de rotación canónicas. La columna P de "Brecha Sin Stock" mezcla
+# mayúsculas y tildes ("Sin Información" / "Sin información"), y sin unificar
+# el resumen abre dos categorías para lo mismo.
+_ROT_CANON = {
+    "ALTA ROTACION":    "Alta Rotacion",
+    "MEDIANA ROTACION": "Mediana Rotacion",
+    "BAJA ROTACION":    "Baja Rotacion",
+    "SIN ROTACION":     "Sin Rotacion",
+    "SIN INFORMACION":  "Sin Información",
+}
+
+
+def _rot_canon(valor):
+    txt = safe_str(valor).strip() if valor is not None else ""
+    if not txt:
+        return "Sin Información"
+    return _ROT_CANON.get(_norm_cli(txt), txt)
+
+
 def read_brecha_stock(wb):
     """Oportunidades detenidas por falta de stock de repuestos.
 
@@ -1669,7 +1692,13 @@ def read_brecha_stock(wb):
         ov    = _ffill(row[2], ov)
         monto = to_float(row[13])
         cod   = safe_str(row[9]).strip()
-        if not cod and monto == 0:
+        # La hoja cierra con una fila "Total" que repite la suma de la columna
+        # N; sin descartarla la brecha salía al doble. Toda línea real trae
+        # código de producto — las de continuación heredan propietario y OV,
+        # pero nunca el código.
+        if not cod:
+            continue
+        if safe_str(row[0]).strip().upper() in ("TOTAL", "TOTALES"):
             continue
         f = _parse_fecha(row[8])
         items.append({
@@ -1686,7 +1715,7 @@ def read_brecha_stock(wb):
             "cant":     round(to_float(row[11]), 2),
             "pu":       round(to_float(row[12])),
             "monto":    round(monto),
-            "rot":      safe_str(row[15]).strip() if len(row) > 15 and row[15] else "Sin información",
+            "rot":      _rot_canon(row[15] if len(row) > 15 else None),
             "dias":     (TODAY - f).days if f else None,
         })
 
@@ -2133,6 +2162,41 @@ def read_pipeline_st(wb):
         "n_clientes": len({_norm_cli(i["cli"]) for i in items}),
         "monto_tot":  round(sum(i["monto"] for i in items)),
     }
+
+
+def read_gd_costos(wb):
+    """Costo de repuestos consumidos por cliente.
+
+    Fuente: hoja "GD" (guías de despacho y traslados de bodega, una fila por
+    movimiento). Col J = Nombre Cliente, col R = Costo Total. Se agrupa por
+    cliente normalizado; es el costo que la hoja Panel Fact Cliente resta de
+    lo facturado para obtener el margen bruto.
+
+    Reemplaza a "Total Costo Linea" (col Q de la BBDD de facturación), que
+    sólo recogía el costo de las líneas facturadas y dejaba a la mitad de los
+    clientes en cero.
+    """
+    ws = next((wb[n] for n in wb.sheetnames if n.strip().upper() == "GD"), None)
+    if ws is None:
+        print("  ADVERTENCIA: no se encontró la hoja 'GD'; el costo por cliente queda en cero.")
+        return {}
+    idx = {}
+    n_filas = 0
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 18:
+            continue
+        cli = safe_str(row[9]).strip()
+        if not cli:
+            continue
+        k = _norm_cli(cli)
+        e = idx.setdefault(k, {"nombre": cli, "costo": 0.0})
+        e["costo"] += to_float(row[17])
+        n_filas += 1
+    print(f"       GD: {n_filas} movimientos | {len(idx)} clientes | "
+          f"costo MM${sum(e['costo'] for e in idx.values())/1e6:,.1f}")
+    for e in idx.values():
+        e["costo"] = round(e["costo"])
+    return idx
 
 
 def read_back_order_idx(wb):
@@ -2928,7 +2992,7 @@ def compute_desglose_ingresos(contratos, panel_raw, bbdd, contr_real_monthly, fa
 # ══════════════════════════════════════════════════════════════════════════════
 # 7. ENSAMBLAR APP_DATA
 # ══════════════════════════════════════════════════════════════════════════════
-def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac=None, base_instalada=None, mapa_data=None):
+def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac=None, base_instalada=None, mapa_data=None, gd_costo=None):
 
     # Lookups from CONTRATOS
     coord_by_cli   = {}
@@ -3025,6 +3089,41 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
             "real":     round(float(monto)),
             "costo":    round(float(costo_cli.get(cli_bbdd, 0))),
         })
+    # ── Costo de repuestos por cliente, desde la hoja GD ────────────────────
+    # Reemplaza al costo de la BBDD y suma a los clientes que consumieron
+    # repuestos sin facturar en el período: entran con real = 0 y margen
+    # bruto negativo. La lista se arma en cada corrida, así que si mañana
+    # esos clientes facturan salen solos de este grupo, y si aparecen otros
+    # se incorporan sin tocar nada.
+    if gd_costo:
+        _vistos = set()
+        for c in fact_clientes:
+            k = _norm_cli(c["cliente"])
+            _vistos.add(k)
+            c["costo"] = gd_costo.get(k, {}).get("costo", 0)
+            c["solo_costo"] = False
+        # Los que consumieron repuestos sin facturar van consolidados en una
+        # sola fila; el detalle queda en el tooltip.
+        _sc = [e for k, e in gd_costo.items() if k not in _vistos and e["costo"]]
+        _sc.sort(key=lambda e: -e["costo"])
+        _nuevos = len(_sc)
+        if _sc:
+            fact_clientes.append({
+                "cliente":  "Clientes sin Facturación",
+                "tipo_cli": "Sin clasificar",
+                "contrato": False,
+                "real":     0,
+                "costo":    sum(e["costo"] for e in _sc),
+                "solo_costo": True,
+                "n_sc":     _nuevos,
+                "detalle":  [{"cliente": e["nombre"], "costo": e["costo"]} for e in _sc],
+            })
+        _kc = sum(x["costo"] for x in fact_clientes)
+        _rc = sum(x["real"] for x in fact_clientes)
+        print(f"       COSTO GD: {len(_vistos & set(gd_costo))} clientes con factura y costo | "
+              f"{_nuevos} sólo costo | costo MM${_kc/1e6:,.1f} | "
+              f"margen bruto MM${(_rc-_kc)/1e6:,.1f} ({(_rc-_kc)/_rc*100:.1f}%)")
+
     fact_clientes.sort(key=lambda x: -x["real"])
     _tot_fc = sum(x["real"] for x in fact_clientes)
     print(f"       FACT CLIENTES: {len(fact_clientes)} clientes | MM${_tot_fc/1e6:,.1f} "
@@ -3559,6 +3658,7 @@ def main():
     cli_rel  = read_clientes_relevantes(wb2)
     back_ord = read_back_order_idx(wb2)
     pipe_st  = read_pipeline_st(wb2)
+    gd_costo = read_gd_costos(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -3575,7 +3675,7 @@ def main():
     # Reconciliar el flag manual "No Continuó" con los contratos ANTES de
     # derivar APP_DATA.panel y DATA, para que ambas fuentes coincidan.
     panel_raw = corregir_estado_relacion(panel_raw, contratos)
-    app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada, mapa_data=mapa_data)
+    app_data = build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, analisis_fac, base_instalada, mapa_data=mapa_data, gd_costo=gd_costo)
     app_data["ratios2"] = ratios2
     app_data["resumen_programas"] = resumen_programas
     app_data["inv_ts"] = inv_ts
@@ -3585,6 +3685,11 @@ def main():
     app_data["cli_rel"]  = cli_rel
     app_data["back_order"] = back_ord
     app_data["pipeline_st"] = pipe_st
+    # Costo GD que no queda asignado a ningún cliente de la tabla
+    if gd_costo:
+        _hu = {_norm_cli(c["cliente"]) for c in app_data.get("fact_clientes", [])}
+        app_data["gd_costo_fuera"] = round(sum(e["costo"] for k, e in gd_costo.items() if k not in _hu))
+        app_data["gd_costo_total"] = round(sum(e["costo"] for e in gd_costo.values()))
     if pipe_st:
         print(f"       PIPELINE ST: {pipe_st['n']} oportunidades | {pipe_st['n_clientes']} clientes | "
               f"{len(pipe_st['lineas'])} lineas | anios {','.join(pipe_st['anios'])} | "

@@ -452,6 +452,13 @@ async function eerrExportPDF() {
     if (eerrTbl)  wrap.appendChild(makeSection('Estado de Resultado', eerrTbl));
     if (ratioTbl) wrap.appendChild(makeSection('Análisis de Ratios',  ratioTbl));
 
+    // Misma nota que va al pie de la tabla en pantalla
+    const nota = document.createElement('div');
+    nota.style.cssText = 'font-size:8px;color:#555;line-height:1.5;margin-top:2px';
+    nota.innerHTML = 'El <strong>Costo por Ventas</strong> considera el gasto por beneficios a los ' +
+                     'empleados de los técnicos.';
+    wrap.appendChild(nota);
+
     document.body.appendChild(wrap);
 
     // Esperar un frame para que el layout se calcule

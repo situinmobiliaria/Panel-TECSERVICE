@@ -121,8 +121,35 @@ function satFiltrarCom(btn){
 }
 // Helper: cruce con contratos activos
 function _satTieneContr(nombre){
-  const norm=_normInst(nombre);
-  return typeof DATA!=='undefined'&&DATA.some(d=>_normInst(d.cliente)===norm&&d.tipo==='Comercial');
+  return _satContrMonto(nombre).n > 0;
+}
+
+// Monto anual contratado de una institución encuestada.
+// La columna de contratos de la hoja SATISFACCION viene en cero para varios
+// clientes que sí tienen contrato vigente (Hospital San Camilo, Puerto Aysén),
+// y la celda caía en un "Sí" sin cifra. Aquí se busca el contrato en DATA y se
+// devuelve su valor anual; sólo queda sin monto quien de verdad no tiene.
+// El cruce ignora los sufijos societarios, para que «Clínica Vespucio» calce
+// con «Clínica Vespucio SPA».
+const _SAT_SUF = /\s+(SPA|S\.?P\.?A\.?|S\.?A\.?|LTDA\.?|LIMITADA|E\.?I\.?R\.?L\.?)$/;
+function _normContr(s){
+  let t = _normInst(s).replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim(), prev;
+  do { prev = t; t = t.replace(_SAT_SUF, '').trim(); } while (t !== prev);
+  return t;
+}
+function _satContrMonto(inst){
+  const esObj = (typeof inst === 'object' && inst !== null);
+  const nombre = esObj ? inst.institucion : inst;
+  const hoja = (esObj && inst.contr_asociados > 0) ? inst.contr_asociados : 0;
+  if(typeof DATA === 'undefined') return {monto: hoja, n: hoja ? 1 : 0, tipos: []};
+  const claves = [_normContr(nombre)];
+  if(esObj && inst.nombre_bi) claves.push(_normContr(inst.nombre_bi));
+  const hit = DATA.filter(d => claves.indexOf(_normContr(d.cliente)) >= 0);
+  const desdeData = hit.reduce((a, d) => a + (d.val || 0), 0);
+  // Se prefiere el monto de la hoja cuando existe; DATA cubre los que vienen en cero
+  const monto = hoja || desdeData;
+  return {monto: monto, n: hit.length || (hoja ? 1 : 0),
+          tipos: hit.map(d => d.tipo).filter((t, i, a) => a.indexOf(t) === i)};
 }
 function _satContrTag(nombre){
   const tiene=_satTieneContr(nombre);
@@ -621,12 +648,11 @@ function initSatisfaccion(){
       const biSi=biRec?(biRec.total_si||0):null;
       const biStyle=biSi!=null?'color:#C00000;font-weight:700':'color:var(--mut)';
       const nTag=d.n>1?`<span style="font-size:.58rem;background:#FFE0E0;border-radius:3px;padding:.1rem .3rem;margin-left:.3rem">${d.n} resp.</span>`:'';
-      const montoContr = d.contr_asociados > 0 ? d.contr_asociados : 0;
-      const tieneContr = montoContr > 0 || _satTieneContr(d.institucion);
-      const contrCell = montoContr > 0
-        ? `<td style="text-align:right;color:var(--gn);font-weight:700;font-size:.65rem;font-family:'Roboto Mono',monospace">${mm(montoContr)}</td>`
-        : tieneContr
-          ? `<td style="text-align:center;color:var(--gn);font-weight:700;font-size:.65rem">Sí</td>`
+      const ctr = _satContrMonto(d);
+      const contrCell = ctr.monto > 0
+        ? `<td style="text-align:right;color:var(--gn);font-weight:700;font-size:.65rem;font-family:'Roboto Mono',monospace" title="${ctr.tipos.join(' + ')||'según hoja SATISFACCION'}">${mm(ctr.monto)}</td>`
+        : ctr.n > 0
+          ? `<td style="text-align:center;color:var(--gn);font-weight:700;font-size:.65rem" title="Contrato vigente sin monto anual cargado">Sí</td>`
           : `<td></td>`;
       return`<tr>
         <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">${i+1}</td>
@@ -743,6 +769,10 @@ function _renderSatDetBI(){
     return'<span class="badge bgy">Sin datos</span>';
   }
 
+  // Se guardan los valores ya cruzados para reutilizarlos en el exportable
+  // sin repetir la lógica de match con base instalada, panel y contratos.
+  window._satDetBIRows = [];
+
   const rows = detractores.map((d,i) => {
     const rcol = 'var(--rd)';
     const biRec = matchBI(d);
@@ -762,8 +792,12 @@ function _renderSatDetBI(){
     const tieCol = d.tiempo  >= 5 ? 'var(--gn)' : d.tiempo  >= 3 ? 'var(--am)' : 'var(--rd)';
     const nTag = d.n > 1 ? `<span style="font-size:.56rem;background:#FFE0E0;border-radius:3px;padding:.08rem .3rem;margin-left:.3rem">${d.n} resp.</span>` : '';
     // Contrato: mostrar monto si contr_asociados > 0, si no indicar si tiene contrato activo
+    // Si ni la hoja ni el panel traen monto, se toma el valor anual del
+    // contrato desde DATA: antes esos casos caían en un "Sí" sin cifra
+    // (Clínica Vespucio, Hospital San Camilo, Hospital de Puerto Aysén).
     const montoContrDet = (d.contr_asociados > 0) ? d.contr_asociados
-      : (panelRec && (panelRec.presup_contr_ytd || 0) > 0) ? panelRec.presup_contr_ytd : 0;
+      : (panelRec && (panelRec.presup_contr_ytd || 0) > 0) ? panelRec.presup_contr_ytd
+      : (typeof _satContrMonto === 'function' ? _satContrMonto(d).monto : 0);
     const tieneContr = montoContrDet > 0
       || (contrRec && contrRec.n > 0 && contrRec.tipos && contrRec.tipos.includes('Comercial'))
       || (panelRec && panelRec.tiene_contrato);
@@ -772,6 +806,13 @@ function _renderSatDetBI(){
       : tieneContr
         ? `<td style="text-align:center;font-weight:700;color:var(--gn)">Sí</td>`
         : `<td></td>`;
+    window._satDetBIRows.push({
+      inst: d.institucion, n: d.n, cat: d.cat_detractor || '',
+      recom: d.recom, calidad: d.calidad, tiempo: d.tiempo,
+      contrMonto: montoContrDet, contrSi: !!tieneContr,
+      fac2026: fac2026, totalEq: totalEq,
+      dental: dental, ester: ester, incardia: incardia, endo: endo, mob: mob,
+    });
     return `<tr>
       <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">${i+1}</td>
       <td><strong style="font-size:.7rem;color:var(--az1)">${d.institucion}</strong>${nTag}</td>
@@ -873,36 +914,124 @@ async function satExportPDF(){
       kpi('Recomendación',       txt('sat-k-recom'),   'escala 0 a 10',     '#28D2C3') +
       kpi('NPS',                 txt('sat-k-nps'),     txt('sat-k-nps-sub'), (nps.nps || 0) >= 50 ? '#00832F' : (nps.nps || 0) >= 0 ? '#B8860B' : '#C00000');
 
-    // ── Tabla de detractores (solo las primeras filas, para que quepa) ──
-    const tbDet = document.getElementById('tb-sat-det');
+    // ── Tabla de detractores ──
+    // Es la misma que cierra la hoja: cruza cada institución con contratos
+    // activos y base instalada (sólo marcas con Potencial ST = Sí). Se arma
+    // desde los valores que deja _renderSatDetBI(), porque los badges de
+    // categoría usan variables CSS que html2canvas no resuelve. Van todas las
+    // filas; la letra se ajusta al alto de la tabla.
+    if (typeof _renderSatDetBI === 'function' && !window._satDetBIRows) {
+      try { _renderSatDetBI(); } catch (e) { /* la hoja aún no se ha abierto */ }
+    }
+    const det = window._satDetBIRows || [];
+    const fDet = det.length > 22 ? 6.6 : det.length > 16 ? 7.1 : 7.6;
+    const pDet = det.length > 22 ? '1.6px 5px' : '2.6px 5px';
+    const CAT_COL = {
+      'Tiempo de Respuesta': '#0A5C8C', 'Mala Resolucion': '#C05000',
+      'Rotación Tecnicos': '#8B3A00', 'Mala Respuesta Solicitudes': '#007A72',
+      'Otros': '#7A1FAA',
+    };
+    const n2 = (v, n) => (v == null ? '—' : v.toFixed(n > 1 ? 2 : 0).replace('.', ','));
+    const colNota = v => v >= 5 ? '#00832F' : v >= 3 ? '#B8860B' : '#C00000';
+
     let detHTML = '';
-    if (tbDet && tbDet.rows.length) {
-      const tabla = tbDet.closest('table').cloneNode(true);
-      tabla.querySelectorAll('*').forEach(n => {
-        n.style.position = 'static'; n.style.maxHeight = 'none'; n.style.overflow = 'visible';
-      });
-      const tb = tabla.querySelector('tbody');
-      const MAX = 14;
-      const sobran = tb.rows.length - MAX;
-      while (tb.rows.length > MAX) tb.deleteRow(MAX);
-      tabla.querySelectorAll('td,th').forEach(n => {
-        n.style.fontSize = '7.5px'; n.style.padding = '2px 5px';
-        n.style.whiteSpace = 'nowrap'; n.style.lineHeight = '1.25';
-      });
-      tabla.style.borderCollapse = 'collapse'; tabla.style.width = '100%';
-      detHTML = '<div style="font-size:9px;font-weight:700;color:#C00000;text-transform:uppercase;' +
-                'letter-spacing:.06em;margin:0 0 4px">Detractores · ' + txt('sat-det-count') + '</div>' +
-                tabla.outerHTML +
-                (sobran > 0 ? '<div style="font-size:7.5px;color:#8892a8;margin-top:3px">' +
-                 'Se muestran los ' + MAX + ' primeros de ' + (MAX + sobran) + '. El detalle completo está en el panel.</div>' : '');
+    if (det.length) {
+      const enc = [['#', 'right'], ['INSTITUCIÓN', 'left'], ['CATEGORÍA', 'left'],
+                   ['RECOM.', 'center'], ['CALIDAD', 'center'], ['TIEMPO', 'center'],
+                   ['CONTRATO', 'right'], ['FAC. 2026', 'right'], ['TOTAL EQ.', 'right'],
+                   ['DENTAL', 'right'], ['ESTERIL.', 'right'], ['INCARDIA', 'right'],
+                   ['ENDOSC.', 'right'], ['MOBIL.', 'right']];
+      detHTML =
+        '<div style="font-size:9px;font-weight:700;color:#C00000;text-transform:uppercase;' +
+        'letter-spacing:.06em;margin:0 0 4px">Detractores · ' + det.length +
+        ' instituciones con recomendación ≤ 6 · cruce con contratos activos y base instalada</div>' +
+        '<table style="border-collapse:collapse;width:100%">' +
+          '<thead><tr>' + enc.map(e =>
+            '<th style="background:#002D73;color:#fff;font-size:' + (fDet - 0.6) + 'px;padding:3px 5px;' +
+            'letter-spacing:.03em;white-space:nowrap;text-align:' + e[1] + '">' + e[0] + '</th>').join('') +
+          '</tr></thead><tbody>' +
+          det.map((d, i) => {
+            const td = 'font-size:' + fDet + 'px;padding:' + pDet + ';border-bottom:1px solid #E6EAF2;white-space:nowrap';
+            const cc = CAT_COL[d.cat] || '#6B7BA8';
+            const eq = (v, col) => '<td style="' + td + ';text-align:right;color:' +
+              (v === '—' ? '#B8C1D8' : col) + '">' + v + '</td>';
+            const contr = d.contrMonto > 0 ? mm(d.contrMonto) : d.contrSi ? 'Sí' : '—';
+            return '<tr style="background:' + (i % 2 ? '#fff' : '#F7F9FC') + '">' +
+              '<td style="' + td + ';text-align:right;color:#8892a8">' + (i + 1) + '</td>' +
+              '<td style="' + td + ';font-weight:600;white-space:normal;max-width:250px;line-height:1.25">' +
+                d.inst + (d.n > 1 ? ' <span style="color:#8892a8;font-weight:400">(' + d.n + ' resp.)</span>' : '') + '</td>' +
+              '<td style="' + td + ';white-space:normal;max-width:130px;line-height:1.25;color:' + cc +
+                ';font-weight:700">' + (d.cat || '—') + '</td>' +
+              '<td style="' + td + ';text-align:center;font-weight:700;color:#C00000">' + n2(d.recom, d.n) + '</td>' +
+              '<td style="' + td + ';text-align:center;color:' + colNota(d.calidad) + '">' + n2(d.calidad, d.n) + '</td>' +
+              '<td style="' + td + ';text-align:center;color:' + colNota(d.tiempo) + '">' + n2(d.tiempo, d.n) + '</td>' +
+              '<td style="' + td + ';text-align:right;font-weight:700;color:' +
+                (d.contrMonto > 0 || d.contrSi ? '#00832F' : '#B8C1D8') + '">' + contr + '</td>' +
+              '<td style="' + td + ';text-align:right;font-weight:700;color:' +
+                (d.fac2026 === '—' ? '#B8C1D8' : '#002D73') + '">' + d.fac2026 + '</td>' +
+              eq(d.totalEq, '#002D73') + eq(d.dental, '#B8860B') + eq(d.ester, '#33448D') +
+              eq(d.incardia, '#D46000') + eq(d.endo, '#0A7D74') + eq(d.mob, '#7B2FBE') +
+            '</tr>';
+          }).join('') +
+        '</tbody></table>' +
+        '<div style="font-size:7px;color:#8892a8;margin-top:4px;line-height:1.45">' +
+        'Los equipos consideran únicamente marcas con Potencial ST = Sí, es decir las que TECSERVICE ' +
+        'representa y para las cuales podría ofrecer mantención.</div>';
+    }
+
+    // ── Motivos de insatisfacción (categoría detractor) ──
+    // Se arma desde APP_DATA en vez de clonar el DOM: el badge de categoría
+    // usa colores por variable CSS que no sobreviven a html2canvas.
+    const cats = ((window.APP_DATA || {}).satisf || {}).detractor_categorias || [];
+    const nCats = cats.reduce((a, c) => a + c.n, 0);
+    let catHTML = '';
+    if (cats.length) {
+      const colR = v => v >= 7 ? '#00832F' : v >= 4 ? '#B8860B' : '#C00000';
+      const PAL = ['#7A1FAA', '#0A5C8C', '#C05000', '#007A72', '#8B3A00', '#1a6b2a'];
+      const maxN = Math.max.apply(null, cats.map(c => c.n)) || 1;
+      const recProm = nCats ? cats.reduce((a, c) => a + c.recom_avg * c.n, 0) / nCats : 0;
+      const enc = [['MOTIVO', 'left'], ['N°', 'right'], ['% DEL TOTAL', 'left'], ['RECOM.', 'right']];
+      catHTML =
+        '<table style="border-collapse:collapse;width:100%;table-layout:fixed">' +
+          '<colgroup><col style="width:34%"><col style="width:9%"><col style="width:42%"><col style="width:15%"></colgroup>' +
+          '<thead><tr>' + enc.map(e =>
+            '<th style="background:#002D73;color:#fff;font-size:7.5px;padding:4px 7px;letter-spacing:.04em;' +
+            'text-align:' + e[1] + '">' + e[0] + '</th>').join('') + '</tr></thead><tbody>' +
+          cats.map((c, i) => {
+            const col = PAL[i % PAL.length];
+            const pct = nCats ? c.n / nCats * 100 : 0;
+            const td = 'font-size:8.5px;padding:5px 7px;border-bottom:1px solid #E6EAF2';
+            return '<tr style="background:' + (i % 2 ? '#fff' : '#F7F9FC') + '">' +
+              '<td style="' + td + ';font-weight:600">' +
+                '<span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:' + col +
+                ';margin-right:5px"></span>' + c.categoria + '</td>' +
+              '<td style="' + td + ';text-align:right;font-weight:700">' + c.n + '</td>' +
+              '<td style="' + td + '">' +
+                '<div style="display:flex;align-items:center;gap:6px">' +
+                  '<div style="flex:1;height:8px;background:#E6EAF2;border-radius:4px;overflow:hidden">' +
+                    '<div style="height:8px;width:' + (c.n / maxN * 100) + '%;background:' + col + '"></div></div>' +
+                  '<span style="font-size:7.5px;color:#6B7BA8;min-width:30px;text-align:right">' +
+                    pct.toFixed(1).replace('.', ',') + '%</span>' +
+                '</div></td>' +
+              '<td style="' + td + ';text-align:right;font-weight:700;color:' + colR(c.recom_avg) + '">' +
+                c.recom_avg.toFixed(1).replace('.', ',') + '</td>' +
+            '</tr>';
+          }).join('') +
+          '<tr style="background:#002D73;color:#fff;font-weight:800">' +
+            '<td style="font-size:8.5px;padding:5px 7px">TOTAL</td>' +
+            '<td style="font-size:8.5px;padding:5px 7px;text-align:right">' + nCats + '</td>' +
+            '<td style="font-size:8.5px;padding:5px 7px;color:rgba(255,255,255,.75)">100,0%</td>' +
+            '<td style="font-size:8.5px;padding:5px 7px;text-align:right">' +
+              (nCats ? recProm.toFixed(1).replace('.', ',') : '—') + '</td></tr>' +
+        '</tbody></table>';
     }
 
     const secLbl = t => '<div style="font-size:9px;font-weight:700;color:#002D73;text-transform:uppercase;' +
                         'letter-spacing:.06em;margin:0 0 4px">' + t + '</div>';
 
     wrap = document.createElement('div');
-    wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:1180px;' +
-      'padding:16px 22px 20px;font-family:Arial,sans-serif;color:#111;box-sizing:border-box';
+    wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:1300px;' +
+      'padding:16px 24px 20px;font-family:Arial,sans-serif;color:#111;box-sizing:border-box';
 
     wrap.innerHTML =
       '<div style="border-bottom:2.5px solid #002D73;padding-bottom:6px;margin-bottom:10px">' +
@@ -911,20 +1040,26 @@ async function satExportPDF(){
         (hoy ? ' &nbsp;·&nbsp; Datos al ' + hoy : '') + '</span>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-bottom:12px">' + kpis + '</div>' +
-      '<div style="display:flex;gap:14px;margin-bottom:12px;align-items:flex-start">' +
-        '<div style="flex:1.5">' + secLbl('Evolución trimestral') + imgDe('cSatEvolutivo', 640, 200) + '</div>' +
-        '<div style="flex:1">' + secLbl('Distribución NPS') + imgDe('cSatNps', 440, 200) + '</div>' +
-      '</div>' +
-      '<div style="display:flex;gap:14px;align-items:flex-start">' +
-        '<div style="width:250px;flex-shrink:0">' + secLbl('¿Problema resuelto?') +
-          imgDe('cSatResuelto', 200, 170) +
-          '<div style="font-size:8px;color:#444;margin-top:4px;line-height:1.6">' +
+      '<div style="display:flex;gap:14px;margin-bottom:14px;align-items:flex-start">' +
+        '<div style="flex:1.35">' + secLbl('Evolución trimestral') + imgDe('cSatEvolutivo', 620, 195) + '</div>' +
+        '<div style="flex:1">' + secLbl('Distribución NPS') + imgDe('cSatNps', 430, 195) + '</div>' +
+        '<div style="width:210px;flex-shrink:0">' + secLbl('¿Problema resuelto?') +
+          imgDe('cSatResuelto', 185, 150) +
+          '<div style="font-size:8px;color:#444;margin-top:3px;line-height:1.55">' +
             '<div><span style="display:inline-block;width:8px;height:8px;background:#00832F;border-radius:2px;margin-right:4px"></span>Sí, totalmente <strong>' + txt('sat-res-si') + '</strong></div>' +
             '<div><span style="display:inline-block;width:8px;height:8px;background:#FFC000;border-radius:2px;margin-right:4px"></span>Parcialmente <strong>' + txt('sat-res-par') + '</strong></div>' +
             '<div><span style="display:inline-block;width:8px;height:8px;background:#C00000;border-radius:2px;margin-right:4px"></span>No resuelto <strong>' + txt('sat-res-no') + '</strong></div>' +
           '</div></div>' +
-        '<div style="flex:1;min-width:0">' + detHTML + '</div>' +
-      '</div>';
+      '</div>' +
+      '<div>' + detHTML + '</div>' +
+      (cats.length ?
+        '<div style="display:flex;gap:16px;align-items:flex-start;margin-top:16px">' +
+          '<div style="width:430px;flex-shrink:0">' +
+            secLbl('Motivos de insatisfacción · categoría detractor') +
+            imgDe('cSatCatDet', 430, 190) + '</div>' +
+          '<div style="flex:1;min-width:0">' +
+            secLbl(nCats + ' respuestas categorizadas') + catHTML + '</div>' +
+        '</div>' : '');
 
     document.body.appendChild(wrap);
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
