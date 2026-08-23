@@ -25,9 +25,22 @@
   let _vent = 6;      // ventana del top de clientes: 6 o 12 meses
   let _fill = 80;     // fill rate objetivo de la tabla de abajo
   let _topN = 10;
+  let _curvaModo = 'top10'; // 'agregado' | 'top10' | 'top20' | 'individual'
   const _openTop  = new Set();
   const _openFill = new Set();
-  let _ch1 = null, _ch2 = null, _ch3 = null, _ch4 = null;
+  let _ch1 = null, _ch2 = null, _ch3 = null, _ch4 = null, _ch5 = null;
+
+  // ── Fill rate genérico: parámetros (ventana, multiplicador) para CUALQUIER
+  // % objetivo, no sólo 50/80/99. 50% usa la ventana de 6 meses; de 50% a
+  // 80% se usa la de 12 meses tal cual (sin colchón extra); de 80% a 99% se
+  // "linealiza" el colchón de 1,5x: el multiplicador crece en línea recta
+  // desde 1x (en 80%) hasta 1,5x (en 99%), en vez de saltar de golpe.
+  function fillParams(pct) {
+    if (pct <= 50) return { vent: 6, mult: 1 };
+    if (pct <= 80) return { vent: 12, mult: 1 };
+    const t = Math.min(1, Math.max(0, (pct - 80) / (99 - 80)));
+    return { vent: 12, mult: 1 + t * 0.5 };
+  }
 
   // ── Formato ──────────────────────────────────────────────────
   const nUn  = v => (v || 0).toLocaleString('es-CL', { maximumFractionDigits: 0 });
@@ -72,10 +85,10 @@
   // existencias ni órdenes en curso; esas van aparte, en la cobertura.
   // La cobertura se topa en 100% por SKU antes de agregar, para que un
   // excedente en un repuesto no tape el quiebre de otro.
-  function nec(s, f) {
-    const cf = FILL[f];
-    const q  = skuQ(s, cf.vent) * cf.mult;
-    const v  = skuV(s, cf.vent) * cf.mult;
+  function necP(s, pct) {
+    const p  = fillParams(pct);
+    const q  = skuQ(s, p.vent) * p.mult;
+    const v  = skuV(s, p.vent) * p.mult;
     const st = stockSku[s.sku];
     const bo = BO[s.sku] || 0;
     const disp = (st || 0) + bo;
@@ -87,6 +100,7 @@
     return { q: q, v: v, st: st, bo: bo, disp: disp, cub: cub, vCub: frac * v,
              pct: frac * 100, enInv: st !== undefined };
   }
+  const nec = (s, f) => necP(s, f); // 50 / 80 / 99: mismo resultado que antes
 
   // Barra de cobertura: qué parte de la demanda ya está cubierta entre el
   // stock en bodega y lo que viene en camino.
@@ -118,6 +132,7 @@
     if (_openFill.has(c)) _openFill.delete(c); else _openFill.add(c);
     tablaFill();
   };
+  window.crCurvaModo = function (m) { _curvaModo = m; segmentadores(); curvaFill(); };
 
   // ── Esqueleto ────────────────────────────────────────────────
   function esqueleto() {
@@ -178,10 +193,26 @@
 
     <div id="cr-fr-kpi" class="g5" style="grid-template-columns:repeat(4,1fr)"></div>
 
-    <div class="card">
+    <div class="card" style="margin-bottom:.9rem">
       <div class="ch"><span class="ct">Stock Objetivo por Cliente</span>
         <span style="font-size:.63rem;color:var(--mut);margin-left:auto">clic en un cliente para ver el detalle por SKU</span></div>
       <div class="cb"><div id="cr-fr"></div></div>
+    </div>
+
+    <div class="card">
+      <div class="ch" style="flex-wrap:wrap;gap:.5rem">
+        <span class="ct">Curva de Cobertura · $ Por Comprar según Fill Rate Objetivo</span>
+        <div style="display:flex;gap:.25rem;margin-left:auto" id="cr-seg-curva"></div>
+      </div>
+      <div class="cb">
+        <div style="position:relative;height:300px"><canvas id="cCrCurva"></canvas></div>
+        <p style="font-size:.62rem;color:var(--mut);margin:.6rem 0 0;line-height:1.6">
+          Muestra cuánto habría que comprar (valorizado) para llegar a un fill rate del <strong>50%</strong>
+          (lo consumido en 6 meses), <strong>80%</strong> (lo consumido en 12 meses) y <strong>99%</strong>
+          (12 meses × 1,5 de colchón). Entre 80% y 99% el colchón de 1,5x se <strong>linealiza</strong>: crece en
+          línea recta en vez de saltar de golpe, para ver la curva de cobertura completa.
+        </p>
+      </div>
     </div>`;
   }
 
@@ -199,6 +230,24 @@
     seg('cr-seg-vent', [{ v: 6, t: '6 meses' }, { v: 12, t: '12 meses' }], _vent, 'window.crVent');
     seg('cr-seg-top',  [{ v: 10, t: 'Top 10' }, { v: 20, t: 'Top 20' }, { v: 9999, t: 'Todos' }], _topN, 'window.crTopN');
     seg('cr-seg-fill', [50, 80, 99].map(f => ({ v: f, t: FILL[f].lbl, c: FILL[f].col })), _fill, 'window.crFill');
+
+    // Segmentador de la curva usa strings, no números: reuso el mismo helper
+    // `seg` (que compara con `===`) pasando el valor entrecomillado.
+    const el = document.getElementById('cr-seg-curva');
+    if (el) {
+      const opts = [
+        { v: 'agregado',   t: 'Agregado' },
+        { v: 'top10',      t: 'Top 10' },
+        { v: 'top20',      t: 'Top 20' },
+        { v: 'individual', t: 'Cada cliente' },
+      ];
+      el.innerHTML = opts.map(o => {
+        const on = o.v === _curvaModo;
+        return `<button onclick="window.crCurvaModo('${o.v}')" style="${BTN};
+          border:1px solid ${on ? 'var(--az2)' : 'var(--brd)'};background:${on ? 'var(--az2)' : 'var(--bg2)'};
+          color:${on ? '#fff' : 'var(--txt)'};font-weight:${on ? 700 : 400}">${o.t}</button>`;
+      }).join('');
+    }
   }
 
   // ── KPIs (mismas clases que Inventario TS y el Resumen) ────────
@@ -308,10 +357,23 @@
     if (!t.length) { box.innerHTML = '<div style="padding:1rem;color:var(--mut);font-size:.7rem">Sin datos.</div>'; return; }
     const TD = 'padding:.4rem .7rem;white-space:nowrap';
 
+    // Celda de dos líneas: unidades (arriba) y monto valorizado (abajo), para
+    // que cada columna de fill rate muestre unidades y $ sin triplicar el
+    // ancho de la tabla con columnas separadas. `fmt` es nMM (fila agregada
+    // por cliente, montos grandes) o nCLP (fila de detalle por SKU).
+    const celdaQV = (q, v, col, bold, fmt) => `<div style="text-align:right;font-variant-numeric:tabular-nums;
+        ${bold ? 'font-weight:700;' : ''}color:${col}">${nUn(q)}</div>
+      <div style="text-align:right;font-size:.85em;color:var(--mut);font-variant-numeric:tabular-nums">${(fmt || nCLP)(v)}</div>`;
+
     let rows = '', tQ = 0, tV = 0, tSt = 0, tBo = 0, tVCub = 0, tSku = 0;
+    let tQ50 = 0, tV50 = 0, tQ80 = 0, tV80 = 0, tQ99 = 0, tV99 = 0;
     t.forEach((c, i) => {
       const sk = c.skus.filter(s => skuQ(s, cf.vent) > 0)
-                       .map(s => Object.assign({ _s: s }, nec(s, _fill)))
+                       .map(s => Object.assign({ _s: s }, nec(s, _fill), {
+                         q50: necP(s, 50).q, v50: necP(s, 50).v,
+                         q80: necP(s, 80).q, v80: necP(s, 80).v,
+                         q99: necP(s, 99).q, v99: necP(s, 99).v,
+                       }))
                        .sort((a, b) => b.v - a.v);
       const aQ  = sk.reduce((a, s) => a + s.q, 0);
       const aV  = sk.reduce((a, s) => a + s.v, 0);
@@ -320,7 +382,11 @@
       const aVCub = sk.reduce((a, s) => a + s.vCub, 0);
       const aPct  = aV > 0 ? aVCub / aV * 100 : 0;
       const nOk   = sk.filter(s => s.pct >= 99.95).length;
+      const aQ50 = sk.reduce((a, s) => a + s.q50, 0), aV50 = sk.reduce((a, s) => a + s.v50, 0);
+      const aQ80 = sk.reduce((a, s) => a + s.q80, 0), aV80 = sk.reduce((a, s) => a + s.v80, 0);
+      const aQ99 = sk.reduce((a, s) => a + s.q99, 0), aV99 = sk.reduce((a, s) => a + s.v99, 0);
       tQ += aQ; tV += aV; tSt += aSt; tBo += aBo; tVCub += aVCub; tSku += sk.length;
+      tQ50 += aQ50; tV50 += aV50; tQ80 += aQ80; tV80 += aV80; tQ99 += aQ99; tV99 += aV99;
 
       const open = _openFill.has(c.cliente);
       rows += `<tr style="background:${i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)'};cursor:pointer;
@@ -332,10 +398,9 @@
             transform:rotate(${open ? 90 : 0}deg);transition:transform .15s">&#9654;</span>${esc(c.cliente)}
         </td>
         <td style="${TD};text-align:right;font-size:.68rem;${SEP}">${sk.length}</td>
-        <td style="${TD};text-align:right;font-size:.73rem;font-weight:700;
-                   font-variant-numeric:tabular-nums;${SEP}">${nUn(aQ)}</td>
-        <td style="${TD};text-align:right;font-size:.72rem;
-                   font-variant-numeric:tabular-nums;${SEP}">${nMM(aV)}</td>
+        <td style="padding:.4rem .7rem;font-size:.68rem;${SEP}">${celdaQV(aQ50, aV50, FILL[50].col, false, nMM)}</td>
+        <td style="padding:.4rem .7rem;font-size:.68rem;${SEP}">${celdaQV(aQ80, aV80, FILL[80].col, false, nMM)}</td>
+        <td style="padding:.4rem .7rem;font-size:.73rem;${SEP}">${celdaQV(aQ99, aV99, FILL[99].col, true, nMM)}</td>
         <td style="${TD};text-align:right;font-size:.68rem;color:var(--gn);${SEP}">${nUn(aSt)}</td>
         <td style="${TD};text-align:right;font-size:.68rem;color:#1F6FB2;${SEP}">${aBo > 0 ? nUn(aBo) : '—'}</td>
         <td style="padding:.4rem .7rem;${SEP}">${barraCob(aPct)}</td>
@@ -345,10 +410,11 @@
 
       if (open) {
         const TDD = 'padding:.25rem .7rem;font-size:.66rem;white-space:nowrap';
-        rows += `<tr style="background:var(--bg)"><td colspan="9" style="padding:0">
+        rows += `<tr style="background:var(--bg)"><td colspan="10" style="padding:0">
           <table style="width:100%;border-collapse:collapse">
-            <thead><tr>${thd('SKU')}${thd('PRODUCTO')}${thd('MARCA')}${thd('POR COMPRAR', 'right')}
-              ${thd('$ POR COMPRAR', 'right')}${thd('STOCK', 'right')}${thd('BACK ORDER', 'right')}
+            <thead><tr>${thd('SKU')}${thd('PRODUCTO')}${thd('MARCA')}
+              ${thd('POR COMPRAR 50%', 'right')}${thd('POR COMPRAR 80%', 'right')}${thd('POR COMPRAR 99%', 'right')}
+              ${thd('STOCK', 'right')}${thd('BACK ORDER', 'right')}
               ${thd('% STOCK DISPONIBLE')}</tr></thead>
             <tbody>${sk.map(s => `<tr>
               <td style="${TDD};padding-left:1.9rem;${SEP}">
@@ -357,9 +423,9 @@
               <td style="${TDD};color:var(--mut);max-width:280px;overflow:hidden;
                          text-overflow:ellipsis;${SEP}" title="${esc(s._s.prod)}">${esc(s._s.prod)}</td>
               <td style="${TDD};color:var(--mut);${SEP}">${esc(s._s.marca)}</td>
-              <td style="${TDD};text-align:right;font-weight:700;font-variant-numeric:tabular-nums;${SEP}"
-                  title="${nUn(skuQ(s._s, cf.vent))} un. en ${cf.vent} meses × ${String(cf.mult).replace('.', ',')}">${nUn(s.q)}</td>
-              <td style="${TDD};text-align:right;font-variant-numeric:tabular-nums;${SEP}">${nCLP(s.v)}</td>
+              <td style="padding:.25rem .7rem;${SEP}" title="fill rate 50%: 6 meses">${celdaQV(s.q50, s.v50, FILL[50].col)}</td>
+              <td style="padding:.25rem .7rem;${SEP}" title="fill rate 80%: 12 meses">${celdaQV(s.q80, s.v80, FILL[80].col)}</td>
+              <td style="padding:.25rem .7rem;${SEP}" title="fill rate 99%: 12 meses × 1,5 de colchón">${celdaQV(s.q99, s.v99, FILL[99].col, true)}</td>
               <td style="${TDD};text-align:right;font-variant-numeric:tabular-nums;${SEP};
                          color:${s.enInv ? (s.st > 0 ? 'var(--gn)' : 'var(--mut)') : 'var(--rd)'}">
                 ${s.enInv ? nUn(s.st) : 'no está'}</td>
@@ -374,18 +440,18 @@
     box.innerHTML = `
       <div style="overflow-x:auto;max-height:560px;overflow-y:auto">
         <table style="width:100%;border-collapse:collapse;min-width:1080px">
-          <thead><tr>${th('#', 'right')}${th('CLIENTE')}${th('SKU', 'right')}${th('POR COMPRAR', 'right')}
-            ${th('$ POR COMPRAR', 'right')}${th('STOCK', 'right')}${th('BACK ORDER', 'right')}
+          <thead><tr>${th('#', 'right')}${th('CLIENTE')}${th('SKU', 'right')}
+            ${th('POR COMPRAR 50%', 'right')}${th('POR COMPRAR 80%', 'right')}${th('POR COMPRAR 99%', 'right')}
+            ${th('STOCK', 'right')}${th('BACK ORDER', 'right')}
             ${th('% STOCK DISPONIBLE PARA CUBRIR CLIENTE')}${th('SKU CUBIERTOS', 'right')}
           </tr></thead>
           <tbody>${rows}</tbody>
           <tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">
             <td colspan="2" style="padding:.45rem .7rem;font-size:.72rem;${SEP}">TOTAL · ${t.length} clientes</td>
             <td style="padding:.45rem .7rem;text-align:right;font-size:.68rem;${SEP}">${tSku}</td>
-            <td style="padding:.45rem .7rem;text-align:right;font-size:.72rem;
-                       font-variant-numeric:tabular-nums;${SEP}">${nUn(tQ)}</td>
-            <td style="padding:.45rem .7rem;text-align:right;font-size:.72rem;
-                       font-variant-numeric:tabular-nums;${SEP}">${nMM(tV)}</td>
+            <td style="padding:.4rem .7rem;${SEP}">${celdaQV(tQ50, tV50, '#fff', false, nMM)}</td>
+            <td style="padding:.4rem .7rem;${SEP}">${celdaQV(tQ80, tV80, '#fff', false, nMM)}</td>
+            <td style="padding:.4rem .7rem;${SEP}">${celdaQV(tQ99, tV99, '#fff', true, nMM)}</td>
             <td style="padding:.45rem .7rem;text-align:right;font-size:.68rem;${SEP}">${nUn(tSt)}</td>
             <td style="padding:.45rem .7rem;text-align:right;font-size:.68rem;${SEP}">${nUn(tBo)}</td>
             <td style="padding:.4rem .7rem;${SEP}">${barraCob(tV > 0 ? tVCub / tV * 100 : 0, true)}</td>
@@ -395,14 +461,14 @@
       </div>
       <p style="font-size:.62rem;color:var(--mut);margin:.55rem 0 0;line-height:1.6">
         <strong>Fill rate ${cf.lbl}</strong> = tener en stock ${cf.desc}.
-        <strong>Por Comprar</strong> es esa demanda: lo que habría que tener de cada SKU para atender al
-        cliente${cf.mult !== 1 ? ', multiplicado por ' + String(cf.mult).replace('.', ',') : ''}.
-        No descuenta existencias ni órdenes en curso; el valorizado usa el precio de venta promedio del
-        mismo período.
-        <strong>% Stock Disponible</strong> es qué parte de esa demanda ya está cubierta entre el stock en
-        bodega y el back order. Por SKU es (Stock + Back Order) ÷ Por Comprar, topado en 100%; al resumir
-        por cliente se <strong>pondera por el valorizado de cada SKU</strong>, no por unidades, para que un
-        repuesto caro en quiebre pese lo que corresponde y no lo compensen muchas piezas baratas cubiertas.
+        Las columnas <strong>Por Comprar 50% / 80% / 99%</strong> muestran esa demanda para cada fill rate
+        objetivo, una al lado de la otra: arriba las unidades, abajo el monto valorizado a precio de venta
+        promedio del mismo período. Ninguna descuenta existencias ni órdenes en curso.
+        <strong>% Stock Disponible</strong> (calculado sobre el fill rate ${cf.lbl}, el elegido arriba en el
+        segmentador) es qué parte de esa demanda ya está cubierta entre el stock en bodega y el back order.
+        Por SKU es (Stock + Back Order) ÷ Por Comprar, topado en 100%; al resumir por cliente se
+        <strong>pondera por el valorizado de cada SKU</strong>, no por unidades, para que un repuesto caro en
+        quiebre pese lo que corresponde y no lo compensen muchas piezas baratas cubiertas.
         «Stock» es la existencia actual en bodega (hoja Inventario Bodega) y «no está» significa que el
         código no aparece en el inventario, por lo que se computa como cero.
         «Back Order» es la Cantidad Solicitada de la hoja Back Order cruzada por SKU.
@@ -549,6 +615,70 @@
     }
   }
 
+  // ── Curva de cobertura: $ Por Comprar según fill rate objetivo ────
+  // Puntos fijos en 50% y 80% (el modelo no cambia entre medio) y varios
+  // puntos entre 80% y 99% para dibujar la línea recta del colchón
+  // linealizado (1x → 1,5x) en vez de un salto.
+  const CURVA_PCTS = [50, 80, 83, 86, 89, 92, 95, 99];
+
+  function curvaClientes() {
+    const tod = ordenados();
+    if (_curvaModo === 'agregado') return tod;
+    if (_curvaModo === 'top20')    return tod.slice(0, 20);
+    return tod.slice(0, 10); // top10 e individual: tope en 10 para que la curva se pueda leer
+  }
+
+  function curvaValor(cliente, pct) {
+    const p = fillParams(pct);
+    let v = 0;
+    cliente.skus.forEach(s => { if (skuQ(s, p.vent) > 0) v += necP(s, pct).v; });
+    return v;
+  }
+
+  function curvaFill() {
+    const ctx = document.getElementById('cCrCurva');
+    if (!ctx || typeof Chart === 'undefined') return;
+    if (_ch5) { _ch5.destroy(); _ch5 = null; }
+    const clientes = curvaClientes();
+    const labels = CURVA_PCTS.map(p => p + '%');
+    const corto = s => s.length > 22 ? s.slice(0, 21) + '…' : s;
+    let datasets;
+    if (_curvaModo === 'individual') {
+      datasets = clientes.map((c, i) => ({
+        label: corto(c.cliente), data: CURVA_PCTS.map(p => curvaValor(c, p) / 1e6),
+        borderColor: PAL[i % PAL.length], backgroundColor: 'transparent',
+        borderWidth: 2, tension: .35, pointRadius: 3,
+      }));
+    } else {
+      const lblMap = { agregado: 'Agregado (' + clientes.length + ' clientes)', top10: 'Top 10', top20: 'Top 20' };
+      datasets = [{
+        label: lblMap[_curvaModo] || 'Clientes',
+        data: CURVA_PCTS.map(p => clientes.reduce((s, c) => s + curvaValor(c, p), 0) / 1e6),
+        borderColor: '#33448D', backgroundColor: 'rgba(51,68,141,.12)',
+        borderWidth: 2.5, tension: .35, pointRadius: 4, pointBackgroundColor: '#33448D', fill: true,
+      }];
+    }
+    _ch5 = new Chart(ctx.getContext('2d'), {
+      type: 'line',
+      data: { labels: labels, datasets: datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { family: FT, size: 9 } } },
+          tooltip: { titleFont: { family: FT }, bodyFont: { family: FT },
+            callbacks: { label: x => ' ' + x.dataset.label + ': ' + nMM((x.raw || 0) * 1e6) } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { family: FT, size: 10 } },
+               title: { display: true, text: 'Fill rate objetivo', font: { family: FT, size: 9 }, color: '#8B8200' } },
+          y: { beginAtZero: true, grid: { color: '#E2E6F0' },
+               ticks: { callback: v => 'MM$' + v, font: { family: FT, size: 10 } },
+               title: { display: true, text: '$ Por Comprar (MM$)', font: { family: FT, size: 9 }, color: '#8B8200' } }
+        }
+      }
+    });
+  }
+
   function render() {
     segmentadores();
     const per = document.getElementById('cr-per');
@@ -556,7 +686,7 @@
     const tag = document.getElementById('cr-tag');
     if (tag) tag.textContent = 'Clientes que más repuestos compran · ventana móvil de ' + _vent +
       ' meses (' + (_vent === 6 ? CR.periodo6 : CR.periodo12) + ') · ' + CR.n_clientes + ' clientes con compra';
-    kpis(); tablaTop(); graficos(); frKPIs(); tablaFill();
+    kpis(); tablaTop(); graficos(); frKPIs(); tablaFill(); curvaFill();
   }
 
   window.initCliRel = function () {

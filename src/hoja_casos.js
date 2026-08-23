@@ -226,19 +226,25 @@ function _flujoEtapa(cat) {
 // distinto: varios equipos detenidos suelen compartir el mismo contrato.
 function _flujoDatos(equipos) {
   const et = {};
-  _FLUJO.forEach(f => { et[f.k] = { eq: 0, cli: {}, ctr: {}, coment: [] }; });
+  _FLUJO.forEach(f => { et[f.k] = { eq: 0, cli: {}, ctr: {}, coment: [], mod: {} }; });
   const ctrGlobal = {};
   const cliGlobal = {};
+  const modGlobal = {};
   equipos.forEach(e => {
     const k = _flujoEtapa(_catComentario(e));
     const d = et[k];
     d.eq++;
+    const marca = _normMarca(e.marca);
+    const modKey = marca + ' ' + _familiaModelo(marca, e.modelo);
+    d.mod[modKey] = (d.mod[modKey] || 0) + 1;
+    modGlobal[modKey] = (modGlobal[modKey] || 0) + 1;
     const cli = (e.nombre_cliente || '').trim();
     if (cli) {
       const c = d.cli[cli] || (d.cli[cli] = { eq: 0, ctr: {} });
       c.eq++;
       if (e.contrato_num) c.ctr[e.contrato_num] = [e.fac_anual || 0, e.fac_ytd || 0];
-      const cg = cliGlobal[cli] || (cliGlobal[cli] = { ctr: {} });
+      const cg = cliGlobal[cli] || (cliGlobal[cli] = { eq: 0, ctr: {} });
+      cg.eq++;
       if (e.contrato_num) cg.ctr[e.contrato_num] = [e.fac_anual || 0, e.fac_ytd || 0];
     }
     if (e.contrato_num) {
@@ -261,9 +267,24 @@ function _flujoDatos(equipos) {
         cliente: c, eq: d.cli[c].eq,
         pct: (cliGlobal[c].ytd || 0) / totYtd * 100,
       })).sort((a, b) => b.eq - a.eq || b.pct - a.pct);
+    // Los 2 equipos (marca + familia) más frecuentes de la etapa, y qué
+    // parte de los equipos detenidos en esa etapa concentran entre los dos.
+    d.topMod = Object.keys(d.mod).map(m => ({ modelo: m, eq: d.mod[m] }))
+      .sort((a, b) => b.eq - a.eq).slice(0, 2);
+    d.topModPct = d.eq ? (d.topMod.reduce((a, m) => a + m.eq, 0) / d.eq * 100) : 0;
   });
+  const nEqTot = equipos.length;
+  // Top 3 clientes y top 3 equipos (marca + familia) del total, sin
+  // segmentar por etapa: para la tarjeta "Total" que resume todo el flujo.
+  const topCliGlobal = Object.keys(cliGlobal).map(c => ({
+      cliente: c, eq: cliGlobal[c].eq, pct: (cliGlobal[c].ytd || 0) / totYtd * 100,
+    })).sort((a, b) => b.eq - a.eq || b.pct - a.pct).slice(0, 3);
+  const topModGlobal = Object.keys(modGlobal).map(m => ({ modelo: m, eq: modGlobal[m] }))
+    .sort((a, b) => b.eq - a.eq).slice(0, 3)
+    .map(m => Object.assign(m, { pct: nEqTot ? m.eq / nEqTot * 100 : 0 }));
   return { et: et, totCtr: ctrGlobal, totCli: cliGlobal,
-           anual: suma(ctrGlobal, 0), ytd: suma(ctrGlobal, 1) };
+           anual: suma(ctrGlobal, 0), ytd: suma(ctrGlobal, 1),
+           topCliGlobal: topCliGlobal, topModGlobal: topModGlobal };
 }
 
 function _renderCasosFlujo(equipos) {
@@ -300,7 +321,17 @@ function _renderCasosFlujo(equipos) {
       '<div style="margin:.12rem 0 0 .55rem;font-size:.57rem;color:var(--mut);line-height:1.4">• ' +
       _escH(t.length > 90 ? t.slice(0, 88) + '…' : t) + '</div>').join('') ||
       '<div style="margin-left:.55rem;color:var(--mut);font-size:.6rem">—</div>';
-    return '<div style="flex:1;min-width:0;border:1px solid ' + f.col + ';border-top:3px solid ' + f.col +
+    // Métricas de concentración de la etapa: qué peso tiene sobre el total
+    // de equipos detenidos, sobre los clientes afectados y sobre la
+    // facturación total del panel, más los 2 equipos que más pesan en ella.
+    const pctEqEt  = nEq  ? (d.eq   / nEq  * 100) : 0;
+    const pctCliEt = nCli ? (d.nCli / nCli * 100) : 0;
+    const pctFacEt = facPanel ? (d.ytd / facPanel * 100) : 0;
+    const topMod = d.topMod.map(m =>
+      '<div style="margin:.12rem 0 0 .55rem;font-size:.6rem;line-height:1.4">• ' + _escH(m.modelo) +
+      ' <span style="color:var(--mut)">(' + m.eq + ' eq)</span></div>'
+    ).join('') || '<div style="margin-left:.55rem;color:var(--mut);font-size:.6rem">—</div>';
+    return '<div style="flex:1 1 190px;min-width:190px;border:1px solid ' + f.col + ';border-top:3px solid ' + f.col +
       ';border-radius:5px;padding:.55rem .6rem;background:var(--wh)">' +
       '<ul style="list-style:none;margin:0;padding:0;font-size:.63rem">' +
         li('N° Equipos', d.eq, f.col) +
@@ -310,12 +341,63 @@ function _renderCasosFlujo(equipos) {
       '</ul>' +
       '<div style="font-size:.6rem;color:var(--mut);margin-top:.35rem">Clientes más importantes</div>' + top +
       '<div style="font-size:.6rem;color:var(--mut);margin-top:.35rem">Comentario</div>' + com +
+      '<div style="margin-top:.5rem;padding-top:.4rem;border-top:1px dashed ' + f.col + '55">' +
+        '<ul style="list-style:none;margin:0;padding:0;font-size:.6rem">' +
+          li('% de equipos detenidos', pctEqEt.toFixed(0) + '%', f.col) +
+          li('% de clientes afectados', pctCliEt.toFixed(0) + '%') +
+          li('% de facturación total concentrada', pctFacEt.toFixed(0) + '%', 'var(--teal)') +
+        '</ul>' +
+        '<div style="font-size:.6rem;color:var(--mut);margin-top:.3rem">Equipos más relevantes</div>' + topMod +
+        (d.eq ? '<div style="margin:.15rem 0 0 .55rem;font-size:.58rem;color:var(--mut)">Concentran el ' +
+          d.topModPct.toFixed(0) + '% de los equipos de esta etapa</div>' : '') +
+      '</div>' +
+      '</div>';
+  };
+
+  // Tarjeta "Total": resume el flujo completo, sin segmentar por etapa —
+  // total de equipos y clientes, los clientes y los equipos (marca+familia)
+  // que más pesan en el total, y qué % de los clientes cae en cada etapa.
+  const tarjetaTotal = () => {
+    const li = (t, v, col) => '<li style="margin-bottom:.28rem;line-height:1.45"><span style="color:var(--mut)">' +
+      t + ':</span> <strong style="color:' + (col || 'var(--txt)') + '">' + v + '</strong></li>';
+    const topCli = D.topCliGlobal.map(c =>
+      '<div style="margin:.12rem 0 0 .55rem;font-size:.6rem;line-height:1.4">• ' + _escH(c.cliente) +
+      ' <span style="color:var(--mut)">(' + c.eq + ' eq · ' + c.pct.toFixed(0) + '% fact.)</span></div>'
+    ).join('') || '<div style="margin-left:.55rem;color:var(--mut);font-size:.6rem">—</div>';
+    const topMod = D.topModGlobal.map(m =>
+      '<div style="margin:.12rem 0 0 .55rem;font-size:.6rem;line-height:1.4">• ' + _escH(m.modelo) +
+      ' <span style="color:var(--mut)">(' + m.eq + ' eq · ' + m.pct.toFixed(0) + '%)</span></div>'
+    ).join('') || '<div style="margin-left:.55rem;color:var(--mut);font-size:.6rem">—</div>';
+    const porEtapa = _FLUJO.map(f => {
+      const d = D.et[f.k];
+      const pct = nCli ? (d.nCli / nCli * 100) : 0;
+      return '<div style="display:flex;justify-content:space-between;gap:.4rem;margin-top:.15rem;font-size:.6rem">' +
+        '<span style="color:var(--mut)">' + f.k + '</span><strong style="color:' + f.col + '">' +
+        pct.toFixed(0) + '%</strong></div>';
+    }).join('');
+    return '<div style="flex:1.15 1 210px;min-width:210px;border:1px solid #111827;border-top:3px solid #111827;' +
+      'border-radius:5px;padding:.55rem .6rem;background:var(--wh)">' +
+      '<div style="font-size:.63rem;font-weight:700;color:#111827;letter-spacing:.04em;margin-bottom:.35rem">TOTAL</div>' +
+      '<ul style="list-style:none;margin:0;padding:0;font-size:.63rem">' +
+        li('N° Equipos', nEq, '#111827') +
+        li('N° Clientes', nCli) +
+        li('% de facturación total', pctPanel.toFixed(0) + '%', 'var(--teal)') +
+        li('Fact. anual esperada', mm(D.anual), 'var(--az1)') +
+        li('Fact. a la fecha', mm(D.ytd), 'var(--teal)') +
+      '</ul>' +
+      '<div style="font-size:.6rem;color:var(--mut);margin-top:.35rem">Clientes más importantes</div>' + topCli +
+      '<div style="margin-top:.5rem;padding-top:.4rem;border-top:1px dashed #11182755">' +
+        '<div style="font-size:.6rem;color:var(--mut);margin-bottom:.1rem">% de clientes por etapa</div>' + porEtapa +
+      '</div>' +
+      '<div style="margin-top:.5rem;padding-top:.4rem;border-top:1px dashed #11182755">' +
+        '<div style="font-size:.6rem;color:var(--mut)">Equipos con más problemas (top 3)</div>' + topMod +
+      '</div>' +
       '</div>';
   };
 
   box.innerHTML =
     '<div style="display:flex;gap:3px;margin-bottom:.5rem">' + _FLUJO.map(chev).join('') + '</div>' +
-    '<div style="display:flex;gap:6px;align-items:stretch">' + _FLUJO.map(tarjeta).join('') + '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:stretch">' + _FLUJO.map(tarjeta).join('') + tarjetaTotal() + '</div>' +
     '<div style="margin-top:.7rem;padding:.55rem .8rem;background:rgba(40,210,195,.09);border-left:3px solid var(--teal);' +
       'border-radius:4px;font-size:.63rem;line-height:1.6">' +
       '<div>• Total <strong>' + nEq + ' equipos detenidos</strong>, en <strong>' + nCli +

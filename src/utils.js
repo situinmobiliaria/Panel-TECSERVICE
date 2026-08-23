@@ -9,8 +9,14 @@ const TOTAL_COM_VAL=DATA.filter(d=>d.tipo==='Comercial').reduce((s,d)=>s+d.val,0
 const TOTAL_GAR_VAL=DATA.filter(d=>d.tipo==='Garantia').reduce((s,d)=>s+d.val,0);
 const TOTAL_CARTERA_VAL=TOTAL_COM_VAL+TOTAL_GAR_VAL;
 const C={az1:'#002D73',az2:'#33448D',az3:'#0E2D55',te:'#28D2C3',am:'#FFC000',rd:'#C00000',gn:'#00832F',or:'#D46000',gy:'#E2E6F0',mut:'#B8C1D8'};
-Chart.defaults.font.family="'Roboto',sans-serif";
-Chart.defaults.color='#6B7BA8';
+// Si el CDN de Chart.js no cargó (red bloqueada, CDN caído), que el panel
+// siga funcionando igual: sólo los gráficos quedan sin dibujar, en vez de
+// que este ReferenceError tumbe TODO utils.js (incluida mm() y la pantalla
+// de carga, que van después en este mismo archivo).
+if(typeof Chart!=='undefined'){
+  Chart.defaults.font.family="'Roboto',sans-serif";
+  Chart.defaults.color='#6B7BA8';
+}
 
 // ─── HELPERS ──────────────────────────────────────────────────
 const mm=v=>(v===null||v===undefined||isNaN(v))?'—':'MM$'+fN1(v/1e6);

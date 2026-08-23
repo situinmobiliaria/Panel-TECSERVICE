@@ -125,6 +125,13 @@
 
     const rowBase    = (lbl,ar,ap,av,avp) => `<tr>${LBL(lbl,'.6rem')}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
     const rowSub     = (lbl,ar,ap,av,avp) => `<tr>${LBL('↳ '+lbl,'1.4rem')}${cells4mm(ar,ap,av,avp,'')}${tot4mm(ar,ap,'')}</tr>`;
+    // Apertura del Costo de ventas (técnicos/personal vs. repuestos y otros):
+    // el Excel sólo trae Real para esta apertura, sin presupuesto, así que
+    // las columnas PTTO/VAR/VAR% quedan en "—" en vez de mostrar un dato falso.
+    const dashCell = '<td class="num" style="color:var(--mut)">—</td>';
+    const rowSubReal = (lbl, ar) => `<tr>${LBL('↳ '+lbl,'1.4rem')}${
+      sm.map(i => cN(g(ar,i),false) + dashCell + dashCell + dashCell).join('')
+    }${cN(sumSel(ar),true) + dashCell + dashCell + dashCell}</tr>`;
     const rowPct     = (lbl,ar,ap,av,avp,numR,numP,denR,denP) =>
       `<tr>${LBL(lbl,'.6rem')}${cells4pct(ar,ap,av,avp)}${tot4pct(numR||ar,numP||ap,denR||R2.ingresos_totales,denP||R2.ingresos_totales_p)}</tr>`;
     const rowCeleste = (lbl,ar,ap,av,avp) => `<tr style="background:rgba(0,160,220,.13)">${LBLb(lbl,undefined,BG_CEL)}${cells4mm(ar,ap,av,avp,'bold')}${tot4mm(ar,ap,'bold')}</tr>`;
@@ -147,6 +154,8 @@
             ${rowSub('Ingresos por contratos (MM$)',R2.ingresos_contratos,R2.ingresos_contratos_p,R2.ingresos_contratos_v,R2.ingresos_contratos_vp)}
             ${rowSub('Ingresos por otras actividades (MM$)',R2.ingresos_otras,R2.ingresos_otras_p,R2.ingresos_otras_v,R2.ingresos_otras_vp)}
             ${rowBase('(−) Costo de ventas (MM$)',R2.costo_ventas,R2.costo_ventas_p,R2.costo_ventas_v,R2.costo_ventas_vp)}
+            ${R2.costo_tecnicos?rowSubReal('Costo Técnicos y Personal (MM$, sólo Real)',R2.costo_tecnicos):''}
+            ${R2.costo_repuestos?rowSubReal('Costo Repuestos y Otros (MM$, sólo Real)',R2.costo_repuestos):''}
             ${rowCeleste('= Margen del Producto (MM$)',R2.margen_mm,R2.margen_mm_p,R2.margen_mm_v,R2.margen_mm_vp)}
             ${rowPct('Margen %',R2.margen_pct,R2.margen_pct_p,R2.margen_pct_v,R2.margen_pct_vp, R2.margen_mm,R2.margen_mm_p,R2.ingresos_totales,R2.ingresos_totales_p)}
             ${sepRow('Gastos Operacionales Directos')}
@@ -404,6 +413,11 @@ async function eerrExportPDF() {
 
   let wrap = null;
   try {
+    // Clona preservando el mismo tamaño de fuente, padding y colores que la
+    // tabla en pantalla: antes se forzaba todo a 9px con 3px/6px de padding,
+    // lo que aplastaba la jerarquía tipográfica original y hacía que el PDF
+    // se viera distinto a lo que la tabla realmente muestra. Sólo se quita
+    // lo que impediría capturar el contenido completo (sticky/overflow).
     function cleanClone(el) {
       const c = el.cloneNode(true);
       c.querySelectorAll('*').forEach(n => {
@@ -412,17 +426,8 @@ async function eerrExportPDF() {
         n.style.overflow  = 'visible';
         n.style.maxWidth  = 'none';
       });
-      c.querySelectorAll('td,th').forEach(n => {
-        n.style.fontSize   = '9px';
-        n.style.padding    = '3px 6px';
-        n.style.lineHeight = '1.35';
-        n.style.whiteSpace = 'nowrap';
-      });
-      c.querySelectorAll('table').forEach(t => {
-        t.style.borderCollapse = 'collapse';
-        t.style.tableLayout    = 'auto';
-        t.style.width          = 'auto';
-      });
+      c.querySelectorAll('td,th').forEach(n => { n.style.whiteSpace = 'nowrap'; });
+      c.querySelectorAll('table').forEach(t => { t.style.width = 'auto'; });
       return c;
     }
 
@@ -455,8 +460,9 @@ async function eerrExportPDF() {
     // Misma nota que va al pie de la tabla en pantalla
     const nota = document.createElement('div');
     nota.style.cssText = 'font-size:8px;color:#555;line-height:1.5;margin-top:2px';
-    nota.innerHTML = 'El <strong>Costo por Ventas</strong> considera el gasto por beneficios a los ' +
-                     'empleados de los técnicos.';
+    nota.innerHTML = 'El <strong>Costo de Ventas</strong> se abre en <strong>Costo Técnicos y Personal</strong> ' +
+                     '(gasto por beneficios a los empleados técnicos) y <strong>Costo Repuestos y Otros</strong> ' +
+                     '(el resto, por diferencia). Esa apertura sólo existe en Real: el presupuesto no la distingue.';
     wrap.appendChild(nota);
 
     document.body.appendChild(wrap);

@@ -2434,6 +2434,35 @@ def read_inventario_ts(wb):
     }
 
 
+def read_costo_tecnicos(wb, n_meses):
+    """Costo de personal técnico dentro del Costo de Ventas.
+
+    Fuente: hoja "EERR S&S", bloque bajo "Presupuesto acumulado al periodo"
+    (fila "Costo Empresas Técnicos"), con 4 columnas por mes igual que la
+    sección EERR principal (Real = col 2 + i*4). Sólo trae el Real; el Excel
+    no tiene un presupuesto para esta apertura de "Costo de ventas" en
+    técnicos/personal vs. repuestos y otros, así que el resto ("Costo
+    Repuestos y Otros") se calcula como el residuo contra "Costo de ventas"
+    y también queda sólo en Real.
+    """
+    ws = next((wb[n] for n in wb.sheetnames if n.strip().upper() == "EERR S&S"), None)
+    if ws is None:
+        return [0.0] * n_meses
+    fila = None
+    for row in ws.iter_rows(min_row=1, max_row=80, values_only=True):
+        if len(row) > 1 and "TECNIC" in _norm_cli(row[1]) and "COSTO" in _norm_cli(row[1]):
+            fila = row
+            break
+    if fila is None:
+        return [0.0] * n_meses
+    out = []
+    for i in range(n_meses):
+        col = 2 + i * 4
+        v = to_float(fila[col]) if col < len(fila) else 0.0
+        out.append(round(-abs(v) / 1e6, 3))
+    return out
+
+
 def read_ratios2(wb):
     ws = None
     for name in wb.sheetnames:
@@ -2524,6 +2553,9 @@ def read_ratios2(wb):
     r44, p44, v44, vp44 = row4(44)
     r45, p45, v45, vp45 = row4(45)
 
+    costo_tecnicos  = read_costo_tecnicos(wb, n)
+    costo_repuestos = [round(r9[i] - costo_tecnicos[i], 3) for i in range(n)]
+
     return {
         "mes_cierre": mes_cierre, "meses": MESES[:n],
         # Ingresos
@@ -2532,6 +2564,10 @@ def read_ratios2(wb):
         "ingresos_otras":    r8,  "ingresos_otras_p":    p8,  "ingresos_otras_v":    v8,  "ingresos_otras_vp":    vp8,
         # Costo y margen
         "costo_ventas":      r9,  "costo_ventas_p":      p9,  "costo_ventas_v":      v9,  "costo_ventas_vp":      vp9,
+        # Apertura de "Costo de ventas" en técnicos/personal vs. repuestos y
+        # otros. Sólo Real: el Excel no presupuesta esta apertura.
+        "costo_tecnicos":    costo_tecnicos,
+        "costo_repuestos":   costo_repuestos,
         "margen_mm":         r10, "margen_mm_p":         p10, "margen_mm_v":         v10, "margen_mm_vp":         vp10,
         "margen_pct":        r11, "margen_pct_p":        p11, "margen_pct_v":        v11, "margen_pct_vp":        vp11,
         # Gastos directos
