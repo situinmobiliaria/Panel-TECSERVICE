@@ -579,7 +579,7 @@ async function vgGarExportPDF(){
     wrap.style.width   = realW + 'px';
 
     const canvas = await html2canvas(wrap, {
-      scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
+      scale: hdEscala(realW, realH), backgroundColor: '#ffffff', useCORS: true, logging: false,
       width: realW, height: realH, windowWidth: realW, windowHeight: realH,
     });
 
@@ -589,9 +589,10 @@ async function vgGarExportPDF(){
     const pageH = realH * MM_PX;
     const pdf = new jsPDF({
       orientation: pageW >= pageH ? 'landscape' : 'portrait',
-      unit: 'mm', format: [pageW, pageH],
+      unit: 'mm', format: [pageW, pageH], compress: true,
     });
-    pdf.addImage(canvas.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, pageW, pageH);
+    const im = hdImagen(canvas);
+    pdf.addImage(im.data, im.fmt, 0, 0, pageW, pageH);
     const suf = _vgGarLinea === 'todas' ? '' : '_' + _vgGarLinea.replace(/[\s/]+/g, '_');
     pdf.save('Contratos_Garantia_TS' + suf + '_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
 

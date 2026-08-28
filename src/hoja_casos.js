@@ -101,6 +101,18 @@ function _casosHTML() {
     </div>
   </div>
 
+  <!-- Resumen por Marca -->
+  <div class="card" style="margin-top:.9rem">
+    <div class="ch" style="background:linear-gradient(135deg,rgba(255,160,0,.18),rgba(255,160,0,.06));flex-wrap:wrap;gap:.4rem">
+      <span class="ct" style="color:var(--am)">Resumen por Marca</span>
+      <span style="font-size:.58rem;color:var(--mut)" id="cas-marca-count">&mdash;</span>
+      <button id="cas-marca-pdf" onclick="casosMarcaExportPDF()"
+        style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;
+               border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar PDF</button>
+    </div>
+    <div class="cb"><div id="cas-marca-tabla"></div></div>
+  </div>
+
   <!-- Tabla 2: Equipos Detenidos -->
   <div class="card" style="margin-top:.9rem">
     <div class="ch" style="background:linear-gradient(135deg,rgba(255,160,0,.18),rgba(255,160,0,.06));flex-wrap:wrap;gap:.4rem">
@@ -128,7 +140,7 @@ function _casosHTML() {
     <style>.cas-sel{font-size:.62rem;border:1px solid var(--brd);border-radius:5px;padding:.22rem .45rem;
       background:#fff;color:var(--txt);font-family:'Roboto',sans-serif;max-width:190px}</style>
     <div style="overflow-x:auto">
-      <table class="tbl" id="cas-table2" style="min-width:1950px">
+      <table class="tbl" id="cas-table2" style="min-width:2150px">
         <thead><tr>
           <th style="min-width:120px">Modelo</th>
           <th style="min-width:200px">Nombre Activo</th>
@@ -136,8 +148,10 @@ function _casosHTML() {
           <th style="min-width:90px">Marca</th>
           <th style="min-width:100px">Estado</th>
           <th style="min-width:110px">Coordinadora</th>
-          <th style="min-width:150px">Tipo de Comentario</th>
-          <th style="min-width:260px">Comentario Coordinadora</th>
+          <th style="min-width:170px">Comentario</th>
+          <th style="min-width:230px">Comentario Coordinadora</th>
+          <th style="min-width:105px">Fecha Ingreso</th>
+          <th style="min-width:110px">Costo Equipo</th>
           <th style="min-width:90px">N° Contrato</th>
           <th style="min-width:120px">Estado Garantía</th>
           <th style="min-width:200px">Nombre Cliente</th>
@@ -223,67 +237,88 @@ function _flujoEtapa(cat) {
 }
 
 // Agrega los equipos por etapa. La facturación se acumula por contrato
-// distinto: varios equipos detenidos suelen compartir el mismo contrato.
+// distinto: varios equipos detenidos suelen compartir el mismo contrato y
+// sumarla por equipo la multiplicaría. El valorizado, en cambio, sí es por
+// equipo: es el costo CIF de cada uno.
 function _flujoDatos(equipos) {
   const et = {};
-  _FLUJO.forEach(f => { et[f.k] = { eq: 0, cli: {}, ctr: {}, coment: [], mod: {} }; });
-  const ctrGlobal = {};
-  const cliGlobal = {};
-  const modGlobal = {};
+  _FLUJO.forEach(f => {
+    et[f.k] = { eq: 0, cli: {}, ctr: {}, coment: [], mod: {}, marca: {}, cif: 0 };
+  });
+  const ctrG = {}, cliG = {}, modG = {}, marcaG = {};
+  let cifG = 0;
+
   equipos.forEach(e => {
-    const k = _flujoEtapa(_catComentario(e));
-    const d = et[k];
+    const d = et[_flujoEtapa(_catComentario(e))];
     d.eq++;
+    const cif = +e.costo_cif || 0;
+    d.cif += cif;
+    cifG += cif;
+
     const marca = _normMarca(e.marca);
+    d.marca[marca] = d.marca[marca] || { eq: 0, cif: 0 };
+    d.marca[marca].eq++; d.marca[marca].cif += cif;
+    marcaG[marca] = (marcaG[marca] || 0) + 1;
+
     const modKey = marca + ' ' + _familiaModelo(marca, e.modelo);
     d.mod[modKey] = (d.mod[modKey] || 0) + 1;
-    modGlobal[modKey] = (modGlobal[modKey] || 0) + 1;
+    modG[modKey]  = (modG[modKey]  || 0) + 1;
+
     const cli = (e.nombre_cliente || '').trim();
     if (cli) {
       const c = d.cli[cli] || (d.cli[cli] = { eq: 0, ctr: {} });
       c.eq++;
-      if (e.contrato_num) c.ctr[e.contrato_num] = [e.fac_anual || 0, e.fac_ytd || 0];
-      const cg = cliGlobal[cli] || (cliGlobal[cli] = { eq: 0, ctr: {} });
-      cg.eq++;
-      if (e.contrato_num) cg.ctr[e.contrato_num] = [e.fac_anual || 0, e.fac_ytd || 0];
+      const g = cliG[cli] || (cliG[cli] = { eq: 0, ctr: {} });
+      g.eq++;
+      if (e.contrato_num) {
+        c.ctr[e.contrato_num] = [e.fac_anual || 0, e.fac_ytd || 0];
+        g.ctr[e.contrato_num] = [e.fac_anual || 0, e.fac_ytd || 0];
+      }
     }
     if (e.contrato_num) {
       d.ctr[e.contrato_num] = [e.fac_anual || 0, e.fac_ytd || 0];
-      ctrGlobal[e.contrato_num] = [e.fac_anual || 0, e.fac_ytd || 0];
+      ctrG[e.contrato_num]  = [e.fac_anual || 0, e.fac_ytd || 0];
     }
     const txt = (e.comentario_coord || '').trim();
     if (txt && d.coment.indexOf(txt) < 0) d.coment.push(txt);
   });
-  const suma = (o, i) => Object.keys(o).reduce((a, k) => a + o[k][i], 0);
-  const totYtd = suma(ctrGlobal, 1) || 1;
-  Object.keys(cliGlobal).forEach(c => { cliGlobal[c].ytd = suma(cliGlobal[c].ctr, 1); });
+
+  const suma  = (o, i) => Object.keys(o).reduce((a, k) => a + o[k][i], 0);
+  const totYtd = suma(ctrG, 1) || 1;
+  Object.keys(cliG).forEach(c => { cliG[c].ytd = suma(cliG[c].ctr, 1); });
+
   _FLUJO.forEach(f => {
     const d = et[f.k];
-    d.anual = suma(d.ctr, 0);
-    d.ytd   = suma(d.ctr, 1);
-    d.nCli  = Object.keys(d.cli).length;
-    d.nCtr  = Object.keys(d.ctr).length;
-    d.top   = Object.keys(d.cli).map(c => ({
-        cliente: c, eq: d.cli[c].eq,
-        pct: (cliGlobal[c].ytd || 0) / totYtd * 100,
+    d.anual   = suma(d.ctr, 0);
+    d.ytd     = suma(d.ctr, 1);
+    d.nCli    = Object.keys(d.cli).length;
+    d.nCtr    = Object.keys(d.ctr).length;
+    d.nMarcas = Object.keys(d.marca).length;
+    d.pctCif  = cifG ? d.cif / cifG * 100 : 0;
+    d.anualProm = d.nCli ? d.anual / d.nCli : 0;
+    d.top = Object.keys(d.cli).map(c => ({
+        cliente: c, eq: d.cli[c].eq, pct: (cliG[c].ytd || 0) / totYtd * 100,
       })).sort((a, b) => b.eq - a.eq || b.pct - a.pct);
-    // Los 2 equipos (marca + familia) más frecuentes de la etapa, y qué
-    // parte de los equipos detenidos en esa etapa concentran entre los dos.
+    d.marcas = Object.keys(d.marca).map(m => ({
+        marca: m, eq: d.marca[m].eq, cif: d.marca[m].cif,
+        pct: d.cif ? d.marca[m].cif / d.cif * 100 : 0,
+      })).sort((a, b) => b.cif - a.cif || b.eq - a.eq);
     d.topMod = Object.keys(d.mod).map(m => ({ modelo: m, eq: d.mod[m] }))
       .sort((a, b) => b.eq - a.eq).slice(0, 2);
-    d.topModPct = d.eq ? (d.topMod.reduce((a, m) => a + m.eq, 0) / d.eq * 100) : 0;
+    d.topModPct = d.eq ? d.topMod.reduce((a, m) => a + m.eq, 0) / d.eq * 100 : 0;
   });
+
   const nEqTot = equipos.length;
-  // Top 3 clientes y top 3 equipos (marca + familia) del total, sin
-  // segmentar por etapa: para la tarjeta "Total" que resume todo el flujo.
-  const topCliGlobal = Object.keys(cliGlobal).map(c => ({
-      cliente: c, eq: cliGlobal[c].eq, pct: (cliGlobal[c].ytd || 0) / totYtd * 100,
+  const topCliGlobal = Object.keys(cliG).map(c => ({
+      cliente: c, eq: cliG[c].eq, pct: (cliG[c].ytd || 0) / totYtd * 100,
     })).sort((a, b) => b.eq - a.eq || b.pct - a.pct).slice(0, 3);
-  const topModGlobal = Object.keys(modGlobal).map(m => ({ modelo: m, eq: modGlobal[m] }))
+  const topModGlobal = Object.keys(modG).map(m => ({ modelo: m, eq: modG[m] }))
     .sort((a, b) => b.eq - a.eq).slice(0, 3)
     .map(m => Object.assign(m, { pct: nEqTot ? m.eq / nEqTot * 100 : 0 }));
-  return { et: et, totCtr: ctrGlobal, totCli: cliGlobal,
-           anual: suma(ctrGlobal, 0), ytd: suma(ctrGlobal, 1),
+
+  return { et: et, totCtr: ctrG, totCli: cliG, cif: cifG,
+           nMarcas: Object.keys(marcaG).length,
+           anual: suma(ctrG, 0), ytd: suma(ctrG, 1),
            topCliGlobal: topCliGlobal, topModGlobal: topModGlobal };
 }
 
@@ -291,129 +326,136 @@ function _renderCasosFlujo(equipos) {
   const box = document.getElementById('cas-flujo');
   if (!box) return;
   const D = _flujoDatos(equipos);
-  const nEq = equipos.length;
+  const nEq  = equipos.length;
   const nCli = Object.keys(D.totCli).length;
   const sumaEt = _FLUJO.reduce((a, f) => a + D.et[f.k].nCli, 0);
   const facPanel = ((window.APP_DATA || {}).fact_clientes || [])
     .reduce((a, c) => a + (c.real || 0), 0);
   const pctPanel = facPanel ? D.ytd / facPanel * 100 : 0;
+  const pc0 = v => (v || 0).toFixed(0) + '%';
 
   // Chevron: punta a la derecha salvo en la última etapa
   const chev = (f, i) => {
-    const ult = i === _FLUJO.length - 1;
+    const ult   = i === _FLUJO.length - 1;
     const claro = i < 2;
     return '<div style="flex:1;min-width:0;background:' + f.col +
       ';color:' + (claro ? '#1B2A6B' : '#fff') + ';font-size:.63rem;font-weight:700;text-align:center;' +
       'padding:.4rem .5rem .4rem ' + (i ? '1.1rem' : '.6rem') + ';white-space:nowrap;overflow:hidden;' +
-      'text-overflow:ellipsis;clip-path:polygon(0 0,' + (ult ? '100% 0,100% 50%,100% 100%' : 'calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%') +
+      'text-overflow:ellipsis;clip-path:polygon(0 0,' +
+      (ult ? '100% 0,100% 50%,100% 100%' : 'calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%') +
       ',0 100%' + (i ? ',14px 50%' : '') + ')">' + f.k + '</div>';
   };
 
+  const li = (t, v, col) =>
+    '<li style="display:flex;justify-content:space-between;gap:.4rem;margin-bottom:.26rem;line-height:1.4">' +
+    '<span style="color:var(--mut)">' + t + '</span>' +
+    '<strong style="color:' + (col || 'var(--txt)') + ';white-space:nowrap">' + v + '</strong></li>';
+  const sub = t => '<div style="font-size:.59rem;color:var(--mut);margin-top:.4rem;' +
+    'text-transform:uppercase;letter-spacing:.04em">' + t + '</div>';
+  const vacio = '<div style="margin-left:.5rem;color:var(--mut);font-size:.6rem">—</div>';
+
   const tarjeta = f => {
     const d = D.et[f.k];
-    const li = (t, v, col) => '<li style="margin-bottom:.28rem;line-height:1.45"><span style="color:var(--mut)">' +
-      t + ':</span> <strong style="color:' + (col || 'var(--txt)') + '">' + v + '</strong></li>';
     const top = d.top.slice(0, 3).map(c =>
-      '<div style="margin:.12rem 0 0 .55rem;font-size:.6rem;line-height:1.4">• ' + _escH(c.cliente) +
-      ' <span style="color:var(--mut)">(' + c.eq + ' eq · ' + c.pct.toFixed(0) + '% fact.)</span></div>'
-    ).join('') || '<div style="margin-left:.55rem;color:var(--mut);font-size:.6rem">—</div>';
-    const com = d.coment.slice(0, 2).map(t =>
-      '<div style="margin:.12rem 0 0 .55rem;font-size:.57rem;color:var(--mut);line-height:1.4">• ' +
-      _escH(t.length > 90 ? t.slice(0, 88) + '…' : t) + '</div>').join('') ||
-      '<div style="margin-left:.55rem;color:var(--mut);font-size:.6rem">—</div>';
-    // Métricas de concentración de la etapa: qué peso tiene sobre el total
-    // de equipos detenidos, sobre los clientes afectados y sobre la
-    // facturación total del panel, más los 2 equipos que más pesan en ella.
-    const pctEqEt  = nEq  ? (d.eq   / nEq  * 100) : 0;
-    const pctCliEt = nCli ? (d.nCli / nCli * 100) : 0;
-    const pctFacEt = facPanel ? (d.ytd / facPanel * 100) : 0;
+      '<div style="margin:.1rem 0 0 .5rem;font-size:.6rem;line-height:1.35">• ' + _escH(c.cliente) +
+      ' <span style="color:var(--mut)">(' + c.eq + ' eq · ' + pc0(c.pct) + ' fact.)</span></div>').join('') || vacio;
+    // Desglose de valorización por marca, justo bajo el valorizado total
+    const marcas = d.marcas.slice(0, 4).map(m =>
+      '<div style="display:flex;justify-content:space-between;gap:.4rem;margin:.1rem 0 0 .5rem;' +
+      'font-size:.6rem;line-height:1.35"><span>• ' + _escH(m.marca) +
+      ' <span style="color:var(--mut)">(' + m.eq + ')</span></span>' +
+      '<span style="white-space:nowrap;color:var(--or);font-weight:600">' + mm(m.cif) +
+      ' <span style="color:var(--mut);font-weight:400">' + pc0(m.pct) + '</span></span></div>').join('') || vacio;
     const topMod = d.topMod.map(m =>
-      '<div style="margin:.12rem 0 0 .55rem;font-size:.6rem;line-height:1.4">• ' + _escH(m.modelo) +
-      ' <span style="color:var(--mut)">(' + m.eq + ' eq)</span></div>'
-    ).join('') || '<div style="margin-left:.55rem;color:var(--mut);font-size:.6rem">—</div>';
-    return '<div style="flex:1 1 190px;min-width:190px;border:1px solid ' + f.col + ';border-top:3px solid ' + f.col +
-      ';border-radius:5px;padding:.55rem .6rem;background:var(--wh)">' +
-      '<ul style="list-style:none;margin:0;padding:0;font-size:.63rem">' +
+      '<div style="margin:.1rem 0 0 .5rem;font-size:.6rem;line-height:1.35">• ' + _escH(m.modelo) +
+      ' <span style="color:var(--mut)">(' + m.eq + ' eq)</span></div>').join('') || vacio;
+
+    return '<div style="flex:1 1 200px;min-width:200px;border:1px solid ' + f.col +
+      ';border-top:3px solid ' + f.col + ';border-radius:5px;padding:.55rem .6rem;background:var(--wh)">' +
+      '<ul style="list-style:none;margin:0;padding:0;font-size:.62rem">' +
         li('N° Equipos', d.eq, f.col) +
         li('N° Clientes', d.nCli) +
+        li('N° Marcas', d.nMarcas) +
         li('Fact. anual esperada', mm(d.anual), 'var(--az1)') +
         li('Fact. a la fecha', mm(d.ytd), 'var(--teal)') +
+        li('Fact. anual prom. x cliente', mm(d.anualProm), 'var(--az2)') +
       '</ul>' +
-      '<div style="font-size:.6rem;color:var(--mut);margin-top:.35rem">Clientes más importantes</div>' + top +
-      '<div style="font-size:.6rem;color:var(--mut);margin-top:.35rem">Comentario</div>' + com +
+      sub('Valorizado de los equipos') +
+      '<ul style="list-style:none;margin:.1rem 0 0;padding:0;font-size:.62rem">' +
+        li('Valorizado total', mm(d.cif), 'var(--or)') +
+        li('% del valorizado detenido', pc0(d.pctCif), 'var(--or)') +
+      '</ul>' + marcas +
+      sub('Clientes más importantes') + top +
+      sub('Equipos más relevantes') + topMod +
+      (d.eq ? '<div style="margin:.15rem 0 0 .5rem;font-size:.57rem;color:var(--mut)">Concentran el ' +
+        pc0(d.topModPct) + ' de los equipos de la etapa</div>' : '') +
       '<div style="margin-top:.5rem;padding-top:.4rem;border-top:1px dashed ' + f.col + '55">' +
         '<ul style="list-style:none;margin:0;padding:0;font-size:.6rem">' +
-          li('% de equipos detenidos', pctEqEt.toFixed(0) + '%', f.col) +
-          li('% de clientes afectados', pctCliEt.toFixed(0) + '%') +
-          li('% de facturación total concentrada', pctFacEt.toFixed(0) + '%', 'var(--teal)') +
-        '</ul>' +
-        '<div style="font-size:.6rem;color:var(--mut);margin-top:.3rem">Equipos más relevantes</div>' + topMod +
-        (d.eq ? '<div style="margin:.15rem 0 0 .55rem;font-size:.58rem;color:var(--mut)">Concentran el ' +
-          d.topModPct.toFixed(0) + '% de los equipos de esta etapa</div>' : '') +
-      '</div>' +
-      '</div>';
+          li('% de equipos detenidos', pc0(nEq ? d.eq / nEq * 100 : 0), f.col) +
+          li('% de clientes afectados', pc0(nCli ? d.nCli / nCli * 100 : 0)) +
+          li('% de facturación del año', pc0(facPanel ? d.ytd / facPanel * 100 : 0), 'var(--teal)') +
+        '</ul></div></div>';
   };
 
-  // Tarjeta "Total": resume el flujo completo, sin segmentar por etapa —
-  // total de equipos y clientes, los clientes y los equipos (marca+familia)
-  // que más pesan en el total, y qué % de los clientes cae en cada etapa.
+  // Tarjeta Total: el flujo completo, sin segmentar
   const tarjetaTotal = () => {
-    const li = (t, v, col) => '<li style="margin-bottom:.28rem;line-height:1.45"><span style="color:var(--mut)">' +
-      t + ':</span> <strong style="color:' + (col || 'var(--txt)') + '">' + v + '</strong></li>';
     const topCli = D.topCliGlobal.map(c =>
-      '<div style="margin:.12rem 0 0 .55rem;font-size:.6rem;line-height:1.4">• ' + _escH(c.cliente) +
-      ' <span style="color:var(--mut)">(' + c.eq + ' eq · ' + c.pct.toFixed(0) + '% fact.)</span></div>'
-    ).join('') || '<div style="margin-left:.55rem;color:var(--mut);font-size:.6rem">—</div>';
+      '<div style="margin:.1rem 0 0 .5rem;font-size:.6rem;line-height:1.35">• ' + _escH(c.cliente) +
+      ' <span style="color:var(--mut)">(' + c.eq + ' eq · ' + pc0(c.pct) + ' fact.)</span></div>').join('') || vacio;
     const topMod = D.topModGlobal.map(m =>
-      '<div style="margin:.12rem 0 0 .55rem;font-size:.6rem;line-height:1.4">• ' + _escH(m.modelo) +
-      ' <span style="color:var(--mut)">(' + m.eq + ' eq · ' + m.pct.toFixed(0) + '%)</span></div>'
-    ).join('') || '<div style="margin-left:.55rem;color:var(--mut);font-size:.6rem">—</div>';
+      '<div style="margin:.1rem 0 0 .5rem;font-size:.6rem;line-height:1.35">• ' + _escH(m.modelo) +
+      ' <span style="color:var(--mut)">(' + m.eq + ' eq · ' + pc0(m.pct) + ')</span></div>').join('') || vacio;
     const porEtapa = _FLUJO.map(f => {
       const d = D.et[f.k];
-      const pct = nCli ? (d.nCli / nCli * 100) : 0;
-      return '<div style="display:flex;justify-content:space-between;gap:.4rem;margin-top:.15rem;font-size:.6rem">' +
-        '<span style="color:var(--mut)">' + f.k + '</span><strong style="color:' + f.col + '">' +
-        pct.toFixed(0) + '%</strong></div>';
-    }).join('');
-    return '<div style="flex:1.15 1 210px;min-width:210px;border:1px solid #111827;border-top:3px solid #111827;' +
-      'border-radius:5px;padding:.55rem .6rem;background:var(--wh)">' +
-      '<div style="font-size:.63rem;font-weight:700;color:#111827;letter-spacing:.04em;margin-bottom:.35rem">TOTAL</div>' +
-      '<ul style="list-style:none;margin:0;padding:0;font-size:.63rem">' +
-        li('N° Equipos', nEq, '#111827') +
+      if (!d.eq) return '';
+      return '<div style="display:flex;justify-content:space-between;gap:.4rem;margin:.1rem 0 0 .5rem;' +
+        'font-size:.6rem;line-height:1.35"><span>• ' + f.k + '</span><span style="white-space:nowrap">' +
+        d.nCli + ' cli <span style="color:var(--mut)">(' + pc0(nCli ? d.nCli / nCli * 100 : 0) +
+        ')</span></span></div>';
+    }).join('') || vacio;
+    return '<div style="flex:1 1 200px;min-width:200px;border:1px solid var(--az1);border-top:3px solid var(--az1);' +
+      'border-radius:5px;padding:.55rem .6rem;background:rgba(0,45,115,.04)">' +
+      '<div style="font-size:.66rem;font-weight:800;color:var(--az1);margin-bottom:.35rem">TOTAL</div>' +
+      '<ul style="list-style:none;margin:0;padding:0;font-size:.62rem">' +
+        li('N° Equipos', nEq, 'var(--az1)') +
         li('N° Clientes', nCli) +
-        li('% de facturación total', pctPanel.toFixed(0) + '%', 'var(--teal)') +
+        li('N° Marcas', D.nMarcas) +
         li('Fact. anual esperada', mm(D.anual), 'var(--az1)') +
         li('Fact. a la fecha', mm(D.ytd), 'var(--teal)') +
+        li('Fact. anual prom. x cliente', mm(nCli ? D.anual / nCli : 0), 'var(--az2)') +
       '</ul>' +
-      '<div style="font-size:.6rem;color:var(--mut);margin-top:.35rem">Clientes más importantes</div>' + topCli +
-      '<div style="margin-top:.5rem;padding-top:.4rem;border-top:1px dashed #11182755">' +
-        '<div style="font-size:.6rem;color:var(--mut);margin-bottom:.1rem">% de clientes por etapa</div>' + porEtapa +
-      '</div>' +
-      '<div style="margin-top:.5rem;padding-top:.4rem;border-top:1px dashed #11182755">' +
-        '<div style="font-size:.6rem;color:var(--mut)">Equipos con más problemas (top 3)</div>' + topMod +
-      '</div>' +
+      sub('Valorizado de los equipos') +
+      '<ul style="list-style:none;margin:.1rem 0 0;padding:0;font-size:.62rem">' +
+        li('Valorizado total', mm(D.cif), 'var(--or)') +
+        li('% del valorizado detenido', '100%', 'var(--or)') +
+      '</ul>' +
+      sub('Clientes más importantes') + topCli +
+      sub('Equipos más relevantes') + topMod +
+      sub('% de clientes por etapa') + porEtapa +
       '</div>';
   };
 
   box.innerHTML =
     '<div style="display:flex;gap:3px;margin-bottom:.5rem">' + _FLUJO.map(chev).join('') + '</div>' +
-    '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:stretch">' + _FLUJO.map(tarjeta).join('') + tarjetaTotal() + '</div>' +
-    '<div style="margin-top:.7rem;padding:.55rem .8rem;background:rgba(40,210,195,.09);border-left:3px solid var(--teal);' +
-      'border-radius:4px;font-size:.63rem;line-height:1.6">' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:stretch">' +
+      _FLUJO.map(tarjeta).join('') + tarjetaTotal() + '</div>' +
+    '<div style="margin-top:.7rem;padding:.55rem .8rem;background:rgba(40,210,195,.09);' +
+      'border-left:3px solid var(--teal);border-radius:4px;font-size:.63rem;line-height:1.6">' +
       '<div>• Total <strong>' + nEq + ' equipos detenidos</strong>, en <strong>' + nCli +
-        ' clientes</strong>, que representan un <strong>' + pctPanel.toFixed(0) +
-        '%</strong> de la facturación total del año.</div>' +
+        ' clientes</strong> y <strong>' + D.nMarcas + ' marcas</strong>, que representan un <strong>' +
+        pc0(pctPanel) + '</strong> de la facturación total del año.</div>' +
       '<div>• Facturación real a la fecha de esos clientes <strong>' + mm(D.ytd) +
         '</strong> vs. esperada <strong>' + mm(D.anual) + '</strong>.</div>' +
+      '<div>• Valorizado de los equipos detenidos <strong>' + mm(D.cif) + '</strong>.</div>' +
       (sumaEt > nCli ? '<div style="color:var(--mut);font-size:.6rem;margin-top:.15rem">' +
         'Los clientes de cada etapa suman ' + sumaEt + ' porque ' + (sumaEt - nCli) +
         ' aparece' + (sumaEt - nCli > 1 ? 'n' : '') + ' en más de una etapa; el total sin repetir es ' +
         nCli + '.</div>' : '') +
     '</div>';
 
-  const sub = document.getElementById('cas-flujo-sub');
-  if (sub) sub.textContent = nEq + ' equipos · ' + nCli + ' clientes · ' +
-    Object.keys(D.totCtr).length + ' contratos';
+  const st = document.getElementById('cas-flujo-sub');
+  if (st) st.textContent = nEq + ' equipos · ' + nCli + ' clientes · ' +
+    Object.keys(D.totCtr).length + ' contratos · ' + mm(D.cif) + ' valorizado';
 }
 
 // ── EXPORTAR EL FLUJO A PDF ───────────────────────────────────────
@@ -450,14 +492,16 @@ async function casosFlujoExportPDF() {
     const realH = Math.ceil(wrap.getBoundingClientRect().height) || wrap.offsetHeight;
     if (!realW || !realH) throw new Error('No se pudo medir el contenido');
     const canvas = await html2canvas(wrap, {
-      scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
+      scale: hdEscala(realW, realH), backgroundColor: '#ffffff', useCORS: true, logging: false,
       width: realW, height: realH, windowWidth: realW, windowHeight: realH,
     });
     const { jsPDF } = window.jspdf;
     const MM_PX = 25.4 / 96;
     const pw = realW * MM_PX, ph = realH * MM_PX;
-    const pdf = new jsPDF({ orientation: pw >= ph ? 'landscape' : 'portrait', unit: 'mm', format: [pw, ph] });
-    pdf.addImage(canvas.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, pw, ph);
+    const pdf = new jsPDF({ orientation: pw >= ph ? 'landscape' : 'portrait', unit: 'mm',
+                            format: [pw, ph], compress: true });
+    const im = hdImagen(canvas);
+    pdf.addImage(im.data, im.fmt, 0, 0, pw, ph);
     pdf.save('Equipos_Detenidos_TS_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
   } catch (err) {
     console.error('casosFlujoExportPDF:', err);
@@ -681,10 +725,14 @@ function renderCasos() {
         <td style="text-align:center">${(() => {
           const k = _catComentario(e), col = _CAT_COLOR[k] || '#6B7BA8';
           return `<span title="${_escH(k)}" style="background:${col}1A;color:${col};border:1px solid ${col}55;
-                    padding:.08rem .35rem;border-radius:3px;font-size:.53rem;font-weight:700;
+                    padding:.08rem .35rem;border-radius:3px;font-size:.55rem;font-weight:700;
                     white-space:nowrap">${_escH(_catCorto(k))}</span>`;
         })()}</td>
-        <td><div style="font-size:.6rem;line-height:1.5;max-width:280px;color:#111;font-weight:600">${_escH(e.comentario_coord)||_dash}</div></td>
+        <td><div style="font-size:.6rem;line-height:1.5;max-width:250px;color:var(--mut)">${_escH(e.comentario_coord)||_dash}</div></td>
+        <td style="text-align:center">${_mono(e.fecha_ingreso)}</td>
+        <td style="text-align:right">${e.costo_cif>0
+          ? `<span style="font-size:.63rem;font-weight:700;color:var(--or);font-family:'Roboto Mono',monospace">${mm(e.costo_cif)}</span>`
+          : _dash}</td>
         <td style="text-align:center">${contrNum}</td>
         <td style="text-align:center">${garBadge}</td>
         <td>${clienteCell}</td>
@@ -699,6 +747,7 @@ function renderCasos() {
 
   _renderCasosFlujo(eqFilt);
   _renderCasosEquipos(eqFilt);
+  _renderCasosMarca(eqFilt);
 
   // KPIs
   const totGar   = equipos.filter(e => e.garantia.toUpperCase().includes('VIGENTE')).length;
@@ -730,6 +779,167 @@ function renderCasos() {
   const tag = document.getElementById('casos-tag');
   if (tag) tag.textContent =
     `${casos.length} casos abiertos · ${equipos.length} equipos detenidos · actualizado al correr el extractor`;
+}
+
+// ── RESUMEN POR MARCA ─────────────────────────────────────────────
+// Una fila por marca: cuántos equipos están detenidos, cuántos tienen
+// contrato y cuántos no, y la facturación de los clientes de esa marca.
+// La facturación se acumula por contrato distinto: varios equipos parados
+// suelen colgar del mismo contrato y sumar por equipo la multiplicaría.
+function _renderCasosMarca(equipos) {
+  const box = document.getElementById('cas-marca-tabla');
+  if (!box) return;
+  const g = {};
+  const ctrG = {};
+  equipos.forEach(e => {
+    const m = _normMarca(e.marca);
+    const d = g[m] || (g[m] = { eq: 0, con: 0, sin: 0, ctr: {}, cli: {}, cif: 0 });
+    d.eq++;
+    d.cif += (+e.costo_cif || 0);
+    if (e.contrato_num) {
+      d.con++;
+      d.ctr[e.contrato_num] = [e.fac_anual || 0, e.fac_ytd || 0];
+      ctrG[e.contrato_num]  = [e.fac_anual || 0, e.fac_ytd || 0];
+    } else d.sin++;
+    const c = (e.nombre_cliente || '').trim();
+    if (c) d.cli[c] = 1;
+  });
+  const sum = (o, i) => Object.keys(o).reduce((a, k) => a + o[k][i], 0);
+  const D = Object.keys(g).map(m => {
+    const d = g[m];
+    return { marca: m, eq: d.eq, con: d.con, sin: d.sin, cif: d.cif,
+             nCli: Object.keys(d.cli).length, nCtr: Object.keys(d.ctr).length,
+             anual: sum(d.ctr, 0), ytd: sum(d.ctr, 1) };
+  }).sort((a, b) => b.eq - a.eq || b.ytd - a.ytd);
+
+  if (!D.length) {
+    box.innerHTML = '<div style="padding:1.2rem;text-align:center;color:var(--mut);font-size:.68rem">' +
+      'Sin equipos para los filtros seleccionados.</div>';
+    return;
+  }
+  const SEP = 'border-right:1px solid var(--brd)';
+  const TD  = 'padding:.4rem .7rem;white-space:nowrap';
+  const th  = (t, al) => '<th style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;' +
+    'padding:.42rem .7rem;font-size:.6rem;letter-spacing:.04em;text-align:' + (al || 'left') +
+    ';white-space:nowrap;' + SEP + '">' + t + '</th>';
+  const maxEq  = Math.max.apply(null, D.map(d => d.eq).concat([1]));
+  const cifTot = D.reduce((a, d) => a + d.cif, 0);
+
+  box.innerHTML =
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:900px;' +
+    'table-layout:fixed"><colgroup>' +
+      '<col style="width:16%"><col style="width:7%"><col style="width:9%"><col style="width:9%">' +
+      '<col style="width:9%"><col style="width:8%"><col style="width:12%"><col style="width:8%">' +
+      '<col style="width:11%"><col style="width:11%">' +
+    '</colgroup><thead><tr>' +
+      th('MARCA') + th('EQUIPOS', 'right') + th('') + th('CON CONTRATO', 'right') +
+      th('SIN CONTRATO', 'right') + th('CLIENTES', 'right') + th('VALORIZADO', 'right') +
+      th('% VALOR.', 'right') + th('FACT. ANUAL ESPERADA', 'right') + th('FACT. A LA FECHA', 'right') +
+    '</tr></thead><tbody>' +
+    D.map((d, i) =>
+      '<tr style="background:' + (i % 2 ? 'var(--bg)' : 'var(--bg2)') + '">' +
+        '<td style="' + TD + ';font-size:.72rem;font-weight:700;color:var(--am);overflow:hidden;' +
+          'text-overflow:ellipsis;' + SEP + '" title="' + _escH(d.marca) + '">' + _escH(d.marca) + '</td>' +
+        '<td style="' + TD + ';text-align:right;font-size:.73rem;font-weight:700;' + SEP + '">' + d.eq + '</td>' +
+        '<td style="padding:.4rem .7rem;' + SEP + '">' +
+          '<div style="height:8px;background:var(--gy);border-radius:4px;overflow:hidden;min-width:40px">' +
+          '<div style="height:100%;width:' + (d.eq / maxEq * 100) + '%;background:var(--am)"></div></div></td>' +
+        '<td style="' + TD + ';text-align:right;font-size:.7rem;color:var(--az2);font-weight:600;' + SEP + '">' +
+          (d.con || '—') + '</td>' +
+        '<td style="' + TD + ';text-align:right;font-size:.7rem;color:var(--mut);' + SEP + '">' +
+          (d.sin || '—') + '</td>' +
+        '<td style="' + TD + ';text-align:right;font-size:.7rem;' + SEP + '">' + (d.nCli || '—') + '</td>' +
+        '<td style="' + TD + ';text-align:right;font-size:.71rem;font-weight:700;color:var(--or);' +
+          'font-variant-numeric:tabular-nums;' + SEP + '">' + (d.cif ? mm(d.cif) : '—') + '</td>' +
+        '<td style="' + TD + ';text-align:right;font-size:.68rem;color:var(--or);' + SEP + '">' +
+          (d.cif && cifTot ? (d.cif / cifTot * 100).toFixed(1).replace('.', ',') + '%' : '—') + '</td>' +
+        '<td style="' + TD + ';text-align:right;font-size:.71rem;font-weight:600;color:var(--az1);' +
+          'font-variant-numeric:tabular-nums;' + SEP + '">' + (d.anual ? mm(d.anual) : '—') + '</td>' +
+        '<td style="' + TD + ';text-align:right;font-size:.71rem;font-weight:600;color:var(--teal);' +
+          'font-variant-numeric:tabular-nums">' + (d.ytd ? mm(d.ytd) : '—') + '</td>' +
+      '</tr>').join('') +
+    '</tbody><tfoot><tr style="background:var(--az3);color:#fff;font-weight:700">' +
+      '<td style="padding:.45rem .7rem;font-size:.7rem;' + SEP + '">TOTAL · ' + D.length + ' marcas</td>' +
+      '<td style="padding:.45rem .7rem;text-align:right;font-size:.72rem;' + SEP + '">' +
+        D.reduce((a, d) => a + d.eq, 0) + '</td>' +
+      '<td style="' + SEP + '"></td>' +
+      '<td style="padding:.45rem .7rem;text-align:right;font-size:.7rem;' + SEP + '">' +
+        D.reduce((a, d) => a + d.con, 0) + '</td>' +
+      '<td style="padding:.45rem .7rem;text-align:right;font-size:.7rem;' + SEP + '">' +
+        D.reduce((a, d) => a + d.sin, 0) + '</td>' +
+      '<td style="padding:.45rem .7rem;text-align:right;font-size:.7rem;' + SEP + '">' +
+        Object.keys(equipos.reduce((o, e) => { const c = (e.nombre_cliente || '').trim();
+          if (c) o[c] = 1; return o; }, {})).length + '</td>' +
+      '<td style="padding:.45rem .7rem;text-align:right;font-size:.71rem;font-variant-numeric:tabular-nums;' +
+        SEP + '">' + mm(cifTot) + '</td>' +
+      '<td style="padding:.45rem .7rem;text-align:right;font-size:.68rem;' + SEP + '">100%</td>' +
+      '<td style="padding:.45rem .7rem;text-align:right;font-size:.71rem;font-variant-numeric:tabular-nums;' +
+        SEP + '">' + mm(sum(ctrG, 0)) + '</td>' +
+      '<td style="padding:.45rem .7rem;text-align:right;font-size:.71rem;font-variant-numeric:tabular-nums">' +
+        mm(sum(ctrG, 1)) + '</td>' +
+    '</tr></tfoot></table></div>' +
+    '<p style="font-size:.6rem;color:var(--mut);margin:.5rem 0 0;line-height:1.55">' +
+      'El valorizado es el costo CIF de los equipos detenidos de esa marca. La facturación es la de los ' +
+      'contratos asociados a esos equipos, acumulada por contrato ' +
+      'distinto y no por equipo. Los equipos sin contrato no aportan monto, y un mismo contrato puede ' +
+      'aparecer en más de una marca, por lo que las filas no suman el total.</p>';
+
+  const c = document.getElementById('cas-marca-count');
+  if (c) c.textContent = D.length + ' marcas · ' + D.reduce((a, d) => a + d.eq, 0) + ' equipos';
+}
+
+// ── EXPORTAR EL RESUMEN POR MARCA ─────────────────────────────────
+async function casosMarcaExportPDF() {
+  if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+    alert('Librerías PDF no cargadas. Verifique conexión a internet e intente de nuevo.');
+    return;
+  }
+  const btn = document.getElementById('cas-marca-pdf');
+  const ICON = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+  let wrap = null;
+  try {
+    const src = document.getElementById('cas-marca-tabla');
+    if (!src) throw new Error('No se encontró el contenido');
+    const hoy = (window.APP_DATA || {}).hoy || '';
+    wrap = document.createElement('div');
+    wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:1240px;' +
+      'padding:18px 24px 22px;font-family:Arial,sans-serif;color:#111;box-sizing:border-box';
+    const enc = document.createElement('div');
+    enc.style.cssText = 'border-bottom:2.5px solid #002D73;padding-bottom:7px;margin-bottom:12px';
+    enc.innerHTML = '<span style="font-size:15px;font-weight:700;color:#002D73">' +
+      'TECSERVICE — Equipos Detenidos por Marca</span>' +
+      (hoy ? '&emsp;<span style="font-size:10px;color:#555">Datos al ' + hoy + '</span>' : '');
+    wrap.appendChild(enc);
+    const cl = src.cloneNode(true);
+    cl.querySelectorAll('*').forEach(n => {
+      n.style.position = 'static'; n.style.maxHeight = 'none'; n.style.overflow = 'visible';
+    });
+    wrap.appendChild(cl);
+    document.body.appendChild(wrap);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const realW = Math.ceil(wrap.getBoundingClientRect().width)  || wrap.offsetWidth;
+    const realH = Math.ceil(wrap.getBoundingClientRect().height) || wrap.offsetHeight;
+    if (!realW || !realH) throw new Error('No se pudo medir el contenido');
+    const canvas = await html2canvas(wrap, {
+      scale: hdEscala(realW, realH), backgroundColor: '#ffffff', useCORS: true, logging: false,
+      width: realW, height: realH, windowWidth: realW, windowHeight: realH,
+    });
+    const { jsPDF } = window.jspdf;
+    const MM_PX = 25.4 / 96;
+    const pw = realW * MM_PX, ph = realH * MM_PX;
+    const pdf = new jsPDF({ orientation: pw >= ph ? 'landscape' : 'portrait', unit: 'mm',
+                            format: [pw, ph], compress: true });
+    const im = hdImagen(canvas);
+    pdf.addImage(im.data, im.fmt, 0, 0, pw, ph);
+    pdf.save('Equipos_Detenidos_por_Marca_TS_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
+  } catch (err) {
+    console.error('casosMarcaExportPDF:', err);
+    alert('Error al generar PDF: ' + err.message);
+  } finally {
+    if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    if (btn) { btn.disabled = false; btn.innerHTML = ICON; }
+  }
 }
 
 // ── RESUMEN POR EQUIPO ────────────────────────────────────────────
@@ -942,14 +1152,16 @@ async function casosEqExportPDF() {
     const realH = Math.ceil(wrap.getBoundingClientRect().height) || wrap.offsetHeight;
     if (!realW || !realH) throw new Error('No se pudo medir el contenido');
     const canvas = await html2canvas(wrap, {
-      scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
+      scale: hdEscala(realW, realH), backgroundColor: '#ffffff', useCORS: true, logging: false,
       width: realW, height: realH, windowWidth: realW, windowHeight: realH,
     });
     const { jsPDF } = window.jspdf;
     const MM_PX = 25.4 / 96;
     const pw = realW * MM_PX, ph = realH * MM_PX;
-    const pdf = new jsPDF({ orientation: pw >= ph ? 'landscape' : 'portrait', unit: 'mm', format: [pw, ph] });
-    pdf.addImage(canvas.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, pw, ph);
+    const pdf = new jsPDF({ orientation: pw >= ph ? 'landscape' : 'portrait', unit: 'mm',
+                            format: [pw, ph], compress: true });
+    const im = hdImagen(canvas);
+    pdf.addImage(im.data, im.fmt, 0, 0, pw, ph);
     pdf.save('Resumen_Equipos_Detenidos_TS_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
   } catch (err) {
     console.error('casosEqExportPDF:', err);

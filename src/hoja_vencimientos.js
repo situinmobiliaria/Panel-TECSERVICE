@@ -98,7 +98,64 @@ function _vpMM(v){return 'MM$'+((v||0)/1e6).toLocaleString('es-CL',{minimumFract
 const _VP_REL={Nuevo:'#0A7D74',Renovado:'#B8860B',Perdido:'#C00000'};
 function _vpUrg(d){return d<0?'#7A0000':d<=30?'#C00000':d<=60?'#D46000':d<=90?'#8B8200':'#00832F';}
 
-function _vpPagina(titulo, subtitulo, filas, opt){
+// Cada página del PDF necesita su propio gráfico: el canvas de la hoja sólo
+// refleja el horizonte que esté seleccionado en pantalla, así que se dibuja
+// uno nuevo fuera de vista con los datos de esa página y se pasa a imagen.
+// Chart.js pinta en el siguiente frame, por eso hay que esperarlo antes de
+// leer el canvas.
+async function _vpGrafico(cfg, w, h){
+  if (typeof Chart === 'undefined') return '';
+  const cont = document.createElement('div');
+  cont.style.cssText = 'position:absolute;left:-99999px;top:0;width:'+w+'px;height:'+h+'px';
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  cont.appendChild(cv);
+  document.body.appendChild(cont);
+  let ch = null;
+  try {
+    cfg.options = cfg.options || {};
+    cfg.options.animation = false;
+    cfg.options.responsive = false;
+    cfg.options.maintainAspectRatio = false;
+    cfg.options.devicePixelRatio = window.PDF_HD ? window.PDF_HD.escala : 2;
+    ch = new Chart(cv.getContext('2d'), cfg);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return '<img src="'+cv.toDataURL('image/png')+'" style="width:'+w+'px;height:'+h+'px;display:block">';
+  } catch (e) {
+    console.error('_vpGrafico:', e);
+    return '';
+  } finally {
+    if (ch) ch.destroy();
+    if (cont.parentNode) cont.parentNode.removeChild(cont);
+  }
+}
+
+// Los dos gráficos de una página: distribución por mes (apilada Comercial /
+// Garantía) y composición de la cartera en riesgo.
+async function _vpGraficosPagina(bk, bkeys, valCom, valGar){
+  const FT = {family:'Arial', size:10};
+  const barras = await _vpGrafico({
+    type:'bar',
+    data:{labels:bkeys, datasets:[
+      {label:'Comercial', data:bkeys.map(k=>bk[k].com/1e6), backgroundColor:'#33448D',
+       stack:'s', borderRadius:3},
+      {label:'Garantía',  data:bkeys.map(k=>bk[k].gar/1e6), backgroundColor:'#28D2C3',
+       stack:'s', borderRadius:3}]},
+    options:{plugins:{legend:{position:'top', labels:{boxWidth:10, font:FT}}, tooltip:{enabled:false}},
+      scales:{y:{stacked:true, grid:{color:'#E2E6F0'}, ticks:{callback:v=>'MM$'+v, font:FT}},
+              x:{stacked:true, grid:{display:false}, ticks:{font:{family:'Arial', size:9}}}}}
+  }, 520, 205);
+  const dona = await _vpGrafico({
+    type:'doughnut',
+    data:{labels:['Comercial','Garantía'], datasets:[{data:[valCom/1e6, valGar/1e6],
+      backgroundColor:['#33448D','#28D2C3'], borderWidth:1, borderColor:'#fff'}]},
+    options:{cutout:'52%', plugins:{legend:{position:'bottom', labels:{boxWidth:10, font:FT}},
+      tooltip:{enabled:false}}}
+  }, 240, 205);
+  return {barras:barras, dona:dona};
+}
+
+async function _vpPagina(titulo, subtitulo, filas, opt){
   opt = opt || {};
   const com = filas.filter(d=>d.tipo==='Comercial');
   const gar = filas.filter(d=>d.tipo==='Garantia');
@@ -131,7 +188,7 @@ function _vpPagina(titulo, subtitulo, filas, opt){
   });
   const bkeys=Object.keys(bk).sort((a,b)=>bk[a].ord-bk[b].ord);
   const mesHTML = bkeys.length ?
-    '<table style="border-collapse:collapse;width:100%;margin-bottom:10px">'+
+    '<table style="border-collapse:collapse;width:100%">'+
     '<thead><tr>'+['MES DE VENCIMIENTO','N°','COMERCIAL','GARANTÍA','TOTAL'].map((t,i)=>
       '<th style="background:#002D73;color:#fff;font-size:7.5px;padding:3px 6px;text-align:'+
       (i?'right':'left')+';letter-spacing:.04em">'+t+'</th>').join('')+'</tr></thead><tbody>'+
@@ -190,13 +247,21 @@ function _vpPagina(titulo, subtitulo, filas, opt){
   const secLbl=t=>'<div style="font-size:9px;font-weight:700;color:#002D73;text-transform:uppercase;'+
                   'letter-spacing:.06em;margin:0 0 4px">'+t+'</div>';
 
+  const g = opt.sinMes ? {barras:'', dona:''}
+                       : await _vpGraficosPagina(bk, bkeys, valCom, valGar);
+
   return '<div style="border-bottom:2.5px solid #002D73;padding-bottom:6px;margin-bottom:10px">'+
       '<span style="font-size:13px;font-weight:700;color:#002D73">TECSERVICE — Control de Vencimientos</span>'+
       '&emsp;<span style="font-size:11px;font-weight:700;color:#C00000">'+titulo+'</span>'+
       '&emsp;<span style="font-size:10px;color:#555">'+subtitulo+'</span>'+
     '</div>'+
     '<div style="display:flex;gap:8px;margin-bottom:11px">'+kpis+'</div>'+
-    (opt.sinMes?'':secLbl('Distribución por mes de vencimiento')+mesHTML)+
+    (opt.sinMes?'':
+      '<div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:12px">'+
+        '<div style="flex:1.15;min-width:0">'+secLbl('Distribución por mes de vencimiento')+g.barras+'</div>'+
+        '<div style="width:240px;flex-shrink:0">'+secLbl('Composición de la cartera')+g.dona+'</div>'+
+        '<div style="flex:1;min-width:0">'+secLbl('Detalle por mes')+mesHTML+'</div>'+
+      '</div>')+
     secLbl(opt.tituloTabla||'Detalle de contratos')+detHTML+
     (opt.nota?'<div style="font-size:7.5px;color:#8892a8;margin-top:6px;line-height:1.5">'+opt.nota+'</div>':'');
 }
@@ -236,9 +301,9 @@ async function vencExportPDF(){
     for (let i = 0; i < paginas.length; i++) {
       const p = paginas[i];
       wrap = document.createElement('div');
-      wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:1320px;'+
+      wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:1460px;'+
         'padding:16px 22px 20px;font-family:Arial,sans-serif;color:#111;box-sizing:border-box';
-      wrap.innerHTML = _vpPagina(p.t, p.s, p.f, p.o);
+      wrap.innerHTML = await _vpPagina(p.t, p.s, p.f, p.o || {});
       document.body.appendChild(wrap);
       await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
@@ -247,16 +312,18 @@ async function vencExportPDF(){
       if (!realW || !realH) throw new Error('No se pudo medir la página '+(i+1));
 
       const canvas = await html2canvas(wrap, {
-        scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
+        scale: hdEscala(realW, realH), backgroundColor: '#ffffff', useCORS: true, logging: false,
         width: realW, height: realH, windowWidth: realW, windowHeight: realH,
       });
       wrap.parentNode.removeChild(wrap); wrap = null;
 
       const pageW = realW * MM_PX, pageH = realH * MM_PX;
       const orient = pageW >= pageH ? 'landscape' : 'portrait';
-      if (!pdf) pdf = new jsPDF({ orientation: orient, unit: 'mm', format: [pageW, pageH] });
+      if (!pdf) pdf = new jsPDF({ orientation: orient, unit: 'mm', format: [pageW, pageH],
+                                 compress: true });
       else      pdf.addPage([pageW, pageH], orient);
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, pageW, pageH);
+      const im = hdImagen(canvas);
+      pdf.addImage(im.data, im.fmt, 0, 0, pageW, pageH);
     }
 
     pdf.save('Vencimientos_Contratos_TS_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');

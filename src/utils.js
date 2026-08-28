@@ -195,6 +195,70 @@ function _injectUpdateBadges(){
 }
 document.addEventListener('DOMContentLoaded',_injectUpdateBadges);
 
+// ─── CALIDAD DE LOS EXPORTABLES PDF ──────────────────────────────
+// Todos los exportables del panel son una captura de la pantalla hecha con
+// html2canvas y pegada dentro de un PDF, así que la nitidez depende de dos
+// cosas: a cuántos píxeles se rasteriza el HTML (escala) y con qué formato
+// se guarda esa imagen. Para subir o bajar la calidad de golpe, tocar sólo
+// estos números: son los que usan las nueve funciones de exportación.
+window.PDF_HD = {
+  escala:       4,      // objetivo: 4x el tamaño en pantalla (~384 DPI)
+  ladoMax:   14000,     // px por lado que aguanta un canvas sin fallar
+  areaMax:     5e7,     // px totales; por sobre esto el navegador se queda sin memoria
+  pxPng:     3.2e7,     // hasta este tamaño se usa PNG sin pérdida
+  calidadJpeg: 0.96,    // calidad del JPEG cuando el canvas es demasiado grande para PNG
+};
+
+// Escala segura para un bloque de w x h px CSS. Parte del objetivo y la baja
+// hasta que el canvas resultante entre en los límites del navegador; nunca
+// baja de 1 (a esa altura el bloque ya es impresentable de todas formas).
+window.hdEscala = function (w, h) {
+  const C = window.PDF_HD;
+  if (!w || !h) return C.escala;
+  const s = Math.min(C.escala, C.ladoMax / w, C.ladoMax / h,
+                     Math.sqrt(C.areaMax / (w * h)));
+  return Math.max(1, Math.round(s * 100) / 100);
+};
+
+// Serializa el canvas para jsPDF. PNG es sin pérdida y comprime muy bien
+// texto y tablas (colores planos), pero en canvas enormes la cadena base64
+// se vuelve inmanejable: ahí se cae a JPEG de calidad casi máxima.
+// forzarJpeg sirve para los informes de muchas páginas, donde el peso total
+// importa más que el último gramo de nitidez.
+window.hdImagen = function (cv, forzarJpeg) {
+  const C = window.PDF_HD;
+  if (!forzarJpeg && cv.width * cv.height <= C.pxPng)
+    return { data: cv.toDataURL('image/png'), fmt: 'PNG' };
+  return { data: cv.toDataURL('image/jpeg', C.calidadJpeg), fmt: 'JPEG' };
+};
+
+// Foto de un gráfico de Chart.js a la misma resolución que el resto del
+// exportable. El canvas de pantalla está dibujado al devicePixelRatio del
+// monitor (normalmente 1), así que al estirarlo dentro de una captura 4x se
+// veía borroso justo al lado de un texto nítido. Acá se sube el DPR del
+// gráfico vivo, se redibuja, se serializa y se deja como estaba: el usuario
+// no alcanza a ver el parpadeo y la imagen entra con todo su detalle.
+window.hdChartImg = function (id) {
+  const cv = typeof id === 'string' ? document.getElementById(id) : id;
+  if (!cv || !cv.toDataURL) return null;
+  const dpr = window.PDF_HD ? window.PDF_HD.escala : 2;
+  let ch = null;
+  try {
+    ch = (typeof Chart !== 'undefined' && Chart.getChart) ? Chart.getChart(cv) : null;
+  } catch (e) { ch = null; }
+  if (!ch) { try { return cv.toDataURL('image/png'); } catch (e) { return null; } }
+  const prev = ch.options.devicePixelRatio;
+  try {
+    ch.options.devicePixelRatio = dpr;
+    ch.resize();
+    return cv.toDataURL('image/png');
+  } catch (e) {
+    try { return cv.toDataURL('image/png'); } catch (e2) { return null; }
+  } finally {
+    try { ch.options.devicePixelRatio = prev; ch.resize(); } catch (e) {}
+  }
+};
+
 // ─── PROGRAMAS CARE (usado en todas las hojas de contratos) ───────
 const _PROG_FEATURES={
   BASIC:{label:'Basic',color:'#4caf50',bg:'rgba(76,175,80,.15)',solidBg:'#81c784',

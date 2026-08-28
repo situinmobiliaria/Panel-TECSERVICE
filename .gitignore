@@ -9,3 +9,6 @@ src/__pycache__/
 
 # macOS
 .DS_Store
+
+# Archivos de bloqueo de Office (Excel/PowerPoint abiertos)
+~$*

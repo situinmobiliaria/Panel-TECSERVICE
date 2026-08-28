@@ -1493,6 +1493,14 @@ def read_mapa(wb):
 #     Tabla derecha   J-T (cols 9-19): Equipos Detenidos
 # ══════════════════════════════════════════════════════════════════════════════
 def read_casos(wb):
+    """Casos relevantes y equipos detenidos.
+
+    La hoja tiene dos tablas lado a lado y ya se le han insertado columnas
+    tres veces (ESTADO y Acciones a la izquierda; Fecha Ingreso Caso, Fecha
+    de ingreso y Costo CIF a la derecha), corriendo todo lo que venía después
+    y dejando el panel leyendo campos equivocados en silencio. Por eso las
+    columnas se ubican por su encabezado y no por un índice fijo.
+    """
     ws = None
     for name in wb.sheetnames:
         if "caso" in name.lower() and "relevante" in name.lower():
@@ -1501,63 +1509,151 @@ def read_casos(wb):
     if ws is None:
         return {"casos": [], "equipos": []}
 
-    casos   = []
-    equipos = []
-    last_coord = ""
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        # Forward-fill coordinador (puede estar en celdas combinadas)
-        coord_cell = safe_str(row[0]) if len(row) > 0 and row[0] else ""
-        if coord_cell:
-            last_coord = coord_cell
+    filas = list(ws.iter_rows(values_only=True))
+    if not filas:
+        return {"casos": [], "equipos": []}
+    cab = filas[0]
 
-        # Tabla izquierda: fila de caso si hay cliente (col B = índice 1)
-        cliente = safe_str(row[1]) if len(row) > 1 and row[1] else ""
+    def buscar(*fragmentos):
+        """Índice de la primera columna cuyo encabezado contenga el fragmento."""
+        for frag in fragmentos:
+            f = _norm_cli(frag)
+            for i, v in enumerate(cab):
+                if v is None:
+                    continue
+                if f in _norm_cli(v):
+                    return i
+        return None
+
+    # Tabla izquierda: casos
+    C = {
+        "coordinador": buscar("COORDINADOR"),
+        "cliente":     buscar("CLIENTE"),
+        "problema":    buscar("PROBLEMA"),
+        "estado":      buscar("ESTADO"),
+        "responsable": buscar("RESPONSABLE"),
+        "comentario":  buscar("COMENTARIO"),
+        "salesforce":  buscar("REGISTRO EN SALESFORCE", "SALESFORCE"),
+        "acciones":    buscar("ACCIONES"),
+        "fecha_caso":  buscar("FECHA INGRESO CASO"),
+    }
+    # Tabla derecha: equipos. Se busca desde la columna del modelo hacia la
+    # derecha para no confundir "Estado" del caso con "Estado" del equipo, ni
+    # "Cliente" con "Nombre Cliente".
+    i_mod = buscar("MODELO")
+    def buscarD(*fragmentos):
+        for frag in fragmentos:
+            f = _norm_cli(frag)
+            for i, v in enumerate(cab):
+                if v is None or (i_mod is not None and i < i_mod):
+                    continue
+                if f in _norm_cli(v):
+                    return i
+        return None
+    E = {
+        "modelo":           i_mod,
+        "nombre":           buscarD("NOMBRE DE ACTIVO"),
+        "serie":            buscarD("NUMERO DE SERIE"),
+        "marca":            buscarD("MARCA"),
+        "estado":           buscarD("ESTADO"),
+        "coordinadora":     buscarD("COORDINADORA"),
+        "comentario_coord": buscarD("COMENTARIO COORDINADORA"),
+        "comentario_cat":   buscarD("COMENTARIO COORDINADORA 2"),
+        "comentario_mat":   buscarD("COMENTARIO MATILDE"),
+        "contrato_num":     buscarD("NUMERO DE CONTRATO"),
+        "garantia":         buscarD("ESTADO GARANTIA"),
+        "nombre_cliente":   buscarD("NOMBRE CLIENTE"),
+        "neta_mes":         buscarD("FACTURACION NETA MES"),
+        "fac_anual":        buscarD("FACTURACION ANUAL"),
+        "fac_ytd":          buscarD("FACTURACION A LA FECHA"),
+        "fecha_inicio":     buscarD("FECHA INC"),   # "Fecha Inciio" / "Fecha Incio Contrato"
+        "fecha_fin":        buscarD("FECHA FIN"),
+        "fecha_ingreso":    buscarD("FECHA DE INGRESO"),
+        "costo_cif":        buscarD("COSTO CIF"),
+    }
+    # El estado del equipo se toma de «COMENTARIO MATILDE», que es la columna
+    # categorizada que se muestra y por la que se filtra. Las otras dos
+    # columnas de comentario quedan como texto libre de apoyo. Si algún día
+    # falta esa columna, se cae a la que tenga menos valores distintos, que
+    # es la forma que tiene la categorizada.
+    if E["comentario_mat"] is not None:
+        E["comentario_cat"], E["comentario_mat"] = E["comentario_mat"], E["comentario_cat"]
+    else:
+        cols_com = sorted({i for i in (E["comentario_coord"], E["comentario_cat"]) if i is not None})
+        if cols_com:
+            distintos = {i: len({_norm_cli(r[i]) for r in filas[1:]
+                                 if r and i < len(r) and r[i] not in (None, "")})
+                         for i in cols_com}
+            i_cat = min(distintos, key=lambda i: distintos[i])
+            E["comentario_cat"] = i_cat
+            libres = [i for i in cols_com if i != i_cat]
+            E["comentario_coord"] = libres[0] if libres else None
+
+    faltan = [k for k, v in E.items() if v is None and k not in ("fecha_ingreso", "costo_cif")]
+    if faltan:
+        print(f"  ADVERTENCIA: columnas no encontradas en Casos Relevantes: {', '.join(faltan)}")
+
+    def val(row, i):
+        return row[i] if (i is not None and i < len(row)) else None
+    def txt(row, i):
+        v = val(row, i)
+        return safe_str(v) if v is not None else ""
+    def num(row, i):
+        v = val(row, i)
+        return to_float(v) if isinstance(v, (int, float)) else 0
+    def fecha(row, i):
+        v = val(row, i)
+        return v.strftime("%d-%m-%Y") if isinstance(v, (datetime, date)) else ""
+    def sin_asoc(row, i):
+        t = txt(row, i)
+        return "" if "NO ASOCIADO" in t.upper() else t
+
+    casos, equipos = [], []
+    last_coord = ""
+    for row in filas[1:]:
+        if not row:
+            continue
+        # El coordinador puede venir en celdas combinadas: se arrastra
+        c0 = txt(row, C["coordinador"])
+        if c0:
+            last_coord = c0
+
+        cliente = txt(row, C["cliente"])
         if cliente:
-            # A=coordinador B=Cliente C=Problema D=ESTADO E=Responsable
-            # F=Comentario G=Registro en Salesforce H=Acciones
             casos.append({
-                "coordinador": last_coord,
-                "cliente":     cliente,
-                "problema":    safe_str(row[2]) if len(row) > 2 else "",
-                "estado":      safe_str(row[3]) if len(row) > 3 else "",
-                "responsable": safe_str(row[4]) if len(row) > 4 else "",
-                "comentario":  safe_str(row[5]) if len(row) > 5 else "",
-                "salesforce":  safe_str(row[6]) if len(row) > 6 else "",
-                "acciones":    safe_str(row[7]) if len(row) > 7 else "",
+                "coordinador":  last_coord,
+                "cliente":      cliente,
+                "problema":     txt(row, C["problema"]),
+                "estado":       txt(row, C["estado"]),
+                "responsable":  txt(row, C["responsable"]),
+                "comentario":   txt(row, C["comentario"]),
+                "salesforce":   txt(row, C["salesforce"]),
+                "acciones":     txt(row, C["acciones"]),
+                "fecha_caso":   fecha(row, C["fecha_caso"]),
             })
 
-        # Tabla derecha: fila de equipo si hay modelo (col J = índice 9)
-        modelo = safe_str(row[9]) if len(row) > 9 and row[9] else ""
+        modelo = txt(row, E["modelo"])
         if modelo:
-            def _fmt_dt(v):
-                if isinstance(v, (datetime, date)):
-                    return v.strftime("%d-%m-%Y")
-                return ""
-            def _no_asoc(v):
-                s = safe_str(v) if v is not None else ""
-                return "" if "NO ASOCIADO" in s.upper() else s
-            # Índices según los encabezados reales de la hoja:
-            #   J=Modelo  K=Nombre de activo  L=N° de serie  M=Marca  N=Estado
-            #   O=COORDINADORA  P=COMENTARIO COORDINADORA (texto libre)
-            #   Q=COMENTARIO COORDINADORA 2 (categoría)  R=COMENTARIO MATILDE
             equipos.append({
                 "modelo":           modelo,
-                "nombre":           safe_str(row[10]) if len(row) > 10 else "",
-                "serie":            safe_str(str(row[11])) if len(row) > 11 and row[11] else "",
-                "marca":            safe_str(row[12]) if len(row) > 12 else "",
-                "estado":           safe_str(row[13]) if len(row) > 13 else "",
-                "coordinadora":     safe_str(row[14]) if len(row) > 14 else "",
-                "comentario_coord": safe_str(row[15]) if len(row) > 15 else "",
-                "comentario_cat":   safe_str(row[16]) if len(row) > 16 else "",
-                "comentario_mat":   safe_str(row[17]) if len(row) > 17 else "",
-                "contrato_num":     safe_str(str(row[18])) if len(row) > 18 and row[18] else "",
-                "garantia":         safe_str(row[19]) if len(row) > 19 else "",
-                "nombre_cliente":   _no_asoc(row[21]) if len(row) > 21 else "",
-                "neta_mes":         to_float(row[22]) if len(row) > 22 and not isinstance(row[22], str) else 0,
-                "fac_anual":        to_float(row[23]) if len(row) > 23 and not isinstance(row[23], str) else 0,
-                "fac_ytd":          to_float(row[24]) if len(row) > 24 and not isinstance(row[24], str) else 0,
-                "fecha_inicio":     _fmt_dt(row[25]) if len(row) > 25 else "",
-                "fecha_fin":        _fmt_dt(row[26]) if len(row) > 26 else "",
+                "nombre":           txt(row, E["nombre"]),
+                "serie":            txt(row, E["serie"]),
+                "marca":            txt(row, E["marca"]),
+                "estado":           txt(row, E["estado"]),
+                "coordinadora":     txt(row, E["coordinadora"]),
+                "comentario_coord": txt(row, E["comentario_coord"]),
+                "comentario_cat":   txt(row, E["comentario_cat"]),
+                "comentario_mat":   txt(row, E["comentario_mat"]),
+                "contrato_num":     txt(row, E["contrato_num"]),
+                "garantia":         txt(row, E["garantia"]),
+                "nombre_cliente":   sin_asoc(row, E["nombre_cliente"]),
+                "neta_mes":         num(row, E["neta_mes"]),
+                "fac_anual":        num(row, E["fac_anual"]),
+                "fac_ytd":          num(row, E["fac_ytd"]),
+                "fecha_inicio":     fecha(row, E["fecha_inicio"]),
+                "fecha_fin":        fecha(row, E["fecha_fin"]),
+                "fecha_ingreso":    fecha(row, E["fecha_ingreso"]),
+                "costo_cif":        num(row, E["costo_cif"]),
             })
 
     return {"casos": casos, "equipos": equipos}
@@ -2485,26 +2581,120 @@ def read_ratios2(wb):
 
     def get_val(row_idx, col_idx):
         row = rows[row_idx] if row_idx < len(rows) else []
-        if col_idx < len(row) and row[col_idx] is not None:
+        if col_idx is not None and col_idx < len(row) and row[col_idx] is not None:
             try: return float(row[col_idx])
-            except: return 0.0
+            except (TypeError, ValueError): return 0.0
         return 0.0
 
-    def get_real(row_idx, month_i):   return get_val(row_idx, 2 + month_i * 4)
-    def get_ptto(row_idx, month_i):   return get_val(row_idx, 3 + month_i * 4)
-    def get_var(row_idx, month_i):    return get_val(row_idx, 4 + month_i * 4)
-    def get_varpct(row_idx, month_i): return get_val(row_idx, 5 + month_i * 4)
+    # Los meses se resuelven leyendo las dos filas de encabezado (fila 5 = tipo
+    # de columna, fila 6 = mes) en vez de asumir 4 columnas por mes. La hoja no
+    # es regular: julio quedó con 3 columnas (sin "Variación Ptto %"), y con
+    # paso fijo el bloque "Periodo Actual" del final entraba como un mes más.
+    def _mes_de(v):
+        if isinstance(v, (datetime, date)):
+            return (v.year, v.month)
+        t = safe_str(v).strip()
+        m = re.match(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$", t)
+        if m:
+            a = int(m.group(3))
+            return (a + 2000 if a < 100 else a, int(m.group(2)))
+        return None
+
+    TIPOS = {"REAL": "real", "PTTO": "ptto",
+             "VARIACION PTTO": "var", "VARIACION PTTO %": "vp"}
+    fila_tipo = rows[4] if len(rows) > 4 else []
+    fila_mes  = rows[5] if len(rows) > 5 else []
+    meses_cols, orden = {}, []
+    for ci in range(2, min(len(fila_mes), MAX_COL)):
+        clave = _mes_de(fila_mes[ci])
+        if clave is None:
+            continue                      # "Periodo Actual", acumulados, etc.
+        tipo = TIPOS.get(_norm_cli(fila_tipo[ci]) if ci < len(fila_tipo) else "")
+        if tipo is None:
+            continue
+        if clave not in meses_cols:
+            meses_cols[clave] = {}
+            orden.append(clave)
+        meses_cols[clave].setdefault(tipo, ci)
+    orden.sort()
+
+    def _col(month_i, tipo):
+        if month_i >= len(orden):
+            return None
+        return meses_cols[orden[month_i]].get(tipo)
+
+    def get_real(row_idx, month_i):   return get_val(row_idx, _col(month_i, "real"))
+    def get_ptto(row_idx, month_i):   return get_val(row_idx, _col(month_i, "ptto"))
+    def get_var(row_idx, month_i):    return get_val(row_idx, _col(month_i, "var"))
+    def get_varpct(row_idx, month_i): return get_val(row_idx, _col(month_i, "vp"))
 
     def arr(row_idx, n):    return [round(get_real(row_idx, i),   3) for i in range(n)]
     def arrp(row_idx, n):   return [round(get_ptto(row_idx, i),   3) for i in range(n)]
     def arrv(row_idx, n):   return [round(get_var(row_idx, i),    3) for i in range(n)]
     def arrvp(row_idx, n):  return [round(get_varpct(row_idx, i), 4) for i in range(n)]
 
-    # Detectar mes_cierre: meses consecutivos con Ingresos != 0 (row 7 → idx 6)
-    # Paramos en el primer cero para no capturar columna Total al final
+    # Las filas se ubican por su etiqueta en la columna B y no por un índice
+    # fijo: la hoja ya se ha reordenado dos veces (se insertaron "Costo
+    # Tecnicos y Personal" y "Costos Repuestos y Otros" bajo Costo de ventas,
+    # corriendo todo lo de abajo) y con índices fijos el EERR quedaba
+    # silenciosamente descuadrado. Se toma la primera fila que contenga el
+    # fragmento, por eso "% EBITDA" resuelve al de EBITDA Directo, que es el
+    # que va primero.
+    ETIQUETAS = [
+        ("ingresos_totales",        "INGRESOS DE ACTIVIDADES"),
+        ("ingresos_contratos",      "INGRESOS POR CONTRATOS"),
+        ("ingresos_otras",          "INGRESOS POR OTRAS ACTIVIDADES"),
+        ("costo_ventas",            "COSTO DE VENTAS"),
+        ("costo_tecnicos",          "COSTO TECNICOS"),
+        ("costo_repuestos",         "REPUESTOS Y OTROS"),
+        ("margen_mm",               "MARGEN DEL PRODUCTO"),
+        ("margen_pct",              "% MARGEN"),
+        ("gastos_empleados",        "BENEFICIOS A LOS EMPLEADOS"),
+        ("otros_gastos",            "OTROS GASTOS POR NATURALEZA"),
+        ("ebitda_directo",          "EBITDA DIRECTO"),
+        ("ebitda_directo_pct",      "% EBITDA"),
+        ("gav_indirecto",           "GAV INDIRECTO"),
+        ("ebitda_indirecto",        "EBITDA INDIRECTO"),
+        ("finiquitos",              "FINIQUITOS"),
+        ("multas",                  "MULTAS"),
+        ("prov_obsolescencias",     "OBSOLESCENCIAS"),
+        ("prov_incobrables",        "INCOBRA"),
+        ("prov_habilitacion",       "HABILITACION"),
+        ("total_gastos_adicionales","TOTAL GASTOS ADICIONALES"),
+        ("ebitda_empresa",          "EBITDA EMPRESA"),
+        ("depreciacion",            "DEPRECIACION"),
+        ("resultado_operacional",   "RESULTADO OPERACIONAL"),
+        ("otros_ingresos_funcion",  "OTROS INGRESOS POR FUNCION"),
+        ("ingreso_financiero",      "INGRESO FINANCIERO"),
+        ("costo_financiero",        "COSTO FINANCIERO"),
+        ("otros_gastos_funcion",    "OTROS GASTOS POR FUNCION"),
+        ("diferencia_cambio",       "DIFERENCIA DE CAMBIO"),
+        ("resultado_no_operacional","RESULTADO NO OPERACIONAL"),
+        ("resultado_antes_imp",     "RESULTADO ANTES DE IMPUESTOS"),
+        ("impuesto_renta",          "IMPUESTO A LA RENTA"),
+        ("resultado_ejercicio",     "RESULTADO DEL EJERCICIO"),
+    ]
+    PORCENTAJES = {"margen_pct", "ebitda_directo_pct"}
+
+    idx_fila = {}
+    for ri, row in enumerate(rows):
+        etq = _norm_cli(row[1]) if len(row) > 1 and row[1] is not None else ""
+        if not etq:
+            continue
+        for clave, frag in ETIQUETAS:
+            if clave not in idx_fila and frag in etq:
+                idx_fila[clave] = ri
+                break
+    faltan = [c for c, _ in ETIQUETAS if c not in idx_fila]
+    if faltan:
+        print(f"  ADVERTENCIA: filas no encontradas en Ratio Costos 2: {', '.join(faltan)}")
+
+    # Detectar mes_cierre: meses consecutivos con Ingresos != 0.
+    # Paramos en el primer cero para no capturar la columna Total al final.
+    _ri_ing = idx_fila.get("ingresos_totales", 6)
     mes_cierre = 0
-    for i in range(MAX_MONTHS):
-        if abs(get_real(6, i)) > 0.001:
+    for i in range(len(orden)):
+        if abs(get_real(_ri_ing, i)) > 0.001:
             mes_cierre = i + 1
         else:
             break
@@ -2522,90 +2712,42 @@ def read_ratios2(wb):
     def pct4(ri):  # idem para filas %
         return pct(ri), pctp(ri), pctv(ri), pctvp(ri)
 
-    r6,  p6,  v6,  vp6  = row4(6)
-    r7,  p7,  v7,  vp7  = row4(7)
-    r8,  p8,  v8,  vp8  = row4(8)
-    r9,  p9,  v9,  vp9  = row4(9)
-    r10, p10, v10, vp10 = row4(10)
-    r11, p11, v11, vp11 = pct4(11)
-    r13, p13, v13, vp13 = row4(13)
-    r14, p14, v14, vp14 = row4(14)
-    r16, p16, v16, vp16 = row4(16)
-    r17, p17, v17, vp17 = pct4(17)
-    r19, p19, v19, vp19 = row4(19)
-    r20, p20, v20, vp20 = row4(20)
-    r21, p21, v21, vp21 = row4(21)
-    r22, p22, v22, vp22 = row4(22)
-    r23, p23, v23, vp23 = row4(23)
-    r24, p24, v24, vp24 = row4(24)
-    r25, p25, v25, vp25 = row4(25)
-    r27, p27, v27, vp27 = row4(27)
-    r29, p29, v29, vp29 = row4(29)
-    r32, p32, v32, vp32 = row4(32)
-    r33, p33, v33, vp33 = row4(33)
-    r35, p35, v35, vp35 = row4(35)
-    r36, p36, v36, vp36 = row4(36)
-    r37, p37, v37, vp37 = row4(37)
-    r38, p38, v38, vp38 = row4(38)
-    r39, p39, v39, vp39 = row4(39)
-    r40, p40, v40, vp40 = row4(40)
-    r42, p42, v42, vp42 = row4(42)
-    r44, p44, v44, vp44 = row4(44)
-    r45, p45, v45, vp45 = row4(45)
+    D = {}
+    for clave, _ in ETIQUETAS:
+        ri = idx_fila.get(clave)
+        if ri is None:
+            D[clave] = ([0.0] * n, [0.0] * n, [0.0] * n, [0.0] * n)
+        elif clave in PORCENTAJES:
+            D[clave] = pct4(ri)
+        else:
+            D[clave] = row4(ri)
 
-    costo_tecnicos  = read_costo_tecnicos(wb, n)
-    costo_repuestos = [round(r9[i] - costo_tecnicos[i], 3) for i in range(n)]
+    def col(clave, k=0):
+        return D[clave][k]
 
-    return {
-        "mes_cierre": mes_cierre, "meses": MESES[:n],
-        # Ingresos
-        "ingresos_totales":  r6,  "ingresos_totales_p":  p6,  "ingresos_totales_v":  v6,  "ingresos_totales_vp":  vp6,
-        "ingresos_contratos":r7,  "ingresos_contratos_p":p7,  "ingresos_contratos_v":v7,  "ingresos_contratos_vp":vp7,
-        "ingresos_otras":    r8,  "ingresos_otras_p":    p8,  "ingresos_otras_v":    v8,  "ingresos_otras_vp":    vp8,
-        # Costo y margen
-        "costo_ventas":      r9,  "costo_ventas_p":      p9,  "costo_ventas_v":      v9,  "costo_ventas_vp":      vp9,
-        # Apertura de "Costo de ventas" en técnicos/personal vs. repuestos y
-        # otros. Sólo Real: el Excel no presupuesta esta apertura.
-        "costo_tecnicos":    costo_tecnicos,
-        "costo_repuestos":   costo_repuestos,
-        "margen_mm":         r10, "margen_mm_p":         p10, "margen_mm_v":         v10, "margen_mm_vp":         vp10,
-        "margen_pct":        r11, "margen_pct_p":        p11, "margen_pct_v":        v11, "margen_pct_vp":        vp11,
-        # Gastos directos
-        "gastos_empleados":  r13, "gastos_empleados_p":  p13, "gastos_empleados_v":  v13, "gastos_empleados_vp":  vp13,
-        "otros_gastos":      r14, "otros_gastos_p":      p14, "otros_gastos_v":      v14, "otros_gastos_vp":      vp14,
-        # EBITDA Directo
-        "ebitda_directo":       r16, "ebitda_directo_p":       p16, "ebitda_directo_v":       v16, "ebitda_directo_vp":       vp16,
-        "ebitda_directo_pct":   r17, "ebitda_directo_pct_p":   p17, "ebitda_directo_pct_v":   v17, "ebitda_directo_pct_vp":   vp17,
-        # GAV Indirecto
-        "gav_indirecto":     r19, "gav_indirecto_p":     p19, "gav_indirecto_v":     v19, "gav_indirecto_vp":     vp19,
-        "ebitda_indirecto":  r20, "ebitda_indirecto_p":  p20, "ebitda_indirecto_v":  v20, "ebitda_indirecto_vp":  vp20,
-        # Gastos adicionales
-        "finiquitos":             r21, "finiquitos_p":             p21, "finiquitos_v":             v21, "finiquitos_vp":             vp21,
-        "multas":                 r22, "multas_p":                 p22, "multas_v":                 v22, "multas_vp":                 vp22,
-        "prov_obsolescencias":    r23, "prov_obsolescencias_p":    p23, "prov_obsolescencias_v":    v23, "prov_obsolescencias_vp":    vp23,
-        "prov_incobrables":       r24, "prov_incobrables_p":       p24, "prov_incobrables_v":       v24, "prov_incobrables_vp":       vp24,
-        "prov_habilitacion":      r25, "prov_habilitacion_p":      p25, "prov_habilitacion_v":      v25, "prov_habilitacion_vp":      vp25,
-        "total_gastos_adicionales":r27,"total_gastos_adicionales_p":p27,"total_gastos_adicionales_v":v27,"total_gastos_adicionales_vp":vp27,
-        # EBITDA Empresa
-        "ebitda_empresa":    r29, "ebitda_empresa_p":    p29, "ebitda_empresa_v":    v29, "ebitda_empresa_vp":    vp29,
-        # Depreciación
-        "depreciacion":      r32, "depreciacion_p":      p32, "depreciacion_v":      v32, "depreciacion_vp":      vp32,
-        "resultado_operacional":  r33, "resultado_operacional_p":  p33, "resultado_operacional_v":  v33, "resultado_operacional_vp":  vp33,
-        # No operacional
-        "otros_ingresos_funcion": r35, "otros_ingresos_funcion_p": p35, "otros_ingresos_funcion_v": v35, "otros_ingresos_funcion_vp": vp35,
-        "ingreso_financiero":     r36, "ingreso_financiero_p":     p36, "ingreso_financiero_v":     v36, "ingreso_financiero_vp":     vp36,
-        "costo_financiero":       r37, "costo_financiero_p":       p37, "costo_financiero_v":       v37, "costo_financiero_vp":       vp37,
-        "otros_gastos_funcion":   r38, "otros_gastos_funcion_p":   p38, "otros_gastos_funcion_v":   v38, "otros_gastos_funcion_vp":   vp38,
-        "diferencia_cambio":      r39, "diferencia_cambio_p":      p39, "diferencia_cambio_v":      v39, "diferencia_cambio_vp":      vp39,
-        "resultado_no_operacional":r40,"resultado_no_operacional_p":p40,"resultado_no_operacional_v":v40,"resultado_no_operacional_vp":vp40,
-        # Resultado final
-        "resultado_antes_imp":  r42, "resultado_antes_imp_p":  p42, "resultado_antes_imp_v":  v42, "resultado_antes_imp_vp":  vp42,
-        "impuesto_renta":       r44, "impuesto_renta_p":       p44, "impuesto_renta_v":       v44, "impuesto_renta_vp":       vp44,
-        "resultado_ejercicio":  r45, "resultado_ejercicio_p":  p45, "resultado_ejercicio_v":  v45, "resultado_ejercicio_vp":  vp45,
-        # ── SECCIÓN RATIOS (filas 49-64, 2 cols/mes: Real=col[2+i*2], PTTO=col[3+i*2]) ──
-        # Detectar cuántos meses tienen datos reales válidos en la sección RATIOS
-        **_read_ratios_section(rows, MESES),
+    # La apertura del costo de ventas viene sólo en Real; el Excel no la
+    # presupuesta. Si la hoja no trae las dos líneas nuevas, "Repuestos y
+    # Otros" se calcula como el residuo contra el costo de ventas.
+    costo_tecnicos  = col("costo_tecnicos")
+    costo_repuestos = col("costo_repuestos")
+    if not any(costo_repuestos):
+        costo_repuestos = [round(col("costo_ventas")[i] - costo_tecnicos[i], 3) for i in range(n)]
+
+    salida = {
+        "mes_cierre": mes_cierre,
+        "meses":      [MESES[orden[i][1] - 1] for i in range(n)],
+        "costo_tecnicos":  costo_tecnicos,
+        "costo_repuestos": costo_repuestos,
     }
+    for clave, _ in ETIQUETAS:
+        if clave in ("costo_tecnicos", "costo_repuestos"):
+            continue
+        r, pp, vv, vp = D[clave]
+        salida[clave]           = r
+        salida[clave + "_p"]    = pp
+        salida[clave + "_v"]    = vv
+        salida[clave + "_vp"]   = vp
+    return salida
 
 
 def _read_ratios_section(rows, MESES):

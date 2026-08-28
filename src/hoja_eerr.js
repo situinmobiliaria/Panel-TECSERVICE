@@ -4,6 +4,12 @@
 // ═══════════════════════════════════════════════════════════════
 (function(){
   const R2 = (APP_DATA && APP_DATA.ratios2) || {};
+
+  // «Otros gastos por naturaleza» quedó en cero en la hoja Ratio Costos 2,
+  // así que su fila y su opción de ratio se ocultan. Se evalúa el dato en vez
+  // de borrar el código: si el Excel vuelve a poblar la línea, reaparece sola.
+  const _eerrHay = arr =>
+    Array.isArray(arr) && arr.some(v => Math.abs(v || 0) > 0.0005);
   if(!R2.meses || !R2.meses.length){
     const el = document.getElementById('view-eerr');
     if(el){
@@ -160,7 +166,7 @@
             ${rowPct('Margen %',R2.margen_pct,R2.margen_pct_p,R2.margen_pct_v,R2.margen_pct_vp, R2.margen_mm,R2.margen_mm_p,R2.ingresos_totales,R2.ingresos_totales_p)}
             ${sepRow('Gastos Operacionales Directos')}
             ${rowBase('(−) Gasto beneficios empleados Directos (MM$)',R2.gastos_empleados,R2.gastos_empleados_p,R2.gastos_empleados_v,R2.gastos_empleados_vp)}
-            ${rowBase('(−) Otros gastos por naturaleza Directos (MM$)',R2.otros_gastos,R2.otros_gastos_p,R2.otros_gastos_v,R2.otros_gastos_vp)}
+            ${_eerrHay(R2.otros_gastos)||_eerrHay(R2.otros_gastos_p)?rowBase('(−) Otros gastos por naturaleza Directos (MM$)',R2.otros_gastos,R2.otros_gastos_p,R2.otros_gastos_v,R2.otros_gastos_vp):''}
             ${rowCeleste('= EBITDA Directo (MM$)',R2.ebitda_directo,R2.ebitda_directo_p,R2.ebitda_directo_v,R2.ebitda_directo_vp)}
             ${rowPct('%  EBITDA Directo',R2.ebitda_directo_pct,R2.ebitda_directo_pct_p,R2.ebitda_directo_pct_v,R2.ebitda_directo_pct_vp, R2.ebitda_directo,R2.ebitda_directo_p,R2.ingresos_totales,R2.ingresos_totales_p)}
             ${sepRow('GAV Indirecto')}
@@ -242,7 +248,7 @@
     {key:'costo_total', label:'Costo Total',                   arr:costoTotArr, arrP:costoTotArrP, color:'#8B0000'},
     {key:'costo_venta', label:'Costo de Venta',                arr:cdvArr,      arrP:cdvArrP,      color:'#C00000'},
     {key:'empleados',   label:'Gasto x Beneficios Empleados',  arr:empArr,      arrP:empArrP,      color:'#7A1FAA'},
-    {key:'otros',       label:'Otros Gastos por Naturaleza',   arr:otrArr,      arrP:otrArrP,      color:'#E87722'},
+    ...(_eerrHay(otrArr)||_eerrHay(otrArrP) ? [{key:'otros', label:'Otros Gastos por Naturaleza', arr:otrArr, arrP:otrArrP, color:'#E87722'}] : []),
     {key:'gav_ind',     label:'GAV Indirecto',                 arr:gavArr,      arrP:gavArrP,      color:'#C05000'},
     {key:'gav_tot',     label:'GAV Totales',                   arr:gavTotArr,   arrP:gavTotArrP,   color:'#6B3A2A'},
   ];
@@ -392,6 +398,199 @@
   _renderChart();
 })();
 
+// ── EXPORTAR RESUMEN: último mes + acumulado ──────────────────────
+// Mismo formato y mismas filas que el EERR de pantalla, pero condensado a
+// dos bloques de columnas: el último mes cerrado y el acumulado del año,
+// cada uno contra presupuesto con su variación en monto y en %. La tabla se
+// arma desde los datos y no clonando la de pantalla, porque esa trae una
+// columna por mes.
+async function eerrExportResumenPDF() {
+  if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+    alert('Librerías PDF no cargadas. Verifique conexión a internet e intente de nuevo.');
+    return;
+  }
+  const R2 = (window.APP_DATA && window.APP_DATA.ratios2) || {};
+  const M  = R2.meses || [];
+  if (!M.length) { alert('No hay datos EERR para exportar.'); return; }
+
+  const btn  = document.getElementById('eerr-pdf-res-btn');
+  const ICON = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+
+  const n  = M.length, ult = n - 1;
+  const gg = a => Array.isArray(a) ? a : [];
+  const v  = (a, i) => { const x = gg(a)[i]; return (typeof x === 'number' && isFinite(x)) ? x : 0; };
+  const ac = a => gg(a).slice(0, n).reduce((s, x) => s + ((typeof x === 'number' && isFinite(x)) ? x : 0), 0);
+  const fM = x => (Math.abs(x) < 0.05 ? '—' : x.toLocaleString('es-CL',
+                   { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+  const fP = x => (!isFinite(x) || Math.abs(x) < 0.0005 ? '—'
+                   : (x * 100).toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%');
+  const col = x => x < -0.05 ? '#C00000' : x > 0.05 ? '#00832F' : '#555';
+
+  let wrap = null;
+  try {
+    const BRD = 'border-bottom:1px solid #E6EAF2';
+    const td  = (txt, extra) => '<td style="' + BRD + ';padding:2.6px 7px;font-size:8.5px;text-align:right;' +
+      'font-variant-numeric:tabular-nums;white-space:nowrap;' + (extra || '') + '">' + txt + '</td>';
+    // Cuatro celdas de un bloque: real, ptto, variación y variación %.
+    // La variación se calcula siempre como real − presupuesto, tanto en el mes
+    // como en el acumulado, para que ambos bloques signifiquen lo mismo: la
+    // hoja trae la variación mensual como |real|−|ptto|, que en las líneas de
+    // costo sale con el signo opuesto al del acumulado y confundía al leerlos
+    // uno al lado del otro. Con este criterio, positivo siempre es favorable:
+    // más ingresos o menos costo que lo presupuestado.
+    const blq = (ar, ap, av, avp, i, neg, bold) => {
+      const r  = i === null ? ac(ar) : v(ar, i);
+      const p  = i === null ? ac(ap) : v(ap, i);
+      const va = r - p;
+      const vp = Math.abs(p) > 0 ? va / Math.abs(p) : 0;
+      const st = bold ? 'font-weight:700;' : '';
+      return td(fM(r), st + 'color:#111') + td(fM(p), st + 'color:#6B7BA8') +
+             td(fM(va), 'color:' + col(va)) + td(fP(vp), 'color:#888');
+    };
+    const blqPct = (numR, numP, denR, denP, i, bold) => {
+      const dR = i === null ? Math.abs(ac(denR)) : Math.abs(v(denR, i));
+      const dP = i === null ? Math.abs(ac(denP)) : Math.abs(v(denP, i));
+      const r  = dR ? (i === null ? ac(numR) : v(numR, i)) / dR : 0;
+      const p  = dP ? (i === null ? ac(numP) : v(numP, i)) / dP : 0;
+      const st = bold ? 'font-weight:700;' : '';
+      return td(fP(r), st + 'color:#111') + td(fP(p), st + 'color:#6B7BA8') +
+             td(fP(r - p), 'color:' + col(r - p)) +
+             td(fP(Math.abs(p) > 0 ? (r - p) / Math.abs(p) : 0), 'color:#888');
+    };
+    const lbl = (t2, ind, st) => '<td style="' + BRD + ';padding:2.6px 7px 2.6px ' + (ind || '7px') +
+      ';font-size:8.5px;white-space:nowrap;' + (st || '') + '">' + t2 + '</td>';
+
+    const fila     = (t2, ar, ap, av, avp, neg) =>
+      '<tr>' + lbl(t2) + blq(ar, ap, av, avp, ult, neg) + blq(ar, ap, av, avp, null, neg) + '</tr>';
+    const filaSub  = (t2, ar, ap, av, avp, neg) =>
+      '<tr>' + lbl('↳ ' + t2, '18px', 'color:#555') + blq(ar, ap, av, avp, ult, neg) +
+      blq(ar, ap, av, avp, null, neg) + '</tr>';
+    const guion    = '<td style="' + BRD + ';padding:2.6px 7px;text-align:right;font-size:8.5px;color:#B8C1D8">—</td>';
+    const filaReal = (t2, ar) =>
+      '<tr>' + lbl('↳ ' + t2, '18px', 'color:#555') +
+      td(fM(v(ar, ult)), 'color:#111') + guion + guion + guion +
+      td(fM(ac(ar)), 'color:#111') + guion + guion + guion + '</tr>';
+    const filaCel  = (t2, ar, ap, av, avp, neg) =>
+      '<tr style="background:#def3fa">' + lbl(t2, '7px', 'font-weight:700') +
+      blq(ar, ap, av, avp, ult, neg, true) + blq(ar, ap, av, avp, null, neg, true) + '</tr>';
+    const filaAzul = (t2, ar, ap, av, avp, neg) =>
+      '<tr style="background:#0E2D55;color:#fff">' +
+      '<td style="padding:3.4px 7px;font-size:8.5px;font-weight:700;white-space:nowrap">' + t2 + '</td>' +
+      blq(ar, ap, av, avp, ult, neg, true).replace(/color:#111/g, 'color:#fff')
+        .replace(/color:#6B7BA8/g, 'color:#B8C1D8').replace(/color:#888/g, 'color:#B8C1D8') +
+      blq(ar, ap, av, avp, null, neg, true).replace(/color:#111/g, 'color:#fff')
+        .replace(/color:#6B7BA8/g, 'color:#B8C1D8').replace(/color:#888/g, 'color:#B8C1D8') + '</tr>';
+    const filaPct  = (t2, numR, numP, denR, denP) =>
+      '<tr>' + lbl(t2) + blqPct(numR, numP, denR, denP, ult) +
+      blqPct(numR, numP, denR, denP, null) + '</tr>';
+    const sep = t2 => '<tr style="background:#edf0f5"><td colspan="9" style="padding:2.6px 7px;font-size:7.5px;' +
+      'font-weight:700;color:#6B7BA8;letter-spacing:.06em">' + t2.toUpperCase() + '</td></tr>';
+
+    const hay = a => Array.isArray(a) && a.some(x => Math.abs(x || 0) > 0.0005);
+    const hasGaAd = hay(R2.total_gastos_adicionales) || hay(R2.finiquitos) || hay(R2.multas);
+    const IT = R2.ingresos_totales, ITP = R2.ingresos_totales_p;
+
+    const cuerpo =
+      sep('Ingresos') +
+      fila('Ingresos de actividades ordinarias (MM$)', R2.ingresos_totales, R2.ingresos_totales_p, R2.ingresos_totales_v, R2.ingresos_totales_vp) +
+      filaSub('Ingresos por contratos (MM$)', R2.ingresos_contratos, R2.ingresos_contratos_p, R2.ingresos_contratos_v, R2.ingresos_contratos_vp) +
+      filaSub('Ingresos por otras actividades (MM$)', R2.ingresos_otras, R2.ingresos_otras_p, R2.ingresos_otras_v, R2.ingresos_otras_vp) +
+      fila('(−) Costo de ventas (MM$)', R2.costo_ventas, R2.costo_ventas_p, R2.costo_ventas_v, R2.costo_ventas_vp, true) +
+      (hay(R2.costo_tecnicos)  ? filaReal('Costo Técnicos y Personal (MM$, sólo Real)', R2.costo_tecnicos) : '') +
+      (hay(R2.costo_repuestos) ? filaReal('Costo Repuestos y Otros (MM$, sólo Real)', R2.costo_repuestos) : '') +
+      filaCel('= Margen del Producto (MM$)', R2.margen_mm, R2.margen_mm_p, R2.margen_mm_v, R2.margen_mm_vp) +
+      filaPct('Margen %', R2.margen_mm, R2.margen_mm_p, IT, ITP) +
+      sep('Gastos Operacionales Directos') +
+      fila('(−) Gasto beneficios empleados Directos (MM$)', R2.gastos_empleados, R2.gastos_empleados_p, R2.gastos_empleados_v, R2.gastos_empleados_vp, true) +
+      (hay(R2.otros_gastos) || hay(R2.otros_gastos_p)
+        ? fila('(−) Otros gastos por naturaleza Directos (MM$)', R2.otros_gastos, R2.otros_gastos_p, R2.otros_gastos_v, R2.otros_gastos_vp, true) : '') +
+      filaCel('= EBITDA Directo (MM$)', R2.ebitda_directo, R2.ebitda_directo_p, R2.ebitda_directo_v, R2.ebitda_directo_vp) +
+      filaPct('%  EBITDA Directo', R2.ebitda_directo, R2.ebitda_directo_p, IT, ITP) +
+      sep('GAV Indirecto') +
+      fila('(−) GAV Indirecto (MM$)', R2.gav_indirecto, R2.gav_indirecto_p, R2.gav_indirecto_v, R2.gav_indirecto_vp, true) +
+      filaCel('= EBITDA Indirecto (MM$)', R2.ebitda_indirecto, R2.ebitda_indirecto_p, R2.ebitda_indirecto_v, R2.ebitda_indirecto_vp) +
+      (hasGaAd ? sep('Gastos Adicionales') +
+        fila('Finiquitos (MM$)', R2.finiquitos, R2.finiquitos_p, R2.finiquitos_v, R2.finiquitos_vp, true) +
+        fila('Multas (MM$)', R2.multas, R2.multas_p, R2.multas_v, R2.multas_vp, true) +
+        fila('Prov. Obsolescencias Inventarios (MM$)', R2.prov_obsolescencias, R2.prov_obsolescencias_p, R2.prov_obsolescencias_v, R2.prov_obsolescencias_vp, true) +
+        fila('Prov. Incobrables (MM$)', R2.prov_incobrables, R2.prov_incobrables_p, R2.prov_incobrables_v, R2.prov_incobrables_vp, true) +
+        fila('Prov. Habilitación Oficinas (MM$)', R2.prov_habilitacion, R2.prov_habilitacion_p, R2.prov_habilitacion_v, R2.prov_habilitacion_vp, true) +
+        fila('Total Gastos Adicionales (MM$)', R2.total_gastos_adicionales, R2.total_gastos_adicionales_p, R2.total_gastos_adicionales_v, R2.total_gastos_adicionales_vp, true) : '') +
+      filaAzul('= EBITDA Empresa (MM$)', R2.ebitda_empresa, R2.ebitda_empresa_p, R2.ebitda_empresa_v, R2.ebitda_empresa_vp) +
+      filaPct('%  EBITDA Empresa', R2.ebitda_empresa, R2.ebitda_empresa_p, IT, ITP) +
+      sep('Resultado Operacional') +
+      fila('(−) Depreciación y amortización (MM$)', R2.depreciacion, R2.depreciacion_p, R2.depreciacion_v, R2.depreciacion_vp, true) +
+      filaCel('= Resultado Operacional (MM$)', R2.resultado_operacional, R2.resultado_operacional_p, R2.resultado_operacional_v, R2.resultado_operacional_vp) +
+      sep('Resultado No Operacional') +
+      fila('Otros ingresos por función (MM$)', R2.otros_ingresos_funcion, R2.otros_ingresos_funcion_p, R2.otros_ingresos_funcion_v, R2.otros_ingresos_funcion_vp) +
+      fila('Ingreso financiero (MM$)', R2.ingreso_financiero, R2.ingreso_financiero_p, R2.ingreso_financiero_v, R2.ingreso_financiero_vp) +
+      fila('Costo financiero (MM$)', R2.costo_financiero, R2.costo_financiero_p, R2.costo_financiero_v, R2.costo_financiero_vp, true) +
+      fila('Otros gastos por función (MM$)', R2.otros_gastos_funcion, R2.otros_gastos_funcion_p, R2.otros_gastos_funcion_v, R2.otros_gastos_funcion_vp, true) +
+      fila('Diferencia de cambio (MM$)', R2.diferencia_cambio, R2.diferencia_cambio_p, R2.diferencia_cambio_v, R2.diferencia_cambio_vp) +
+      filaCel('= Resultado no operacional (MM$)', R2.resultado_no_operacional, R2.resultado_no_operacional_p, R2.resultado_no_operacional_v, R2.resultado_no_operacional_vp) +
+      sep('Resultado Final') +
+      filaCel('= Resultado antes de impuestos (MM$)', R2.resultado_antes_imp, R2.resultado_antes_imp_p, R2.resultado_antes_imp_v, R2.resultado_antes_imp_vp) +
+      fila('(−) Impuesto a la renta (MM$)', R2.impuesto_renta, R2.impuesto_renta_p, R2.impuesto_renta_v, R2.impuesto_renta_vp, true) +
+      filaAzul('= Resultado del ejercicio (MM$)', R2.resultado_ejercicio, R2.resultado_ejercicio_p, R2.resultado_ejercicio_v, R2.resultado_ejercicio_vp);
+
+    const thG = (t2, span) => '<th colspan="' + span + '" style="background:#002D73;color:#fff;font-size:9px;' +
+      'padding:4px 7px;letter-spacing:.05em;border-right:1px solid rgba(255,255,255,.25)">' + t2 + '</th>';
+    const thC = t2 => '<th style="background:#33448D;color:#fff;font-size:7.5px;padding:3px 7px;text-align:right;' +
+      'letter-spacing:.03em;white-space:nowrap">' + t2 + '</th>';
+    const hoy = (window.APP_DATA || {}).hoy || '';
+    const acumLbl = 'Acumulado ' + M[0] + '–' + M[ult];
+
+    wrap = document.createElement('div');
+    wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:940px;' +
+      'padding:18px 24px 22px;font-family:Arial,sans-serif;color:#111;box-sizing:border-box';
+    wrap.innerHTML =
+      '<div style="border-bottom:2.5px solid #002D73;padding-bottom:7px;margin-bottom:12px">' +
+        '<span style="font-size:15px;font-weight:700;color:#002D73">TECSERVICE — Estado de Resultado · Servicio Técnico S&amp;S</span>' +
+        '&emsp;<span style="font-size:10px;color:#555">' + M[ult] + ' y acumulado del año' +
+        (hoy ? ' &nbsp;·&nbsp; Datos al ' + hoy : '') + '</span></div>' +
+      '<table style="border-collapse:collapse;width:100%">' +
+        '<thead><tr>' +
+          '<th rowspan="2" style="background:#002D73;color:#fff;font-size:9px;padding:4px 7px;text-align:left;' +
+            'border-right:1px solid rgba(255,255,255,.25)">CONCEPTO</th>' +
+          thG(M[ult].toUpperCase(), 4) + thG(acumLbl.toUpperCase(), 4) +
+        '</tr><tr>' +
+          thC('REAL') + thC('PTTO') + thC('VAR') + thC('VAR %') +
+          thC('REAL') + thC('PTTO') + thC('VAR') + thC('VAR %') +
+        '</tr></thead><tbody>' + cuerpo + '</tbody></table>' +
+      '<div style="font-size:7.5px;color:#8892a8;margin-top:7px;line-height:1.5">' +
+        'Cifras en MM$. El acumulado suma los ' + n + ' meses cerrados del año (' + M[0] + '–' + M[ult] + ') y ' +
+        'se compara contra el presupuesto acumulado del mismo período. La variación es real − presupuesto en ' +
+        'ambos bloques, así que positivo y verde es siempre favorable —más ingreso o menos costo que lo ' +
+        'presupuestado— y negativo y rojo, desfavorable. El costo de ventas se abre en técnicos/personal y ' +
+        'repuestos, apertura que el Excel sólo trae en Real, por eso sus columnas de presupuesto van en «—».</div>';
+
+    document.body.appendChild(wrap);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const realW = Math.ceil(wrap.getBoundingClientRect().width)  || wrap.offsetWidth;
+    const realH = Math.ceil(wrap.getBoundingClientRect().height) || wrap.offsetHeight;
+    if (!realW || !realH) throw new Error('No se pudo medir el contenido');
+    const canvas = await html2canvas(wrap, {
+      scale: hdEscala(realW, realH), backgroundColor: '#ffffff', useCORS: true, logging: false,
+      width: realW, height: realH, windowWidth: realW, windowHeight: realH,
+    });
+    const { jsPDF } = window.jspdf;
+    const MM_PX = 25.4 / 96;
+    const pw = realW * MM_PX, ph = realH * MM_PX;
+    const pdf = new jsPDF({ orientation: pw >= ph ? 'landscape' : 'portrait', unit: 'mm',
+                            format: [pw, ph], compress: true });
+    const im = hdImagen(canvas);
+    pdf.addImage(im.data, im.fmt, 0, 0, pw, ph);
+    pdf.save('EERR_Resumen_TS_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
+  } catch (err) {
+    console.error('eerrExportResumenPDF:', err);
+    alert('Error al generar PDF: ' + err.message);
+  } finally {
+    if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    if (btn) { btn.disabled = false; btn.innerHTML = ICON; }
+  }
+}
+
 async function eerrExportPDF() {
   // Verificar librerías antes de todo
   if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
@@ -481,7 +680,7 @@ async function eerrExportPDF() {
     wrap.style.width   = realW + 'px';
 
     const canvas = await html2canvas(wrap, {
-      scale:        2,
+      scale:        hdEscala(realW, realH),
       backgroundColor: '#ffffff',
       useCORS:      true,
       logging:      false,
@@ -500,9 +699,11 @@ async function eerrExportPDF() {
       orientation: pageW >= pageH ? 'landscape' : 'portrait',
       unit: 'mm',
       format: [pageW, pageH],
+      compress: true,
     });
 
-    pdf.addImage(canvas.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, pageW, pageH);
+    const im = hdImagen(canvas);
+    pdf.addImage(im.data, im.fmt, 0, 0, pageW, pageH);
     pdf.save('EERR_TS_' + mesLbl.replace(/[\s/]+/g, '_') + '_' + ANO + '.pdf');
 
   } catch (err) {

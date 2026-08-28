@@ -888,7 +888,7 @@ async function satExportPDF(){
     const cv = document.getElementById(id);
     if (!cv || !cv.toDataURL) return '';
     try {
-      return '<img src="' + cv.toDataURL('image/png') + '" style="width:' + w + 'px;height:' + h +
+      return '<img src="' + (hdChartImg(cv) || cv.toDataURL('image/png')) + '" style="width:' + w + 'px;height:' + h +
              'px;object-fit:contain;display:block">';
     } catch (e) { return ''; }
   };
@@ -1069,7 +1069,7 @@ async function satExportPDF(){
     if (!realW || !realH) throw new Error('No se pudo medir el contenido');
 
     const canvas = await html2canvas(wrap, {
-      scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
+      scale: hdEscala(realW, realH), backgroundColor: '#ffffff', useCORS: true, logging: false,
       width: realW, height: realH, windowWidth: realW, windowHeight: realH,
     });
 
@@ -1078,9 +1078,10 @@ async function satExportPDF(){
     const pageW = realW * MM_PX, pageH = realH * MM_PX;
     const pdf = new jsPDF({
       orientation: pageW >= pageH ? 'landscape' : 'portrait',
-      unit: 'mm', format: [pageW, pageH],
+      unit: 'mm', format: [pageW, pageH], compress: true,
     });
-    pdf.addImage(canvas.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, pageW, pageH);
+    const im = hdImagen(canvas);
+    pdf.addImage(im.data, im.fmt, 0, 0, pageW, pageH);
     pdf.save('Satisfaccion_Clientes_TS_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
 
   } catch (err) {

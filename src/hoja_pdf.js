@@ -318,7 +318,7 @@ async function generarPDF() {
   const chartImg = (id) => {
     try {
       const c = document.getElementById(id);
-      return c ? c.toDataURL('image/png') : null;
+      return c ? (hdChartImg(c) || c.toDataURL('image/png')) : null;
     } catch (e) { return null; }
   };
 
@@ -353,7 +353,8 @@ async function generarPDF() {
     await new Promise(r => setTimeout(r, 80));
 
     const cv = await html2canvas(rpt, {
-      scale: 1.6, useCORS: true, allowTaint: true, logging: false,
+      scale: hdEscala(1260, Math.max(rpt.scrollHeight + 50, 860)),
+      useCORS: true, allowTaint: true, logging: false,
       backgroundColor: '#fff', windowWidth: 1260,
       windowHeight: Math.max(rpt.scrollHeight + 50, 860),
     });
@@ -392,7 +393,9 @@ async function generarPDF() {
 
     try {
       const cv = await buildPage(sec);
-      const imgData = cv.toDataURL('image/jpeg', 0.88);
+      // informe de ~10 páginas: se fuerza JPEG de alta calidad, con PNG el
+      // archivo completo se vuelve inmanejable para enviar por correo
+      const imgData = hdImagen(cv, true).data;
       const rawH    = cv.height * PW / cv.width;
       const avail   = PH - HDR;
 
@@ -412,7 +415,7 @@ async function generarPDF() {
           sl.getContext('2d').drawImage(cv, 0, sy, cv.width, sh, 0, 0, cv.width, sh);
           if (pg > 0) pdf.addPage();
           drawHdr(sec.lab, pg, pages);
-          pdf.addImage(sl.toDataURL('image/jpeg', 0.88), 'JPEG', 0, HDR, PW, sh * PW / cv.width, '', 'FAST');
+          pdf.addImage(hdImagen(sl, true).data, 'JPEG', 0, HDR, PW, sh * PW / cv.width, '', 'FAST');
         }
       }
     } catch (err) {
