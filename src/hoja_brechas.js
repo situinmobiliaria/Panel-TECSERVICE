@@ -711,6 +711,231 @@
       </div>`;
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // QUÉ COMPRAR POR CLIENTE
+  // ══════════════════════════════════════════════════════════════
+  // Cruza la cantidad pedida de cada SKU con el stock en bodega y con las
+  // órdenes ya puestas al proveedor, para llegar a cuánto hay que comprar.
+  //
+  // El punto delicado es que el stock es UNO SOLO y varios clientes pueden
+  // estar esperando el mismo repuesto. Restarle las mismas 5 unidades a cada
+  // cliente diría que todos están cubiertos y que no hay que comprar nada.
+  // Por eso la asignación es secuencial: dentro de cada SKU los clientes se
+  // ordenan por el monto que tienen detenido y las unidades disponibles se
+  // reparten en ese orden hasta agotarse. Lo que queda sin cubrir después de
+  // repartir es lo que efectivamente hay que comprar.
+  //
+  // El criterio de prioridad es el dinero en juego, no el orden alfabético ni
+  // la antigüedad: si hay una sola pieza, se la lleva la brecha más grande.
+  let _cmpSoloComprar = false;
+  const _cmpOpen = new Set();
+
+  window._brCmpTog = function (c) {
+    if (_cmpOpen.has(c)) _cmpOpen.delete(c); else _cmpOpen.add(c);
+    stCompras();
+  };
+  window._brCmpF = function () { _cmpSoloComprar = !_cmpSoloComprar; stCompras(); };
+
+  function _asignacion() {
+    // Stock actual por SKU, sumando todas las bodegas.
+    const stock = {};
+    Object.values(INV.data || {}).forEach(d => (d.items || []).forEach(i => {
+      stock[i.sku] = (stock[i.sku] || 0) + i.st;
+    }));
+    const bo = A.back_order || {};
+
+    // Demanda al nivel (cliente, SKU): un mismo cliente puede pedir el mismo
+    // repuesto en varias órdenes de venta y hay que tratarlas como una sola.
+    const dem = {};
+    (ST.clientes_det || []).forEach(c => (c.skus || []).forEach(k => {
+      const id = c.cliente + '\u0000' + k.cod;
+      const d = dem[id] || (dem[id] = {
+        cliente: c.cliente, cod: k.cod, prod: k.prod, cant: 0, monto: 0, rot: k.rot,
+      });
+      d.cant += k.cant; d.monto += k.monto;
+    }));
+
+    // Reparto por SKU, de mayor a menor monto detenido.
+    const porSku = {};
+    Object.values(dem).forEach(d => (porSku[d.cod] || (porSku[d.cod] = [])).push(d));
+    Object.keys(porSku).forEach(cod => {
+      let dispSt = stock[cod] === undefined ? 0 : stock[cod];
+      let dispBo = +bo[cod] || 0;
+      porSku[cod].sort((a, b) => b.monto - a.monto).forEach(d => {
+        d.pu = d.cant ? d.monto / d.cant : 0;
+        d.enInv = stock[cod] !== undefined;
+        d.st = Math.min(dispSt, d.cant); dispSt -= d.st;
+        const resto = d.cant - d.st;
+        d.bo = Math.min(dispBo, resto); dispBo -= d.bo;
+        d.comprar = resto - d.bo;
+        d.valComprar = d.comprar * d.pu;
+      });
+    });
+    return Object.values(dem);
+  }
+
+  function stCompras() {
+    const box = document.getElementById('br-st-compras');
+    if (!box) return;
+    const items = _asignacion();
+    if (!items.length) { box.innerHTML = ''; return; }
+
+    // Agregado por cliente
+    const g = {};
+    items.forEach(d => {
+      const c = g[d.cliente] || (g[d.cliente] = {
+        cliente: d.cliente, n: 0, cant: 0, monto: 0, st: 0, bo: 0, comprar: 0, val: 0, skus: [],
+      });
+      c.n++; c.cant += d.cant; c.monto += d.monto;
+      c.st += d.st; c.bo += d.bo; c.comprar += d.comprar; c.val += d.valComprar;
+      c.skus.push(d);
+    });
+    // De mayor a menor brecha en $: es el mismo orden en que se reparte el
+    // stock, así que la tabla se lee en el orden en que se prioriza.
+    let D = Object.values(g).sort((a, b) => b.monto - a.monto || b.val - a.val);
+    if (_cmpSoloComprar) D = D.filter(c => c.comprar > 0);
+
+    const T = D.reduce((a, c) => ({
+      n: a.n + c.n, cant: a.cant + c.cant, monto: a.monto + c.monto, st: a.st + c.st,
+      bo: a.bo + c.bo, comprar: a.comprar + c.comprar, val: a.val + c.val,
+    }), { n: 0, cant: 0, monto: 0, st: 0, bo: 0, comprar: 0, val: 0 });
+
+    const TD = 'padding:.3rem .55rem;white-space:nowrap';
+    const num = (v, extra) => '<td style="' + TD + ';text-align:right;font-size:.62rem;' +
+      'font-variant-numeric:tabular-nums;' + (extra || '') + SEP + '">' + v + '</td>';
+
+    let html =
+      '<div style="display:flex;gap:.5rem;margin-bottom:.55rem;flex-wrap:wrap;align-items:center">' +
+        '<button onclick="window._brCmpF()" style="font-size:.58rem;padding:.18rem .55rem;border-radius:3px;' +
+          'cursor:pointer;border:1px solid ' + (_cmpSoloComprar ? '#C00000' : 'var(--brd)') + ';' +
+          'background:' + (_cmpSoloComprar ? '#C0000018' : 'var(--bg2)') + ';color:' +
+          (_cmpSoloComprar ? '#C00000' : 'var(--txt)') + ';font-weight:' +
+          (_cmpSoloComprar ? 700 : 400) + '">Sólo con compra pendiente</button>' +
+        '<span style="font-size:.57rem;color:var(--mut)">' + D.length + ' clientes · ' + T.n +
+          ' pares cliente-SKU · clic en un cliente para el detalle</span>' +
+      '</div>' +
+      '<div style="overflow-x:auto;max-height:520px;overflow-y:auto">' +
+      '<table style="width:100%;border-collapse:collapse;min-width:940px;table-layout:fixed"><colgroup>' +
+      '<col style="width:26%"><col style="width:7%"><col style="width:9%"><col style="width:11%">' +
+      '<col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:12%">' +
+      '<col style="width:8%">' +
+      '</colgroup><thead><tr>' +
+      th('CLIENTE / SKU') + th('SKU', 'right') + th('UN. SOLIC.', 'right') + th('BRECHA', 'right') +
+      th('DE STOCK', 'right') + th('DE BACK ORDER', 'right') + th('POR COMPRAR', 'right') +
+      th('VALOR A COMPRAR', 'right') + th('% CUBIERTO', 'right') +
+      '</tr></thead><tbody>';
+
+    D.forEach((c, i) => {
+      const ab = _cmpOpen.has(c.cliente);
+      const cub = c.cant ? (c.st + c.bo) / c.cant * 100 : 0;
+      html += '<tr onclick="window._brCmpTog(' + JSON.stringify(c.cliente).replace(/"/g, '&quot;') + ')" ' +
+        'style="cursor:pointer;background:' + (i % 2 ? 'var(--bg)' : 'var(--bg2)') + '">' +
+        '<td style="' + TD + ';font-size:.65rem;font-weight:700;color:var(--am);overflow:hidden;' +
+          'text-overflow:ellipsis;' + SEP + '" title="' + esc(c.cliente) + '">' +
+          '<span style="display:inline-block;width:11px;color:var(--mut)">' + (ab ? '▾' : '▸') + '</span>' +
+          esc(c.cliente) + '</td>' +
+        num(c.n) + num(nUn(c.cant), 'color:var(--mut);') +
+        num(nMM(c.monto), 'font-weight:700;color:var(--az1);') +
+        num(c.st ? nUn(c.st) : '—', c.st ? 'color:var(--gn);' : 'color:var(--mut);') +
+        num(c.bo ? nUn(c.bo) : '—', c.bo ? 'color:#1F6FB2;' : 'color:var(--mut);') +
+        num(c.comprar ? nUn(c.comprar) : '0',
+            c.comprar ? 'font-weight:700;color:#C00000;' : 'font-weight:700;color:var(--gn);') +
+        num(c.val ? nMM(c.val) : '—', c.val ? 'font-weight:700;color:#C00000;' : 'color:var(--gn);') +
+        num(cub.toFixed(0) + '%', 'color:' + (cub >= 99 ? 'var(--gn)' : cub >= 50 ? 'var(--or)' : 'var(--rd)') + ';') +
+        '</tr>';
+
+      if (ab) {
+        c.skus.slice().sort((a, b) => b.valComprar - a.valComprar || b.monto - a.monto).forEach(d => {
+          const cb = d.cant ? (d.st + d.bo) / d.cant * 100 : 0;
+          html += '<tr style="background:var(--gy)">' +
+            '<td style="' + TD + ';font-size:.6rem;padding-left:1.8rem;overflow:hidden;' +
+              'text-overflow:ellipsis;' + SEP + '" title="' + esc(d.cod + ' · ' + d.prod) + '">' +
+              '<span style="font-family:\'Roboto Mono\',monospace;font-size:.57rem;color:var(--az2)">' +
+              esc(d.cod) + '</span> <span style="color:var(--mut)">' + esc(d.prod) + '</span></td>' +
+            '<td style="' + SEP + '"></td>' +
+            num(nUn(d.cant), 'color:var(--mut);') + num(nMM(d.monto), 'color:var(--az2);') +
+            num(d.st ? nUn(d.st) : (d.enInv ? '0' : 'no está'),
+                d.st ? 'color:var(--gn);' : 'color:var(--mut);font-size:.57rem;') +
+            num(d.bo ? nUn(d.bo) : '—', d.bo ? 'color:#1F6FB2;' : 'color:var(--mut);') +
+            num(d.comprar ? nUn(d.comprar) : '0', d.comprar ? 'color:#C00000;font-weight:700;' : 'color:var(--gn);') +
+            num(d.valComprar ? nMM(d.valComprar) : '—', d.valComprar ? 'color:#C00000;' : 'color:var(--gn);') +
+            num(cb.toFixed(0) + '%', 'color:var(--mut);') +
+            '</tr>';
+        });
+      }
+    });
+
+    const cubT = T.cant ? (T.st + T.bo) / T.cant * 100 : 0;
+    html += '</tbody><tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">' +
+      '<td style="padding:.35rem .55rem;font-size:.62rem;' + SEP + '">TOTAL · ' + D.length + ' clientes</td>' +
+      '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + T.n + '</td>' +
+      '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + nUn(T.cant) + '</td>' +
+      '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + nMM(T.monto) + '</td>' +
+      '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + nUn(T.st) + '</td>' +
+      '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + nUn(T.bo) + '</td>' +
+      '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + nUn(T.comprar) + '</td>' +
+      '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + nMM(T.val) + '</td>' +
+      '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem">' + cubT.toFixed(0) + '%</td>' +
+      '</tr></tfoot></table></div>' +
+      '<p style="font-size:.56rem;color:var(--mut);margin:.5rem 0 0;line-height:1.55">' +
+      '<strong>Por comprar = Un. solicitadas − stock asignado − back order asignado.</strong> ' +
+      'El stock de bodega y las órdenes ya puestas al proveedor son una sola bolsa por SKU, así que se ' +
+      '<strong>asignan secuencialmente</strong>: dentro de cada repuesto los clientes se ordenan por el monto ' +
+      'que tienen detenido y las unidades se reparten en ese orden hasta agotarse. Por eso un cliente puede ' +
+      'aparecer sin cobertura aunque el SKU figure con stock: ese stock ya quedó comprometido con una brecha ' +
+      'mayor. Restarle el stock completo a cada cliente por separado —que es lo intuitivo— haría aparecer ' +
+      'cubierta una demanda que la bodega no alcanza a servir. ' +
+      '«no está» significa que el código no aparece en el inventario y se computa como cero.</p>';
+
+    box.innerHTML = html;
+    const cEl = document.getElementById('br-cmp-count');
+    if (cEl) cEl.textContent = nUn(T.comprar) + ' unidades por comprar · ' + nMM(T.val);
+  }
+
+  window.brComprasExportPDF = async function () {
+    if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+      alert('Librerías PDF no cargadas. Verifique conexión a internet e intente de nuevo.');
+      return;
+    }
+    let wrap = null;
+    try {
+      const src = document.getElementById('br-st-compras');
+      if (!src) throw new Error('No se encontró el contenido');
+      const hoy = A.hoy || '';
+      wrap = document.createElement('div');
+      wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:1240px;' +
+        'padding:18px 24px 22px;font-family:Arial,sans-serif;color:#111;box-sizing:border-box';
+      const enc = document.createElement('div');
+      enc.style.cssText = 'border-bottom:2.5px solid #002D73;padding-bottom:7px;margin-bottom:12px';
+      enc.innerHTML = '<span style="font-size:15px;font-weight:700;color:#002D73">' +
+        'TECSERVICE — Qué comprar por cliente</span>' +
+        (hoy ? '&emsp;<span style="font-size:10px;color:#555">Datos al ' + hoy + '</span>' : '');
+      wrap.appendChild(enc);
+      const cl = src.cloneNode(true);
+      cl.querySelectorAll('*').forEach(n => {
+        n.style.position = 'static'; n.style.maxHeight = 'none'; n.style.overflow = 'visible';
+      });
+      wrap.appendChild(cl);
+      document.body.appendChild(wrap);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const realW = Math.ceil(wrap.getBoundingClientRect().width) || wrap.offsetWidth;
+      const realH = Math.ceil(wrap.getBoundingClientRect().height) || wrap.offsetHeight;
+      if (!realW || !realH) throw new Error('No se pudo medir el contenido');
+      const canvas = await html2canvas(wrap, {
+        scale: hdEscala(realW, realH), backgroundColor: '#ffffff', useCORS: true, logging: false,
+        width: realW, height: realH, windowWidth: realW, windowHeight: realH,
+      });
+      const MM_PX = 25.4 / 96;
+      await hdEntregar(canvas, 'Que_comprar_por_cliente_TS_' + (hoy || '').replace(/[\s/]+/g, '-'),
+                       realW * MM_PX, realH * MM_PX);
+    } catch (err) {
+      console.error('brComprasExportPDF:', err);
+      alert('Error al generar: ' + err.message);
+    } finally {
+      if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    }
+  };
+
   window.initBrechas = function () {
     if (!OP.total && !ST.total && !CT.total) return;
     kpis(); barraComp();
@@ -719,5 +944,6 @@
     stKPIs(); stAging(); stLinea(); stMes();
     stClientes();
     stProductos(); stFiltro(); stDetalle();
+    stCompras();
   };
 })();

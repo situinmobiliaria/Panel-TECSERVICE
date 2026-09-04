@@ -297,6 +297,7 @@ async function vencExportPDF(){
   try {
     const { jsPDF } = window.jspdf;
     const MM_PX = 25.4 / 96;
+    const nomBase = 'Vencimientos_Contratos_TS_' + (hoy || '').replace(/[\s/]+/g, '-');
 
     for (let i = 0; i < paginas.length; i++) {
       const p = paginas[i];
@@ -318,6 +319,13 @@ async function vencExportPDF(){
       wrap.parentNode.removeChild(wrap); wrap = null;
 
       const pageW = realW * MM_PX, pageH = realH * MM_PX;
+      // En imagen no existe el documento de varias hojas: se entrega una por
+      // página, numerada, y siempre como archivo (el portapapeles sólo se
+      // quedaría con la última).
+      if ((window.hdSalida || 'pdf') !== 'pdf') {
+        await hdEntregar(canvas, nomBase + '_p' + (i + 1), pageW, pageH, true);
+        continue;
+      }
       const orient = pageW >= pageH ? 'landscape' : 'portrait';
       if (!pdf) pdf = new jsPDF({ orientation: orient, unit: 'mm', format: [pageW, pageH],
                                  compress: true });
@@ -326,7 +334,8 @@ async function vencExportPDF(){
       pdf.addImage(im.data, im.fmt, 0, 0, pageW, pageH);
     }
 
-    pdf.save('Vencimientos_Contratos_TS_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
+    if (pdf) pdf.save(nomBase + '.pdf');
+    else     hdAviso('Listo: ' + paginas.length + ' imágenes descargadas');
   } catch (err) {
     console.error('vencExportPDF:', err);
     alert('Error al generar PDF: ' + err.message);

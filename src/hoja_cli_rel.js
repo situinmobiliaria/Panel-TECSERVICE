@@ -184,7 +184,8 @@
     </div>
 
     <div class="sh"><h2>Fill Rate para Top Clientes</h2><div class="sh-line"></div>
-      <span class="sh-tag" id="cr-fr-tag">—</span></div>
+      <span class="sh-tag" id="cr-fr-tag">—</span>
+      <button id="cr-fr-pdf" onclick="return false" style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar</button></div>
 
     <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.75rem">
       ${lbl('FILL RATE:')}<div style="display:flex;gap:.25rem" id="cr-seg-fill"></div>
@@ -497,6 +498,14 @@
 
     const d = document.getElementById('cr-fr-def');
     if (d) d.textContent = 'Objetivo: tener en stock ' + cf.desc + '.';
+    const bt = document.getElementById('cr-fr-pdf');
+    if (bt) {
+      // El nombre del archivo lleva el fill rate elegido: son tres exportables
+      // distintos según el objetivo, y conviene distinguirlos al archivarlos.
+      bt.setAttribute('onclick',
+        "exportarPanel({ids:['cr-fr-kpi','cr-fr'],titulo:'Fill Rate para Top Clientes'," +
+        "sub:'Objetivo " + _fill + "%',archivo:'Fill_Rate_" + _fill + "',btn:'cr-fr-pdf'})");
+    }
     const tg = document.getElementById('cr-fr-tag');
     if (tg) tg.textContent = 'Cuánto inventario hay que mantener para atender a los top ' + t.length +
       ' clientes sin quiebres, cruzado con el stock actual y las órdenes de compra en curso.';

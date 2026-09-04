@@ -187,9 +187,7 @@ function _bindMapaCtrl(){
 function _renderMapa(){
   if(!_mapaLeaflet){
     _mapaLeaflet=L.map('mp-leaflet',{zoomControl:true,doubleClickZoom:false}).setView([-35.5,-70.5],5);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
-      attribution:'© OpenStreetMap © CARTO',maxZoom:18
-    }).addTo(_mapaLeaflet);
+    mapaTiles(_mapaLeaflet);
     _mapaLeaflet.on('click',_onMapClick);
     _mapaLeaflet.on('dblclick',_onMapDblClick);
   }

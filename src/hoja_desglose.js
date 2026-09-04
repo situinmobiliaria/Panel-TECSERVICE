@@ -338,9 +338,7 @@
       if(!_regMapL){
         _regMapL = L.map('cDesgMap',{zoomControl:true,scrollWheelZoom:false})
                     .setView([-35.5,-70.5],4);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
-          attribution:'© OpenStreetMap © CARTO',maxZoom:18
-        }).addTo(_regMapL);
+        mapaTiles(_regMapL);
       }
       if(!_regMapLyr){ _regMapLyr=L.layerGroup().addTo(_regMapL); }
       _regMapLyr.clearLayers();

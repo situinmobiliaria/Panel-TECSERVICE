@@ -81,7 +81,7 @@ JS_FILES = [
     "hoja_facturacion.js", "hoja_panelfact.js", "hoja_base_instalada.js", "hoja_satisfaccion.js",
     "hoja_visitas.js", "hoja_mapa.js", "hoja_matriz.js", "hoja_casos.js", "hoja_alerta.js",
     "hoja_pdf.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js",
-    "hoja_cli_rel.js", "hoja_pipeline.js", "hoja_brechas.js",
+    "hoja_prosp_bi.js", "hoja_cli_rel.js", "hoja_pipeline.js", "hoja_brechas.js",
 ]
 
 ANO   = date.today().year
@@ -1015,6 +1015,213 @@ def read_satisfaccion(wb):
 #     col[25]=LineaDeNegocio  col[26]=NombreAnalisis(cliente normalizado, puede ser None)
 #     col[27]=PotencialST (Si/No) — marcas que TECSERVICE aún representa
 # ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# PROSPECTOS BI — la base instalada leída como cartera de renovación
+# ══════════════════════════════════════════════════════════════════════════════
+# Mismas filas activas que read_base_instalada(), pero conservando las dos
+# columnas que esa función ignora y que son las que permiten prospectar:
+#   col Q  (16) «Fecha de Compra»    → la instalación del equipo, de donde sale
+#                                       su vida (hoy − fecha)
+#   col AF (31) «Valorización CLP»   → cuánto vale reponerlo
+#
+# Se emite a nivel de equipo y no agregado: la prospección se hace cruzando
+# libremente región, línea, tipo, estado y un umbral de vida que el usuario
+# mueve en pantalla, y cualquier pre-agregación cerraría esas combinaciones.
+# Son ~13.000 filas de enteros, que comprimen bien.
+#
+# La fecha se guarda como un solo entero ym = año*12 + (mes−1), y −1 cuando la
+# fila no la trae. Sólo un tercio de la base tiene fecha y un sexto tiene
+# valorización: el panel muestra esa cobertura en vez de disimularla, porque
+# un potencial calculado sobre datos incompletos hay que leerlo sabiéndolo.
+
+def read_prospectos_bi(wb):
+    """Base instalada abierta por equipo, con fecha de instalación y valor."""
+    ws = None
+    for name in wb.sheetnames:
+        if "base instalada" in name.lower():
+            ws = wb[name]
+            break
+    if ws is None:
+        return {}
+
+    _EST = {
+        "CONTRATO": "Contrato", "CONTRATO 24/7": "Contrato",
+        "GARANTÍA": "Garantía", "GARANTIA": "Garantía",
+        "SIN GARANTIA": "Sin garantía",
+    }
+
+    regiones, lineas, tipos, clientes, estados = [], [], [], [], []
+    i_reg, i_lin, i_tip, i_cli, i_est = {}, {}, {}, {}, {}
+    # Identificación del equipo, para poder mostrar el detalle bajo cada
+    # cliente: nombre (col E), fabricante (F), modelo (G) y serie (H).
+    nombres, fabricantes, modelos, series = [], [], [], []
+    i_nom, i_fab, i_mod, i_ser = {}, {}, {}, {}
+
+    def ref(lista, indice, valor):
+        if valor not in indice:
+            indice[valor] = len(lista)
+            lista.append(valor)
+        return indice[valor]
+
+    filas_out = []
+    con_fecha = con_valor = 0
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if safe_str(row[0]).upper() != "SI":
+            continue
+        if safe_str(row[1]).upper() == "SI":
+            continue
+
+        tipo = (safe_str(row[12]).strip().upper() or "SIN TIPO") if row[12] else "SIN TIPO"
+        linea = safe_str(row[25]).strip() if row[25] else "Otra"
+        estado = _EST.get(safe_str(row[14]).strip().upper() if row[14] else "", "Sin clasificar")
+        region = _norm_region(row[29] if len(row) > 29 else None)
+
+        cli = safe_str(row[26]).strip() if row[26] else ""
+        if not cli or cli.lower() in ("none", ""):
+            cli = safe_str(row[13]).strip() if row[13] else "SIN CLIENTE"
+        cli = cli.upper()
+        # GEMCO es equipamiento propio, no cartera que prospectar. Se excluye
+        # igual que en read_base_instalada() para que los totales de las dos
+        # hojas hablen del mismo universo.
+        if "GEMCO" in cli:
+            continue
+
+        pot = safe_str(row[27]).strip().upper() if len(row) > 27 and row[27] is not None else ""
+        es_pot = 1 if pot in ("SI", "SÍ", "S", "1", "TRUE", "VERDADERO") else 0
+
+        f = row[16] if len(row) > 16 else None
+        if isinstance(f, (datetime, date)):
+            ym = f.year * 12 + (f.month - 1)
+            dia = f.day
+            con_fecha += 1
+        else:
+            ym, dia = -1, 0
+
+        v = row[31] if len(row) > 31 else None
+        valor = int(round(to_float(v))) if isinstance(v, (int, float)) and v else 0
+        if valor:
+            con_valor += 1
+
+        filas_out.append([
+            ref(regiones, i_reg, region),
+            ref(lineas, i_lin, linea),
+            ref(tipos, i_tip, tipo),
+            ref(clientes, i_cli, cli),
+            ref(estados, i_est, estado),
+            es_pot, ym, valor,
+            ref(nombres, i_nom, safe_str(row[4]).strip() if row[4] else ""),
+            ref(fabricantes, i_fab, safe_str(row[5]).strip() if row[5] else ""),
+            ref(modelos, i_mod, safe_str(row[6]).strip() if row[6] else ""),
+            ref(series, i_ser, safe_str(row[7]).strip() if row[7] else ""),
+            dia,
+        ])
+
+    hoy = TODAY
+    return {
+        "regiones": regiones,
+        "lineas":   lineas,
+        "tipos":    tipos,
+        "clientes": clientes,
+        "estados":  estados,
+        "nombres":     nombres,
+        "fabricantes": fabricantes,
+        "modelos":     modelos,
+        "series":      series,
+        "hoy_ym":   hoy.year * 12 + (hoy.month - 1),
+        "vida_util": 10,          # años de referencia para la renovación
+        "n":         len(filas_out),
+        "con_fecha": con_fecha,
+        "con_valor": con_valor,
+        # [región, línea, tipo, cliente, estado, potencialST, ym, valor,
+        #  nombre, fabricante, modelo, serie, día]
+        "filas":     filas_out,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DESGLOSE DE FACTURACIÓN POR CLIENTE
+# ══════════════════════════════════════════════════════════════════════════════
+# La hoja FACTURACIÓN ya trae, cliente por cliente, la facturación total del año
+# separada entre lo que viene de contratos y lo que no ("Correctiva"). Es el
+# único lugar donde ese corte existe a nivel de cliente: el resto del panel sólo
+# sabe el total facturado y si el cliente tiene contrato o no.
+#
+# Las dos partes suman exactamente el total, incluso cuando "Correctiva" sale
+# negativa: eso ocurre cuando lo devengado del contrato supera lo efectivamente
+# facturado en el año, y es información, no un error que haya que recortar.
+
+def read_fact_desglose(wb):
+    """Facturación por cliente abierta en contratos y no contratos."""
+    ws = None
+    for name in wb.sheetnames:
+        if name.strip().upper() == "FACTURACION":
+            ws = wb[name]
+            break
+    if ws is None:
+        print("  ADVERTENCIA: no se encontro la hoja FACTURACION.")
+        return {}
+
+    filas = list(ws.iter_rows(values_only=True))
+    if not filas:
+        return {}
+    cab = filas[0]
+
+    def col(*frag):
+        for f in frag:
+            fn = _norm_cli(f)
+            for i, v in enumerate(cab):
+                if v is not None and fn in _norm_cli(v):
+                    return i
+        return None
+
+    C = {
+        "nombre": col("NOMBRA ANALISIS", "NOMBRE ANALISIS", "NOMBRE DEL CLIENTE"),
+        "t26":    col("FACTURACION TOTAL 2026"),
+        "t25":    col("FACTURACION TOTAL 2025"),
+        "c26":    col("FACTURACION TOTAL CONTRATOS 2026"),
+        "c25":    col("FACTURACION TOTAL CONTRATOS 2025"),
+        "k26":    col("FACTURACION TOTAL CORRECTIVA 2026"),
+        "k25":    col("FACTURACION TOTAL CORRECTIVA 2025"),
+        "bi":     col("BI TOTAL"),
+        "tipo":   col("TIPO DE CLIENTE"),
+        "nctr":   col("RECUENTO NUMERO CONTRATOS"),
+    }
+    faltan = [k for k, v in C.items() if v is None]
+    if faltan:
+        print(f"  ADVERTENCIA: columnas no encontradas en FACTURACION: {', '.join(faltan)}")
+
+    def num(row, i):
+        if i is None or i >= len(row):
+            return 0.0
+        v = row[i]
+        return to_float(v) if isinstance(v, (int, float)) else 0.0
+
+    out = {}
+    for row in filas[1:]:
+        if not row:
+            continue
+        nom = safe_str(row[C["nombre"]]).strip() if C["nombre"] is not None else ""
+        if not nom:
+            continue
+        k = _norm_cli(nom)
+        d = out.get(k)
+        if d is None:
+            d = out[k] = {"nombre": nom, "t26": 0.0, "t25": 0.0, "c26": 0.0,
+                          "c25": 0.0, "k26": 0.0, "k25": 0.0, "bi": 0,
+                          "tipo": "", "n_contratos": 0}
+        # Un mismo cliente puede venir en más de una fila (alias de facturación):
+        # se suman los montos y se conserva el mayor recuento de contratos.
+        for f in ("t26", "t25", "c26", "c25", "k26", "k25"):
+            d[f] += num(row, C[f])
+        d["bi"] = max(d["bi"], int(num(row, C["bi"])))
+        d["n_contratos"] = max(d["n_contratos"], int(num(row, C["nctr"])))
+        if not d["tipo"] and C["tipo"] is not None and C["tipo"] < len(row):
+            d["tipo"] = safe_str(row[C["tipo"]]).strip()
+
+    print(f"       Desglose facturacion: {len(out)} clientes")
+    return out
+
+
 def read_base_instalada(wb):
     ws = None
     for name in wb.sheetnames:
@@ -1570,6 +1777,11 @@ def read_casos(wb):
         "fecha_fin":        buscarD("FECHA FIN"),
         "fecha_ingreso":    buscarD("FECHA DE INGRESO"),
         "costo_cif":        buscarD("COSTO CIF"),
+        # «Fecha de ingreso» es la del equipo; «Fecha de Estado» es la del
+        # estado actual. Son cosas distintas: la primera mide la vida del
+        # equipo, la segunda cuanto lleva detenido en la etapa en que esta.
+        "fecha_estado":     buscarD("FECHA DE ESTADO"),
+        "dias_estado":      buscarD("ANTIGUEDAD DE ESTADO"),
     }
     # El estado del equipo se toma de «COMENTARIO MATILDE», que es la columna
     # categorizada que se muestra y por la que se filtra. Las otras dos
@@ -1589,7 +1801,8 @@ def read_casos(wb):
             libres = [i for i in cols_com if i != i_cat]
             E["comentario_coord"] = libres[0] if libres else None
 
-    faltan = [k for k, v in E.items() if v is None and k not in ("fecha_ingreso", "costo_cif")]
+    faltan = [k for k, v in E.items() if v is None and
+              k not in ("fecha_ingreso", "costo_cif", "fecha_estado", "dias_estado")]
     if faltan:
         print(f"  ADVERTENCIA: columnas no encontradas en Casos Relevantes: {', '.join(faltan)}")
 
@@ -1610,7 +1823,11 @@ def read_casos(wb):
 
     casos, equipos = [], []
     last_coord = ""
-    for row in filas[1:]:
+    # Las dos tablas están lado a lado en la MISMA fila del Excel, así que el
+    # número de fila las une: el caso trae el cliente abreviado a mano («HP
+    # Tisné») y el equipo de esa misma fila trae el nombre completo, que es el
+    # que permite cruzar contra facturación y base instalada.
+    for _i, row in enumerate(filas[1:]):
         if not row:
             continue
         # El coordinador puede venir en celdas combinadas: se arrastra
@@ -1630,6 +1847,7 @@ def read_casos(wb):
                 "salesforce":   txt(row, C["salesforce"]),
                 "acciones":     txt(row, C["acciones"]),
                 "fecha_caso":   fecha(row, C["fecha_caso"]),
+                "fila":         _i,
             })
 
         modelo = txt(row, E["modelo"])
@@ -1654,6 +1872,12 @@ def read_casos(wb):
                 "fecha_fin":        fecha(row, E["fecha_fin"]),
                 "fecha_ingreso":    fecha(row, E["fecha_ingreso"]),
                 "costo_cif":        num(row, E["costo_cif"]),
+                "fila":             _i,
+                "fecha_estado":     fecha(row, E["fecha_estado"]),
+                # La antiguedad del Excel es un =HOY()-fecha, asi que llega
+                # cuadrada al dia de la conversion; el panel igual la
+                # recalcula desde la fecha para no depender de eso.
+                "dias_estado":      num(row, E["dias_estado"]),
             })
 
     return {"casos": casos, "equipos": equipos}
@@ -1940,6 +2164,160 @@ def read_brecha_stock(wb):
         "por_mes":         por_mes,
         "productos":       productos,
         "items":           items,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EQUIPOS QUE MÁS FALLAN
+# ══════════════════════════════════════════════════════════════════════════════
+# La hoja "Repuestos Vendidas" no tiene una columna de equipo: lo que hay es el
+# «Nombre de cotización» (col F), texto libre escrito a mano por quien cotizó.
+# Ahí aparece el equipo cuando la cotización es de una máquina concreta
+# ("AUTOCLAVE STEELCO VS 12/2 VDX 12114 OT 57902") y no aparece cuando la
+# cotización es masiva ("M. PREVENTIVOS DICIEMBRE - HOSPITAL BASE DE OSORNO")
+# o es una cuota de convenio. Por eso el equipo se deduce por patrones y se
+# reconoce explícitamente lo que no se pudo identificar, en vez de repartirlo.
+#
+# Se emite a nivel de línea, no agregado: son ~3.000 filas y así el panel puede
+# cruzar cualquier combinación de año, naturaleza y marca contando cotizaciones
+# y clientes distintos sin que las sumas se dupliquen.
+
+_EQ_TIPOS = [
+    ("Lavadora ultrasónica",      r"ULTRASONIC|ULTRASONID|SONICA|\bUS\s?\d{2,3}\b"),
+    ("Lavadora de endoscopios",   r"REPROCESAD|LAVAENDOSCOPI|\bWD440\b"),
+    ("Lavadora descontaminadora", r"DESCONTAMINAD|\bDS\s?\d{3}|\bPG\s?\d{4}|LAVADORA|LAVAINSTRUMENT"),
+    ("Secadora",                  r"SECADORA|SECADO"),
+    ("Autoclave",                 r"AUTOCLAVE|ESTERILIZADOR|VACU[CK]LAV|CLINICLAVE|"
+                                  r"\bE?VS\s?\d{1,2}\s?/|\bLVS\b|\bEVS\b"),
+    ("Endoscopio",                r"ENDOSCOPI|GASTROSCOPI|COLONOSCOPI|DUODENOSCOPI|BRONCOSCOPI|"
+                                  r"LARINGOSCOPI|NASOFIBRO|FIBRONASO|CISTOSCOPI|VIDEOPROCESAD|FUENTE DE LUZ"),
+    ("Selladora",                 r"SELLADORA|MELASEAL"),
+    ("Maceradora",                r"MACERAD|PUL[PM]MATIC|PULMATIC"),
+    ("Planta de agua / ósmosis",  r"OSMOSIS|PLANTA DE AGUA|DESMINERALIZ|DESTILAD|ABLANDADOR|TRATAMIENTO DE AGUA"),
+    ("Equipo dental",             r"\bDENTAL\b|TURBINA|MICROMOTOR|CHIROPRO|SILLON|UNIDAD ODONTOLOG|"
+                                  r"COMPRESOR|AMALGAM|RAYOS X|RADIOGRAF"),
+    ("Incubadora / cuna",         r"\bCUNA\b|INCUBADOR|FOTOTERAPIA"),
+    ("Monitor / diagnóstico",     r"MONITOR|DESFIBRILAD|ELECTROBISTURI|OXIMETR|CENTRIFUG"),
+    ("Lavacarros",                r"LAVACARRO|LAVA CARRO"),
+]
+# El modelo se busca en el mismo texto. El orden importa: las series de
+# Steelco son las más frecuentes y las más específicas.
+_EQ_MODELOS = [
+    r"\b(?:EVS|LVS|VSX|ESX|EDX|VDX|VS)\s?\d{1,3}\s?(?:[/-]\s?\d{1,2})?\b",
+    r"\bDS\s?\d{3,4}(?:\s?-\s?\d?[A-Z]{1,3}(?:-\d?[A-Z]?)?)?\b",
+    r"\bPG\s?\d{4}\b",
+    r"\b(?:ED|EG|EC|EPK|EPM)\s?-?\s?\d{3,4}\s?[A-Z]{0,3}\b",
+    r"\bUS\s?\d{2,3}\b",
+    r"\bVACU[CK]LAVE?\s?\d{2,3}\s?[A-Z]?\b",
+    r"\bCLINICLAVE\s?\d{2,3}\b",
+    r"\bMELASEAL\s?[A-Z]*\b",
+    r"\bWD\s?\d{3}\b",
+]
+# Naturaleza del gasto. Sólo «Correctivo» habla derechamente de una falla; el
+# resto se separa para no mezclar mantención programada con reparación.
+_EQ_NATS = [
+    ("Correctivo",  r"CORRECTIV|REPARACION|REPARAR|FALLA|EMERGENC|AVERIA|"
+                    r"CAMBIO DE (?:REPUESTO|PIEZA)|NO ENCIENDE|FUGA"),
+    ("Garantía",    r"GARANTIA"),
+    ("Preventivo",  r"PREVENTIV|\bMP\b|\bM\s?\.\s?P\b|MANTENCION|MANTENIMIENTO"),
+    ("Convenio",    r"CONVENIO|CUOTA|ARRIENDO"),
+    ("Uso interno", r"USO INTERNO|HERRAMIENTA|BODEGA|STOCK"),
+]
+_EQ_FAM_V = {"AUTOCLAVES": "Autoclave", "LAVADORA": "Lavadora descontaminadora"}
+_EQ_SIN = "Sin equipo identificado"
+
+
+def _eq_norm(s):
+    t = unicodedata.normalize("NFD", safe_str(s).upper())
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def read_equipos_fallas(wb):
+    """Repuestos vendidos abiertos por equipo, deducido del nombre de cotización."""
+    ws = None
+    for name in wb.sheetnames:
+        n = name.strip().lower()
+        if "repuesto" in n and "vend" in n:
+            ws = wb[name]
+            break
+    if ws is None:
+        return {}
+
+    rx_tipo = [(t, re.compile(p)) for t, p in _EQ_TIPOS]
+    rx_mod = [re.compile(p) for p in _EQ_MODELOS]
+    rx_nat = [(t, re.compile(p)) for t, p in _EQ_NATS]
+
+    marcas, tipos, modelos, nats, cots, clis = [], [], [], [], [], []
+    idx_m, idx_t, idx_mo, idx_n, idx_c, idx_cl = {}, {}, {}, {}, {}, {}
+
+    def ref(lista, indice, valor):
+        if valor not in indice:
+            indice[valor] = len(lista)
+            lista.append(valor)
+        return indice[valor]
+
+    filas_out = []
+    anios = set()
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 22:
+            continue
+        marca = safe_str(row[19]).strip().upper()
+        if not marca:
+            continue
+        monto = to_float(row[15]) if isinstance(row[15], (int, float)) else 0.0
+        cant = to_float(row[12]) if isinstance(row[12], (int, float)) else 0.0
+        anio = row[17] if isinstance(row[17], (int, float)) else None
+        mes = row[18] if isinstance(row[18], (int, float)) else None
+        if anio is None or mes is None:
+            continue
+        anio, mes = int(anio), int(mes)
+        anios.add(anio)
+
+        txt = _eq_norm(row[5])
+        tipo = None
+        for nombre, rx in rx_tipo:
+            if rx.search(txt):
+                tipo = nombre
+                break
+        if tipo is None:
+            # La cotización no nombra el equipo. «Equipo Asociado» (col V) se
+            # deduce del producto, así que sirve de respaldo grueso.
+            tipo = _EQ_FAM_V.get(safe_str(row[21]).strip().upper())
+        modelo = ""
+        for rx in rx_mod:
+            m = rx.search(txt)
+            if m:
+                modelo = re.sub(r"\s*([/-])\s*", r"\1", m.group(0)).strip()
+                break
+        nat = "Sin clasificar"
+        for nombre, rx in rx_nat:
+            if rx.search(txt):
+                nat = nombre
+                break
+
+        filas_out.append([
+            ref(marcas, idx_m, marca),
+            ref(tipos, idx_t, tipo or _EQ_SIN),
+            ref(modelos, idx_mo, modelo),
+            ref(nats, idx_n, nat),
+            anio, mes,
+            ref(cots, idx_c, safe_str(row[6]).strip() or ("#" + str(len(filas_out)))),
+            ref(clis, idx_cl, safe_str(row[2]).strip()),
+            round(monto),
+            round(cant, 2),
+        ])
+
+    return {
+        "marcas":  marcas,
+        "tipos":   tipos,
+        "modelos": modelos,
+        "nats":    nats,
+        "clientes": clis,
+        "anios":   sorted(anios),
+        "sin_eq":  _EQ_SIN,
+        # [marca, tipo, modelo, naturaleza, año, mes, cotización, cliente, monto, cantidad]
+        "filas":   filas_out,
     }
 
 
@@ -2822,6 +3200,44 @@ def read_resumen_tipos_programas(wb):
             "vig_promedio":    round(to_float(row[11]), 1),
         })
     return rows_out
+
+
+def completar_mapa(mapa_data, fact_clientes):
+    """Agrega al mapa los clientes que facturan pero no están en BASE MAPA.
+
+    El mapa se arma desde la hoja BASE MAPA, que no cubre a todos los clientes
+    con facturación: los que faltan hacían que el total del mapa quedara por
+    debajo del de las demás hojas. En vez de dejar el descuadre, se agregan con
+    su facturación y sin coordenadas —el panel ya sabe dibujar filas sin lat/lon,
+    aparecen en las tablas pero no como punto—, de modo que el total del mapa
+    siempre cuadre con la facturación real. Cuando el cliente se cargue en BASE
+    MAPA con su ubicación, esta función deja de agregarlo sola.
+    """
+    if not mapa_data or not fact_clientes:
+        return mapa_data
+    presentes = {_norm_cli(c["n"]) for c in mapa_data}
+    faltan = [c for c in fact_clientes
+              if c.get("real") and _norm_cli(c["cliente"]) not in presentes]
+    for c in faltan:
+        mapa_data.append({
+            "n":            c["cliente"],
+            "tipo":         c.get("tipo_cli") or "",
+            "ingreso_2025": 0,
+            "ingreso_2026": int(round(c["real"])),
+            "ingreso":      int(round(c["real"])),
+            "bi": 0, "eq": {}, "region": "Sin región", "comuna": "",
+            "contratos": 0, "pipe": 0,
+            "lat": None, "lon": None,     # sin ubicación: no se dibuja en el mapa
+            "cc": 0, "margen": 0, "sat": None,
+            "pot_eq": 0, "pot_eq_ester": 0, "pot_eq_endo": 0, "pot_eq_dental": 0,
+            "pot_st": 0, "pot_st_gar": 0, "pot_st_contr": 0, "pot": 0,
+            "sin_base_mapa": True,        # para poder distinguirlos en el panel
+        })
+    if faltan:
+        tot = sum(c["real"] for c in faltan)
+        print(f"       MAPA: +{len(faltan)} clientes facturados sin fila en BASE MAPA "
+              f"(MM${tot/1e6:,.1f}) agregados sin ubicacion")
+    return mapa_data
 
 
 def enrich_mapa_data(mapa_data, contratos, satisf):
@@ -3831,6 +4247,9 @@ def main():
     resumen_programas = read_resumen_tipos_programas(wb2)
     inv_ts = read_inventario_ts(wb2)
     rep_vend = read_repuestos_vendidos(wb2)
+    eq_fallas = read_equipos_fallas(wb2)
+    prosp_bi  = read_prospectos_bi(wb2)
+    fact_desg = read_fact_desglose(wb2)
     br_oport = read_brecha_oport(wb2)
     br_stock = read_brecha_stock(wb2)
     cli_rel  = read_clientes_relevantes(wb2)
@@ -3858,6 +4277,9 @@ def main():
     app_data["resumen_programas"] = resumen_programas
     app_data["inv_ts"] = inv_ts
     app_data["rep_vend"] = rep_vend
+    app_data["eq_fallas"] = eq_fallas
+    app_data["prosp_bi"] = prosp_bi
+    app_data["fact_desglose"] = fact_desg
     app_data["br_oport"] = br_oport
     app_data["br_stock"] = br_stock
     app_data["cli_rel"]  = cli_rel
@@ -3885,15 +4307,16 @@ def main():
               f"({rep_vend['meses'][0]['lbl']}-{rep_vend['meses'][-1]['lbl']}) | "
               f"{rep_vend['n_clientes']} clientes | {len(rep_vend['familias'])} familias | MM${rep_vend['tot_monto_g']/1e6:,.1f} | "
               f"{rep_vend['tot_cant_g']:,.0f} un")
-    # Hora fija 02:50 am (el proceso real de actualización se considera
-    # completo a esa hora todos los días; el aviso por correo sale 10 min
-    # después, a las 03:00 am). Si esta corrida pasa de las 02:50 am del día
-    # de hoy, la próxima ocurrencia real de "02:50 am" es MAÑANA, así que la
-    # fecha avanza un día — nunca queda una fecha/hora 02:50 am que ya pasó.
-    _ahora_real = datetime.now()
-    _ahora = _ahora_real.replace(hour=2, minute=50, second=0, microsecond=0)
-    if _ahora_real > _ahora:
-        _ahora += timedelta(days=1)
+    # Momento real en que se generó el panel, en hora de Chile. Antes se
+    # forzaba la hora del proceso batch (02:50 am) y, si la corrida era más
+    # tarde, se avanzaba un día: el tablero terminaba mostrando una fecha en el
+    # futuro. La zona horaria se fija explícitamente para que el sello sea el
+    # mismo aunque el panel se genere desde un equipo en otro huso.
+    try:
+        from zoneinfo import ZoneInfo
+        _ahora = datetime.now(ZoneInfo("America/Santiago"))
+    except Exception:
+        _ahora = datetime.now()
     app_data["actualizado_label"] = formato_actualizacion(_ahora)
     app_data["actualizado_iso"] = _ahora.isoformat()
     print(f"       {app_data['actualizado_label']}")
@@ -3918,6 +4341,7 @@ def main():
     print(f"       BRECHAS: oport MM${(br_oport.get('total',0))/1e6:,.1f} | "
           f"contrato MM${_b['total']/1e6:,.1f} | stock MM${(br_stock.get('total',0))/1e6:,.1f}")
     enrich_mapa_data(mapa_data, contratos, satisf)
+    completar_mapa(mapa_data, app_data.get("fact_clientes") or [])
     cc_count = sum(1 for c in mapa_data if c["cc"])
     print(f"       MAPA_DATA: {len(mapa_data)} clientes | {cc_count} con contrato")
     print(f"       CASOS: {len(casos_data['casos'])} casos relevantes | {len(casos_data['equipos'])} equipos detenidos")

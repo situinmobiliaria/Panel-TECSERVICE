@@ -574,14 +574,9 @@ async function eerrExportResumenPDF() {
       scale: hdEscala(realW, realH), backgroundColor: '#ffffff', useCORS: true, logging: false,
       width: realW, height: realH, windowWidth: realW, windowHeight: realH,
     });
-    const { jsPDF } = window.jspdf;
     const MM_PX = 25.4 / 96;
-    const pw = realW * MM_PX, ph = realH * MM_PX;
-    const pdf = new jsPDF({ orientation: pw >= ph ? 'landscape' : 'portrait', unit: 'mm',
-                            format: [pw, ph], compress: true });
-    const im = hdImagen(canvas);
-    pdf.addImage(im.data, im.fmt, 0, 0, pw, ph);
-    pdf.save('EERR_Resumen_TS_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
+    await hdEntregar(canvas, 'EERR_Resumen_TS_' + (hoy || '').replace(/[\s/]+/g, '-'),
+                     realW * MM_PX, realH * MM_PX);
   } catch (err) {
     console.error('eerrExportResumenPDF:', err);
     alert('Error al generar PDF: ' + err.message);
@@ -690,21 +685,9 @@ async function eerrExportPDF() {
       windowHeight: realH,
     });
 
-    const { jsPDF } = window.jspdf;
     const MM = 25.4 / 96;
-    const pageW = realW * MM;
-    const pageH = realH * MM;
-
-    const pdf = new jsPDF({
-      orientation: pageW >= pageH ? 'landscape' : 'portrait',
-      unit: 'mm',
-      format: [pageW, pageH],
-      compress: true,
-    });
-
-    const im = hdImagen(canvas);
-    pdf.addImage(im.data, im.fmt, 0, 0, pageW, pageH);
-    pdf.save('EERR_TS_' + mesLbl.replace(/[\s/]+/g, '_') + '_' + ANO + '.pdf');
+    await hdEntregar(canvas, 'EERR_TS_' + mesLbl.replace(/[\s/]+/g, '_') + '_' + ANO,
+                     realW * MM, realH * MM);
 
   } catch (err) {
     console.error('eerrExportPDF:', err);

@@ -1073,16 +1073,9 @@ async function satExportPDF(){
       width: realW, height: realH, windowWidth: realW, windowHeight: realH,
     });
 
-    const { jsPDF } = window.jspdf;
     const MM_PX = 25.4 / 96;
-    const pageW = realW * MM_PX, pageH = realH * MM_PX;
-    const pdf = new jsPDF({
-      orientation: pageW >= pageH ? 'landscape' : 'portrait',
-      unit: 'mm', format: [pageW, pageH], compress: true,
-    });
-    const im = hdImagen(canvas);
-    pdf.addImage(im.data, im.fmt, 0, 0, pageW, pageH);
-    pdf.save('Satisfaccion_Clientes_TS_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
+    await hdEntregar(canvas, 'Satisfaccion_Clientes_TS_' + (hoy || '').replace(/[\s/]+/g, '-'),
+                     realW * MM_PX, realH * MM_PX);
 
   } catch (err) {
     console.error('satExportPDF:', err);

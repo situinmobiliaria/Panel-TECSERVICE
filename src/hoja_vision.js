@@ -395,6 +395,92 @@ function vgGarSort(f){
 }
 function vgGarLinea(l){ _vgGarLinea = l; _vgRenderGar(); }
 
+// ── GARANTÍAS POR LÍNEA DE NEGOCIO ────────────────────────────────
+// Resume la misma cartera que la tabla de arriba, agrupada por línea. El
+// costo estimado sale de aplicar a cada contrato el margen de su plan CARE,
+// así que el «% consumido» de la línea es cuánto de ese costo ya se gastó,
+// ponderado por el tamaño de cada contrato y no un promedio de porcentajes:
+// un contrato de MM$200 al 10% y uno de MM$2 al 90% no consumieron el 50%.
+function _vgRenderGarLinea(){
+  const box = document.getElementById('vg-garl-tabla');
+  if(!box) return;
+  const filas = _vgGarFilas();
+  if(!filas.length){ box.innerHTML=''; return; }
+
+  const g = {};
+  filas.forEach(f=>{
+    const k = f.linea || '—';
+    const d = g[k] || (g[k] = {linea:k, n:0, costoT:0, costoR:0, val:0, dias:0, nd:0, pct:0});
+    d.n++; d.costoT += f.costoT; d.costoR += f.costoR; d.val += f.val; d.pct += f.pct;
+    if(typeof f.dias === 'number'){ d.dias += f.dias; d.nd++; }
+  });
+  const D = Object.values(g).sort((a,b)=>b.val-a.val);
+  const T = D.reduce((a,d)=>({n:a.n+d.n, costoT:a.costoT+d.costoT, costoR:a.costoR+d.costoR,
+    val:a.val+d.val, dias:a.dias+d.dias, nd:a.nd+d.nd, pct:a.pct+d.pct}),
+    {n:0,costoT:0,costoR:0,val:0,dias:0,nd:0,pct:0});
+
+  const SEPg='border-right:1px solid var(--brd)';
+  const TDg='padding:.4rem .7rem;white-space:nowrap';
+  const thg=(t,al)=>'<th style="background:var(--az1);color:#fff;padding:.42rem .7rem;font-size:.6rem;'+
+    'letter-spacing:.04em;text-align:'+(al||'left')+';white-space:nowrap;'+SEPg+'">'+t+'</th>';
+  const ng=(v,extra)=>'<td style="'+TDg+';text-align:right;font-size:.68rem;'+
+    'font-variant-numeric:tabular-nums;'+(extra||'')+SEPg+'">'+v+'</td>';
+  // Cuánto de la bolsa de costo ya se consumió. Se mide sobre los montos y no
+  // promediando los porcentajes de cada contrato: un contrato de MM$200 al 10%
+  // y uno de MM$2 al 90% no consumieron el 50% entre los dos.
+  const pctCons = d => d.costoT>0 ? (1-d.costoR/d.costoT)*100 : 0;
+  const pctSimple = d => d.n ? d.pct/d.n : 0;
+  const colP = p => p>=80?'var(--rd)':p>=50?'var(--or)':'var(--gn)';
+
+  box.innerHTML =
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:760px">'+
+    '<thead><tr>'+
+      thg('LÍNEA DE NEGOCIO')+thg('# CONTRATOS','right')+thg('COSTO TOTAL','right')+
+      thg('COSTO REMANENTE','right')+thg('SUMA TOTAL','right')+
+      thg('PROMEDIO DÍAS RESTANTES','right')+thg('% CONSUMIDO','right')+
+    '</tr></thead><tbody>'+
+    D.map((d,i)=>{
+      const p = pctCons(d);
+      return '<tr style="background:'+(i%2?'var(--bg)':'var(--bg2)')+'">'+
+        '<td style="'+TDg+';font-size:.7rem;font-weight:700;color:var(--am);'+SEPg+'">'+
+          _vgEsc(d.linea)+'</td>'+
+        ng(d.n,'font-weight:700;')+
+        ng(mm(d.costoT),'color:var(--az2);')+
+        ng(mm(d.costoR),'font-weight:700;color:var(--az1);')+
+        ng(mm(d.val),'font-weight:700;')+
+        ng(d.nd?Math.round(d.dias/d.nd).toLocaleString('es-CL'):'—','color:var(--mut);')+
+        ng(fN1(p)+'%','font-weight:700;color:'+colP(p)+';')+
+      '</tr>';
+    }).join('')+
+    '</tbody><tfoot><tr style="background:var(--az3);color:#fff;font-weight:700">'+
+      '<td style="'+TDg+';font-size:.68rem;'+SEPg+'">TOTAL GENERAL</td>'+
+      '<td style="'+TDg+';text-align:right;font-size:.68rem;'+SEPg+'">'+T.n+'</td>'+
+      '<td style="'+TDg+';text-align:right;font-size:.68rem;'+SEPg+'">'+mm(T.costoT)+'</td>'+
+      '<td style="'+TDg+';text-align:right;font-size:.68rem;'+SEPg+'">'+mm(T.costoR)+'</td>'+
+      '<td style="'+TDg+';text-align:right;font-size:.68rem;'+SEPg+'">'+mm(T.val)+'</td>'+
+      '<td style="'+TDg+';text-align:right;font-size:.68rem;'+SEPg+'">'+
+        (T.nd?Math.round(T.dias/T.nd).toLocaleString('es-CL'):'—')+'</td>'+
+      '<td style="'+TDg+';text-align:right;font-size:.68rem">'+fN1(pctCons(T))+'%</td>'+
+    '</tr></tfoot></table></div>'+
+    '<p style="font-size:.58rem;color:var(--mut);margin:.5rem 0 0;line-height:1.55">'+
+    '<strong>Suma total</strong> es el monto de los contratos en garantía de esa línea y '+
+    '<strong>costo total</strong> el costo estimado de atenderlos, aplicando a cada contrato el margen '+
+    'de su programa CARE (50% cuando no tiene programa asignado). El <strong>costo remanente</strong> '+
+    'es la parte de ese costo que aún no se consume, según el avance de cada contrato. '+
+    'El <strong>% consumido</strong> es cuánto del costo estimado ya se gastó, medido sobre los montos '+
+    'y no promediando los porcentajes de cada contrato. Como referencia, el promedio simple del avance '+
+    'de los '+T.n+' contratos da '+fN1(pctSimple(T))+'%: queda más alto porque los contratos chicos van '+
+    'más avanzados que los grandes.</p>';
+
+  const lbl = document.getElementById('vg-garl-lbl');
+  if(lbl) lbl.textContent = D.length+' líneas · '+T.n+' contratos en garantía';
+}
+
+function _vgEsc(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 function _vgRenderGar(){
   const box = document.getElementById('vg-gar-tabla');
   if(!box) return;
@@ -583,18 +669,10 @@ async function vgGarExportPDF(){
       width: realW, height: realH, windowWidth: realW, windowHeight: realH,
     });
 
-    const { jsPDF } = window.jspdf;
     const MM_PX = 25.4 / 96;
-    const pageW = realW * MM_PX;
-    const pageH = realH * MM_PX;
-    const pdf = new jsPDF({
-      orientation: pageW >= pageH ? 'landscape' : 'portrait',
-      unit: 'mm', format: [pageW, pageH], compress: true,
-    });
-    const im = hdImagen(canvas);
-    pdf.addImage(im.data, im.fmt, 0, 0, pageW, pageH);
     const suf = _vgGarLinea === 'todas' ? '' : '_' + _vgGarLinea.replace(/[\s/]+/g, '_');
-    pdf.save('Contratos_Garantia_TS' + suf + '_' + (hoy || '').replace(/[\s/]+/g, '-') + '.pdf');
+    await hdEntregar(canvas, 'Contratos_Garantia_TS' + suf + '_' + (hoy || '').replace(/[\s/]+/g, '-'),
+                     realW * MM_PX, realH * MM_PX);
 
   } catch (err) {
     console.error('vgGarExportPDF:', err);
@@ -613,5 +691,6 @@ function initVision(){
   document.getElementById('vg-srch').oninput=e=>{vgSrch=e.target.value.toLowerCase();renderVG();};
   renderVG();
   _vgRenderGar();
+  _vgRenderGarLinea();
   _renderProgTable();
 }

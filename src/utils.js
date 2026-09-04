@@ -259,6 +259,315 @@ window.hdChartImg = function (id) {
   }
 };
 
+// ─── FORMATO DE SALIDA DE LOS EXPORTABLES ────────────────────────
+// El PDF sirve para archivar y para imprimir, pero no se puede pegar en una
+// lamina de PowerPoint sin abrirlo y capturar la pantalla, que echa a perder
+// la resolucion que se gano al subir la escala. Por eso el mismo boton puede
+// entregar tres cosas distintas, y la eleccion se recuerda entre sesiones:
+//   pdf     — como siempre, un PDF del porte exacto del contenido
+//   png     — descarga la imagen; se arrastra a la lamina y queda nitida
+//   copiar  — la deja en el portapapeles: Ctrl+V dentro de PowerPoint
+window.hdSalida = (function () {
+  try { return localStorage.getItem('hdSalida') || 'pdf'; } catch (e) { return 'pdf'; }
+})();
+
+window.hdSetSalida = function (v) {
+  window.hdSalida = v;
+  try { localStorage.setItem('hdSalida', v); } catch (e) {}
+  document.querySelectorAll('#hd-salida button').forEach(b => {
+    const on = b.dataset.s === v;
+    b.style.background = on ? '#28D2C3' : 'transparent';
+    b.style.color      = on ? '#002D73' : 'rgba(255,255,255,.75)';
+    b.style.fontWeight = on ? '700' : '400';
+  });
+};
+
+// Aviso breve, para que el modo «copiar» no parezca que no hizo nada.
+window.hdAviso = function (txt, error) {
+  let t = document.getElementById('hd-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'hd-toast';
+    t.style.cssText = 'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:99999;' +
+      'padding:.55rem 1.1rem;border-radius:6px;font-family:Roboto,sans-serif;font-size:.72rem;' +
+      'box-shadow:0 6px 24px rgba(0,0,0,.35);pointer-events:none;transition:opacity .25s';
+    document.body.appendChild(t);
+  }
+  t.style.background = error ? '#C00000' : '#002D73';
+  t.style.color = '#fff';
+  t.textContent = txt;
+  t.style.opacity = '1';
+  clearTimeout(window._hdToastT);
+  window._hdToastT = setTimeout(() => { t.style.opacity = '0'; }, 3800);
+};
+
+// Entrega el canvas ya capturado en el formato elegido. anchoMM/altoMM son
+// las medidas de la pagina para el caso PDF. soloDescarga fuerza el archivo
+// aunque este elegido «copiar»: lo usan los exportables de varias paginas,
+// donde el portapapeles solo podria quedarse con la ultima.
+window.hdEntregar = async function (canvas, nombre, anchoMM, altoMM, soloDescarga) {
+  const modo = window.hdSalida || 'pdf';
+
+  if (modo === 'pdf') {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({
+      orientation: anchoMM >= altoMM ? 'landscape' : 'portrait',
+      unit: 'mm', format: [anchoMM, altoMM], compress: true,
+    });
+    const im = window.hdImagen(canvas);
+    pdf.addImage(im.data, im.fmt, 0, 0, anchoMM, altoMM);
+    pdf.save(nombre + '.pdf');
+    return;
+  }
+
+  // PNG sin perdida, a la resolucion completa de la captura
+  const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+  if (!blob) throw new Error('No se pudo generar la imagen');
+
+  if (modo === 'copiar' && !soloDescarga) {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      window.hdAviso('Imagen copiada · pégala en PowerPoint con Ctrl+V');
+      return;
+    } catch (e) {
+      // El navegador puede negar el portapapeles (pestaña sin foco, permiso
+      // denegado, contexto no seguro). En vez de fallar, se descarga.
+      console.warn('portapapeles no disponible, se descarga:', e);
+      window.hdAviso('El navegador no permitió copiar; se descargó la imagen', true);
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre + '.png';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+};
+
+// ─── FONDO DE LOS MAPAS ──────────────────────────────────────────
+// Los mosaicos venían de basemaps.cartocdn.com, que dejó de ser gratuito sin
+// clave: ahora responde HTTP 200 pero con «API KEY REQUIRED» estampado sobre
+// cada mosaico, así que el mapa se rompía sin dar ningún error de red.
+//
+// Se usa Esri World Light Gray, que no pide clave y mantiene el mismo estilo
+// claro y neutro que teníamos (base gris + etiquetas de lugares en una capa
+// aparte, para que los marcadores se lean por encima). Si el proveedor deja
+// de responder, la capa se cambia sola a OpenStreetMap en vez de dejar el
+// mapa en blanco.
+const _ESRI = 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/';
+window.MAPA_CAPAS = [
+  {
+    nombre: 'Esri Light Gray',
+    url:    _ESRI + 'World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    etiquetas: _ESRI + 'World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+    attribution: '© Esri · HERE · Garmin · © OpenStreetMap',
+    maxNativeZoom: 16,
+  },
+  {
+    nombre: 'OpenStreetMap',
+    url:    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© OpenStreetMap',
+    maxNativeZoom: 19,
+  },
+];
+
+// Pone el fondo en un mapa de Leaflet y devuelve la capa base.
+window.mapaTiles = function (map) {
+  let i = 0, base = null, labels = null, fallos = 0;
+
+  const poner = () => {
+    const cfg = window.MAPA_CAPAS[i];
+    if (!cfg || !window.L) return null;
+    fallos = 0;
+    // maxNativeZoom deja que Leaflet escale el último nivel disponible en vez
+    // de dejar el mapa en gris cuando el usuario se acerca más que eso.
+    const opt = { attribution: cfg.attribution, maxZoom: 18, maxNativeZoom: cfg.maxNativeZoom };
+    base = L.tileLayer(cfg.url, opt).addTo(map);
+    if (cfg.etiquetas) {
+      labels = L.tileLayer(cfg.etiquetas, Object.assign({}, opt, { attribution: '' })).addTo(map);
+    }
+    // Un mosaico suelto puede fallar por red; recién con varios se da por
+    // caído el proveedor y se pasa al siguiente.
+    base.on('tileerror', () => {
+      if (++fallos < 5 || i >= window.MAPA_CAPAS.length - 1) return;
+      try { map.removeLayer(base); if (labels) map.removeLayer(labels); } catch (e) {}
+      labels = null;
+      i++;
+      poner();
+    });
+    return base;
+  };
+
+  return poner();
+};
+
+// ─── EXPORTAR UN BLOQUE DEL PANEL ────────────────────────────────
+// Todas las hojas exportan igual: se clonan uno o más bloques de la pantalla,
+// se apilan en una hoja blanca con el encabezado de TECSERVICE y se entregan
+// en el formato elegido arriba (PDF, PNG o portapapeles). Antes cada hoja
+// repetía estas 40 líneas; ahora declaran qué bloques quieren y el resto es
+// común, así que un arreglo de captura vale para todos los botones a la vez.
+//
+//   exportarPanel({
+//     ids:     ['id-bloque', ...]   // en el orden en que van en la hoja
+//     titulo:  'Análisis de facturación',
+//     sub:     'Acumulado a septiembre',   // opcional
+//     archivo: 'Analisis_Facturacion',
+//     btn:     'id-del-boton',             // opcional, para el «Generando…»
+//     ancho:   1240,                       // opcional
+//   })
+window.exportarPanel = async function (o) {
+  if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+    alert('Librerías PDF no cargadas. Verifique conexión a internet e intente de nuevo.');
+    return;
+  }
+  const btn = o.btn ? document.getElementById(o.btn) : null;
+  const ICON = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+  let wrap = null;
+  try {
+    const bloques = (o.ids || []).map(id => document.getElementById(id)).filter(Boolean);
+    if (!bloques.length) throw new Error('No se encontró el contenido a exportar');
+    const hoy = (window.APP_DATA || {}).hoy || '';
+
+    wrap = document.createElement('div');
+    // Sólo el papel: ni tipografía ni color de texto. Todo lo demás lo pone el
+    // CSS del panel, porque el clon vive en el mismo documento y hereda las
+    // mismas reglas. Así el exportable sale idéntico a la pantalla, sin que
+    // este código tenga que replicar ni corregir un solo color.
+    wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:' +
+      (o.ancho || 1240) + 'px;padding:18px 24px 22px;box-sizing:border-box';
+
+    const enc = document.createElement('div');
+    enc.style.cssText = 'border-bottom:2.5px solid #002D73;padding-bottom:7px;margin-bottom:14px';
+    // textContent en las partes variables: los títulos llevan nombres que
+    // vienen del Excel y no son texto de confianza.
+    const t1 = document.createElement('span');
+    t1.style.cssText = 'font-size:15px;font-weight:700;color:#002D73';
+    t1.textContent = 'TECSERVICE — ' + (o.titulo || '');
+    enc.appendChild(t1);
+    const t2 = document.createElement('span');
+    t2.style.cssText = 'font-size:10px;color:#555;margin-left:14px';
+    t2.textContent = [o.sub, hoy ? 'datos al ' + hoy : ''].filter(Boolean).join(' · ');
+    enc.appendChild(t2);
+    wrap.appendChild(enc);
+
+    const clones = [];
+    bloques.forEach((b, i) => {
+      const cl = b.cloneNode(true);
+      // Dos cosas hay que neutralizar en el clon, y sólo dos:
+      //  · el recorte y el scroll de los contenedores de pantalla, o el
+      //    exportable sale cortado a la altura del viewport;
+      //  · las animaciones, porque las tarjetas de KPI entran con un fade
+      //    escalonado (.kpi{animation:fadeUp}) que al clonarlas arranca de
+      //    nuevo: la captura ocurre a los pocos milisegundos y cada tarjeta
+      //    quedaba congelada a medio aparecer, más pálida mientras más a la
+      //    derecha por el retardo. Apagada la animación, nace en su estado
+      //    final. Ningún color se toca: el clon vive en el mismo documento y
+      //    lo pinta el mismo CSS que a la pantalla.
+      cl.querySelectorAll('*').forEach(n => {
+        n.style.position = 'static'; n.style.maxHeight = 'none';
+        n.style.overflow = 'visible'; n.style.overflowY = 'visible'; n.style.overflowX = 'visible';
+        n.style.animation = 'none'; n.style.transition = 'none';
+      });
+      cl.style.animation = 'none'; cl.style.transition = 'none';
+      cl.style.maxHeight = 'none'; cl.style.overflow = 'visible';
+      // El botón que disparó la exportación no tiene nada que hacer en el PDF,
+      // y además sale con el texto «Generando…».
+      cl.querySelectorAll('button').forEach(b => {
+        const oc = b.getAttribute('onclick') || '';
+        if (oc.indexOf('exportarPanel') >= 0 || oc.indexOf('ExportPDF') >= 0) b.remove();
+      });
+      if (i) cl.style.marginTop = '16px';
+      // Los anchos de columna de la pantalla no siempre sirven en el papel: en
+      // una tabla con una columna de texto largo, ese texto se parte en muchas
+      // líneas y el exportable se vuelve altísimo. «cols» permite repartir el
+      // ancho según lo que cada columna realmente necesita, sólo al exportar.
+      if (o.cols && o.cols.length) {
+        const tb = cl.querySelector('table');
+        const cols = tb && tb.querySelectorAll('col');
+        if (cols && cols.length) {
+          for (let k = 0; k < cols.length && k < o.cols.length; k++) {
+            cols[k].style.width = o.cols[k];
+          }
+          tb.style.minWidth = '0';
+          tb.style.width = '100%';
+        }
+      }
+      // Un <canvas> clonado nace en blanco: el dibujo no viaja con el nodo. Se
+      // reemplaza por una imagen del canvas real para que los gráficos salgan.
+      const cvO = b.querySelectorAll('canvas');
+      const cvC = cl.querySelectorAll('canvas');
+      for (let k = 0; k < cvO.length && k < cvC.length; k++) {
+        try {
+          const im = document.createElement('img');
+          im.src = cvO[k].toDataURL('image/png');
+          im.style.width = cvO[k].offsetWidth + 'px';
+          im.style.height = cvO[k].offsetHeight + 'px';
+          im.style.display = 'block';
+          cvC[k].parentNode.replaceChild(im, cvC[k]);
+        } catch (e) { /* canvas sucio: se deja como está */ }
+      }
+      clones.push(cl);
+      wrap.appendChild(cl);
+    });
+
+    document.body.appendChild(wrap);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    // Una tabla ancha no cabe en la hoja fija de 1240 px y salía cortada. Se
+    // mide lo que el contenido realmente necesita y la hoja crece hasta ahí:
+    // el exportable queda apaisado en vez de recortado.
+    let necesario = 0;
+    clones.forEach(cl => {
+      necesario = Math.max(necesario, cl.scrollWidth || 0);
+      cl.querySelectorAll('table').forEach(t => {
+        necesario = Math.max(necesario, t.scrollWidth || 0, t.offsetWidth || 0);
+      });
+    });
+    const anchoBase = o.ancho || 1240;
+    const PAD = 48;   // el padding lateral del wrap
+    if (necesario + PAD > anchoBase) {
+      wrap.style.width = Math.min(necesario + PAD, 4000) + 'px';
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    }
+
+    const realW = Math.ceil(wrap.getBoundingClientRect().width) || wrap.offsetWidth;
+    const realH = Math.ceil(wrap.getBoundingClientRect().height) || wrap.offsetHeight;
+    if (!realW || !realH) throw new Error('No se pudo medir el contenido');
+
+    const canvas = await html2canvas(wrap, {
+      scale: window.hdEscala(realW, realH), backgroundColor: '#ffffff',
+      useCORS: true, logging: false,
+      width: realW, height: realH, windowWidth: realW, windowHeight: realH,
+    });
+    const MM_PX = 25.4 / 96;
+    await window.hdEntregar(canvas, (o.archivo || 'Exportable') + '_TS_' +
+      (hoy || '').replace(/[\s/]+/g, '-'), realW * MM_PX, realH * MM_PX);
+  } catch (err) {
+    console.error('exportarPanel:', err);
+    alert('Error al generar: ' + err.message);
+  } finally {
+    if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    if (btn) { btn.disabled = false; btn.innerHTML = ICON; }
+  }
+};
+
+// Botón de exportar con el look que ya usa el panel, para no repetir el SVG.
+window.btnExportar = function (id, onclick, extra) {
+  return '<button id="' + id + '" onclick="' + onclick + '" style="' +
+    (extra || 'margin-left:auto;') + 'font-size:.58rem;padding:.22rem .7rem;background:#002D73;' +
+    'color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;' +
+    'align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" ' +
+    'style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" ' +
+    'stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" ' +
+    'fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" ' +
+    'stroke-linecap="round"/></svg>Exportar</button>';
+};
+
 // ─── PROGRAMAS CARE (usado en todas las hojas de contratos) ───────
 const _PROG_FEATURES={
   BASIC:{label:'Basic',color:'#4caf50',bg:'rgba(76,175,80,.15)',solidBg:'#81c784',

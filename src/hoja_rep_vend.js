@@ -848,3 +848,316 @@
     initResumenRep();
   }
 })();
+
+
+// ═══════════════════════════════════════════════════════════════
+// EQUIPOS QUE MÁS FALLAN
+// ═══════════════════════════════════════════════════════════════
+// La hoja de repuestos no trae una columna de equipo: el extractor lo deduce
+// del «Nombre de cotización», que es texto libre. Lo que no se pudo deducir
+// queda como «Sin equipo identificado» en vez de repartirse — casi todo eso
+// son cuotas de convenio y mantenciones masivas de varios equipos a la vez,
+// que no hablan de una máquina en particular.
+//
+// La unidad de conteo es la COTIZACIÓN distinta, no la línea: una reparación
+// genera una cotización con muchas líneas de repuesto, y contar líneas haría
+// parecer que falla más el equipo que lleva más piezas por intervención.
+(function () {
+  const EF = (window.APP_DATA || {}).eq_fallas || {};
+  if (!EF.filas || !EF.filas.length) return;
+
+  const M = EF.marcas, T = EF.tipos, MO = EF.modelos, NA = EF.nats;
+  const SIN = EF.sin_eq || 'Sin equipo identificado';
+  // Índices de columna en cada fila, para que el código se lea solo.
+  const cMAR = 0, cTIP = 1, cMOD = 2, cNAT = 3, cANIO = 4, cCOT = 6, cCLI = 7,
+        cMON = 8, cCANT = 9;
+
+  let _anio = 'todos', _nat = 'todas', _chart = null;
+  const _abiertas = {};
+
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const mm = v => window.fmtMM ? fmtMM(v) : 'MM$' + (v / 1e6).toFixed(1);
+  const nUn = v => Math.round(v).toLocaleString('es-CL');
+  const eqLbl = (t, m) => t === SIN ? SIN : (m ? t + ' ' + m : t + ' (modelo no indicado)');
+
+  const filtra = () => EF.filas.filter(f =>
+    (_anio === 'todos' || f[cANIO] === +_anio) &&
+    (_nat === 'todas' || NA[f[cNAT]] === _nat));
+
+  // Agrupa contando cotizaciones y clientes distintos con Sets: sumar los
+  // conteos de cada grupo contaría dos veces la cotización que toca dos
+  // equipos, y son bastantes.
+  function agrupa(filas, clave) {
+    const g = {};
+    filas.forEach(f => {
+      const k = clave(f);
+      const d = g[k] || (g[k] = { k: k, monto: 0, cant: 0, lin: 0, cot: {}, cli: {}, corr: 0 });
+      d.monto += f[cMON]; d.cant += f[cCANT]; d.lin++;
+      d.cot[f[cCOT]] = 1; d.cli[f[cCLI]] = 1;
+      if (NA[f[cNAT]] === 'Correctivo') d.corr += f[cMON];
+    });
+    return Object.keys(g).map(k => {
+      const d = g[k];
+      d.nCot = Object.keys(d.cot).length;
+      d.nCli = Object.keys(d.cli).length;
+      d.prom = d.nCot ? d.monto / d.nCot : 0;
+      return d;
+    }).sort((a, b) => b.monto - a.monto);
+  }
+
+  // ── Segmentadores ────────────────────────────────────────────
+  function botones(box, opts, activo, fn) {
+    const b = document.getElementById(box);
+    if (!b) return;
+    b.innerHTML = opts.map(o =>
+      '<button onclick="' + fn + '(\'' + o[0] + '\')" style="font-size:.57rem;padding:.2rem .55rem;' +
+      'border-radius:3px;cursor:pointer;white-space:nowrap;border:1px solid ' +
+      (o[0] === activo ? 'var(--az2)' : 'var(--brd)') + ';background:' +
+      (o[0] === activo ? 'var(--az2)' : 'var(--bg2)') + ';color:' +
+      (o[0] === activo ? '#fff' : 'var(--txt)') + ';font-weight:' +
+      (o[0] === activo ? 700 : 400) + '">' + esc(o[1]) + '</button>').join('');
+  }
+
+  function segmentadores() {
+    botones('ef-anio', [['todos', 'Ambos']].concat((EF.anios || []).map(a => [String(a), String(a)])),
+            _anio, 'window._efAnio');
+    // Sólo se ofrecen las naturalezas que existen en los datos, y en un orden
+    // que pone adelante la que habla de fallas.
+    const orden = ['Correctivo', 'Preventivo', 'Garantía', 'Convenio', 'Uso interno', 'Sin clasificar'];
+    const hay = orden.filter(n => NA.indexOf(n) >= 0);
+    botones('ef-nat', [['todas', 'Todas']].concat(hay.map(n => [n, n])), _nat, 'window._efNat');
+  }
+  window._efAnio = v => { if (_anio !== v) { _anio = v; render(); } };
+  window._efNat  = v => { if (_nat  !== v) { _nat  = v; render(); } };
+
+  // ── KPIs ─────────────────────────────────────────────────────
+  function kpis(filas, eqs) {
+    const box = document.getElementById('ef-kpi');
+    if (!box) return;
+    const monto = filas.reduce((a, f) => a + f[cMON], 0);
+    const cot = {}, ident = [];
+    filas.forEach(f => { cot[f[cCOT]] = 1; });
+    let mIdent = 0;
+    eqs.forEach(d => { if (d.tipo !== SIN) { ident.push(d); mIdent += d.monto; } });
+    const tarjeta = (lbl, val, sub, col) =>
+      '<div class="kpi" style="border-top:3px solid ' + col + '">' +
+        '<div class="kl">' + lbl + '</div>' +
+        '<div class="kv" style="color:' + col + '">' + val + '</div>' +
+        '<div class="ks">' + sub + '</div></div>';
+    box.innerHTML =
+      tarjeta('Intervenciones', nUn(Object.keys(cot).length),
+              'cotizaciones distintas', 'var(--az1)') +
+      tarjeta('Equipos distintos', nUn(ident.length),
+              'combinaciones marca + modelo', 'var(--am)') +
+      tarjeta('Repuestos consumidos', mm(monto),
+              nUn(filas.reduce((a, f) => a + f[cCANT], 0)) + ' unidades', 'var(--teal)') +
+      tarjeta('Atribuido a un equipo', monto ? (mIdent / monto * 100).toFixed(0) + '%' : '—',
+              mm(mIdent) + ' de ' + mm(monto), 'var(--or)');
+  }
+
+  // ── Gráfico: los 12 equipos que más consumen ─────────────────
+  function grafico(eqs) {
+    const ctx = document.getElementById('cEfTop');
+    if (!ctx || typeof Chart === 'undefined') return;
+    if (_chart) { _chart.destroy(); _chart = null; }
+    const top = eqs.filter(d => d.tipo !== SIN).slice(0, 12);
+    if (!top.length) return;
+    _chart = new Chart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: top.map(d => d.marca + ' · ' + eqLbl(d.tipo, d.modelo)),
+        datasets: [{
+          label: 'Repuestos', data: top.map(d => d.monto),
+          backgroundColor: '#002D73CC', borderRadius: 3, borderSkipped: false,
+        }],
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: c => mm(c.raw),
+              afterLabel: c => {
+                const d = top[c.dataIndex];
+                return [d.nCot + ' intervenciones · ' + d.nCli + ' clientes',
+                        'Promedio por intervención: ' + mm(d.prom)];
+              },
+            },
+          },
+        },
+        scales: {
+          x: { beginAtZero: true, grid: { color: '#E2E6F033' },
+               ticks: { font: { size: 8 }, callback: v => Math.round(v / 1e6) },
+               title: { display: true, text: 'MM$', font: { size: 8 }, color: '#6B7BA8' } },
+          y: { grid: { display: false }, ticks: { font: { size: 8.5 } } },
+        },
+      },
+    });
+  }
+
+  // ── Tabla: marca, desplegable a equipo ───────────────────────
+  window._efTog = function (m) {
+    _abiertas[m] = !_abiertas[m];
+    tabla();
+  };
+
+  function tabla() {
+    const box = document.getElementById('ef-tabla');
+    if (!box) return;
+    const filas = filtra();
+    const porMarca = agrupa(filas, f => M[f[cMAR]]);
+    const total = filas.reduce((a, f) => a + f[cMON], 0);
+
+    const SEP = 'border-right:1px solid var(--brd)';
+    const TD = 'padding:.34rem .6rem;white-space:nowrap';
+    const th = (t, al) => '<th style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;' +
+      'padding:.4rem .6rem;font-size:.58rem;letter-spacing:.04em;text-align:' + (al || 'left') +
+      ';white-space:nowrap;' + SEP + '">' + t + '</th>';
+    const num = (v, extra) => '<td style="' + TD + ';text-align:right;font-size:.64rem;' +
+      'font-variant-numeric:tabular-nums;' + (extra || '') + SEP + '">' + v + '</td>';
+
+    let html = '<div style="overflow-x:auto;max-height:520px;overflow-y:auto">' +
+      '<table style="width:100%;border-collapse:collapse;min-width:880px;table-layout:fixed"><colgroup>' +
+      '<col style="width:30%"><col style="width:10%"><col style="width:9%"><col style="width:9%">' +
+      '<col style="width:9%"><col style="width:12%"><col style="width:8%"><col style="width:13%">' +
+      '</colgroup><thead><tr>' +
+      th('MARCA / EQUIPO') + th('INTERV.', 'right') + th('LÍNEAS', 'right') +
+      th('UNIDADES', 'right') + th('CLIENTES', 'right') + th('REPUESTOS', 'right') +
+      th('% DEL TOTAL', 'right') + th('PROM. x INTERV.', 'right') +
+      '</tr></thead><tbody>';
+
+    porMarca.forEach((d, i) => {
+      const ab = !!_abiertas[d.k];
+      const eqs = agrupa(filas.filter(f => M[f[cMAR]] === d.k),
+                         f => T[f[cTIP]] + '||' + MO[f[cMOD]]);
+      html += '<tr onclick="window._efTog(' + JSON.stringify(d.k).replace(/"/g, '&quot;') + ')" ' +
+        'style="cursor:pointer;background:' + (i % 2 ? 'var(--bg)' : 'var(--bg2)') + '">' +
+        '<td style="' + TD + ';font-size:.68rem;font-weight:700;color:var(--am);overflow:hidden;' +
+          'text-overflow:ellipsis;' + SEP + '"><span style="display:inline-block;width:11px;color:var(--mut)">' +
+          (ab ? '▾' : '▸') + '</span>' + esc(d.k) +
+          '<span style="font-weight:400;color:var(--mut);font-size:.58rem"> · ' + eqs.length +
+          ' equipo' + (eqs.length === 1 ? '' : 's') + '</span></td>' +
+        num(d.nCot, 'font-weight:700;') + num(d.lin, 'color:var(--mut);') +
+        num(nUn(d.cant), 'color:var(--mut);') + num(d.nCli) +
+        num(mm(d.monto), 'font-weight:700;color:var(--az1);') +
+        num(total ? (d.monto / total * 100).toFixed(1).replace('.', ',') + '%' : '—', 'color:var(--mut);') +
+        num(mm(d.prom), 'color:var(--teal);') + '</tr>';
+
+      if (ab) {
+        eqs.forEach(e => {
+          const p = e.k.split('||');
+          const esSin = p[0] === SIN;
+          html += '<tr style="background:var(--gy)">' +
+            '<td style="' + TD + ';font-size:.63rem;padding-left:1.9rem;overflow:hidden;' +
+              'text-overflow:ellipsis;' + SEP + ';color:' + (esSin ? 'var(--mut)' : 'var(--txt)') +
+              ';font-style:' + (esSin ? 'italic' : 'normal') + '">' + esc(eqLbl(p[0], p[1])) + '</td>' +
+            num(e.nCot) + num(e.lin, 'color:var(--mut);') + num(nUn(e.cant), 'color:var(--mut);') +
+            num(e.nCli) + num(mm(e.monto), 'color:var(--az2);') +
+            num(total ? (e.monto / total * 100).toFixed(1).replace('.', ',') + '%' : '—', 'color:var(--mut);') +
+            num(mm(e.prom), 'color:var(--teal);') + '</tr>';
+        });
+      }
+    });
+
+    html += '</tbody><tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">' +
+      '<td style="padding:.4rem .6rem;font-size:.64rem;' + SEP + '">TOTAL · ' + porMarca.length + ' marcas</td>' +
+      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' +
+        nUn(Object.keys(filas.reduce((o, f) => { o[f[cCOT]] = 1; return o; }, {})).length) + '</td>' +
+      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + filas.length + '</td>' +
+      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' +
+        nUn(filas.reduce((a, f) => a + f[cCANT], 0)) + '</td>' +
+      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' +
+        nUn(Object.keys(filas.reduce((o, f) => { o[f[cCLI]] = 1; return o; }, {})).length) + '</td>' +
+      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + mm(total) + '</td>' +
+      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">100%</td>' +
+      '<td style="padding:.4rem .6rem"></td>' +
+      '</tr></tfoot></table></div>' +
+      '<p style="font-size:.57rem;color:var(--mut);margin:.5rem 0 0;line-height:1.55">' +
+      '<strong>Una intervención es una cotización distinta</strong>, no una línea: una reparación cotiza ' +
+      'muchos repuestos de una vez, y contar líneas haría parecer que falla más el equipo que lleva más ' +
+      'piezas. Las cotizaciones y los clientes se cuentan sin repetir, así que las filas de equipo pueden ' +
+      'sumar más que su marca cuando una misma cotización toca dos equipos. ' +
+      'El equipo se deduce del «Nombre de cotización» del Excel, que es texto libre: lo que no se pudo ' +
+      'identificar queda a la vista como «' + SIN + '» y no se reparte entre los demás. ' +
+      'Casi todo eso son cuotas de convenio y mantenciones masivas de varios equipos a la vez.</p>';
+
+    box.innerHTML = html;
+    const c = document.getElementById('ef-count');
+    if (c) {
+      const eqTot = agrupa(filas, f => M[f[cMAR]] + '||' + T[f[cTIP]] + '||' + MO[f[cMOD]])
+        .filter(d => d.k.indexOf('||' + SIN + '||') < 0).length;
+      c.textContent = eqTot + ' equipos identificados · ' + porMarca.length + ' marcas';
+    }
+  }
+
+  function render() {
+    segmentadores();
+    const filas = filtra();
+    const eqs = agrupa(filas, f => M[f[cMAR]] + '||' + T[f[cTIP]] + '||' + MO[f[cMOD]])
+      .map(d => { const p = d.k.split('||'); d.marca = p[0]; d.tipo = p[1]; d.modelo = p[2]; return d; });
+    kpis(filas, eqs);
+    grafico(eqs);
+    tabla();
+    const p = document.getElementById('ef-periodo');
+    if (p) p.textContent = (_anio === 'todos' ? (EF.anios || []).join(' y ') : _anio) +
+      (_nat === 'todas' ? '' : ' · ' + _nat);
+  }
+
+  window.efExportPDF = async function () {
+    if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+      alert('Librerías PDF no cargadas. Verifique conexión a internet e intente de nuevo.');
+      return;
+    }
+    const btn = document.getElementById('ef-pdf');
+    const ICON = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+    let wrap = null;
+    try {
+      const src = document.getElementById('ef-tabla');
+      if (!src) throw new Error('No se encontró el contenido');
+      const hoy = (window.APP_DATA || {}).hoy || '';
+      wrap = document.createElement('div');
+      wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:1240px;' +
+        'padding:18px 24px 22px;font-family:Arial,sans-serif;color:#111;box-sizing:border-box';
+      const enc = document.createElement('div');
+      enc.style.cssText = 'border-bottom:2.5px solid #002D73;padding-bottom:7px;margin-bottom:12px';
+      enc.innerHTML = '<span style="font-size:15px;font-weight:700;color:#002D73">' +
+        'TECSERVICE — Equipos que más fallan</span>' +
+        '&emsp;<span style="font-size:10px;color:#555">' +
+        (_anio === 'todos' ? (EF.anios || []).join(' y ') : _anio) +
+        (_nat === 'todas' ? '' : ' · ' + _nat) + (hoy ? ' · datos al ' + hoy : '') + '</span>';
+      wrap.appendChild(enc);
+      const cl = src.cloneNode(true);
+      cl.querySelectorAll('*').forEach(n => {
+        n.style.position = 'static'; n.style.maxHeight = 'none'; n.style.overflow = 'visible';
+      });
+      wrap.appendChild(cl);
+      document.body.appendChild(wrap);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const realW = Math.ceil(wrap.getBoundingClientRect().width) || wrap.offsetWidth;
+      const realH = Math.ceil(wrap.getBoundingClientRect().height) || wrap.offsetHeight;
+      if (!realW || !realH) throw new Error('No se pudo medir el contenido');
+      const canvas = await html2canvas(wrap, {
+        scale: hdEscala(realW, realH), backgroundColor: '#ffffff', useCORS: true, logging: false,
+        width: realW, height: realH, windowWidth: realW, windowHeight: realH,
+      });
+      const MM_PX = 25.4 / 96;
+      await hdEntregar(canvas, 'Equipos_que_mas_fallan_TS_' + (hoy || '').replace(/[\s/]+/g, '-'),
+                       realW * MM_PX, realH * MM_PX);
+    } catch (err) {
+      console.error('efExportPDF:', err);
+      alert('Error al generar: ' + err.message);
+    } finally {
+      if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      if (btn) { btn.disabled = false; btn.innerHTML = ICON; }
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', render);
+  } else {
+    render();
+  }
+})();

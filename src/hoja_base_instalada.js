@@ -438,8 +438,7 @@ function _biRenderMapa(){
 
   if(!_biMapL){
     _biMapL = L.map('biMapa',{zoomControl:true,scrollWheelZoom:false}).setView([-35.5,-70.5],4);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-      {attribution:'© OpenStreetMap © CARTO',maxZoom:18}).addTo(_biMapL);
+    mapaTiles(_biMapL);
   }
   if(!_biMapLyr) _biMapLyr = L.layerGroup().addTo(_biMapL);
   _biMapLyr.clearLayers();
