@@ -12,3 +12,16 @@ src/__pycache__/
 
 # Archivos de bloqueo de Office (Excel/PowerPoint abiertos)
 ~$*
+
+# ── Binarios que crecen sin control ──────────────────────────────
+# Cada vez que se guardan, git archiva una copia entera y nueva que ya no
+# se libera. Se quedan en el equipo pero fuera del repositorio: no hacen
+# falta para publicar el panel, que se sirve desde index.html.
+#
+# Las versiones anteriores siguen en la historia, así que no se pierde
+# nada de lo ya subido. Para volver a versionar uno, basta con quitarlo
+# de esta lista y hacerle git add -f.
+*.pptx
+*.pdf
+data/*.xlsb
+data/*.xlsx
