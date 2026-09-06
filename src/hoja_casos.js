@@ -170,23 +170,23 @@ function _casosHTML() {
       </div>
     </div>
     <div style="display:flex;justify-content:flex-end;margin:0 .9rem .5rem">
-      <button id="cas-t1-pdf" onclick="exportarPanel({ids:['cas-table1-wrap'],titulo:'Casos Relevantes',archivo:'Casos_Relevantes',btn:'cas-t1-pdf',ancho:2200,cols:['5%','6%','12%','5%','6%','45%','6%','15%']})" style="font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar</button>
+      <button id="cas-t1-pdf" onclick="exportarPanel({ids:['cas-table1-wrap'],titulo:'Casos Relevantes',archivo:'Casos_Relevantes',btn:'cas-t1-pdf',ancho:2200,cols:['8%','11%','7%','35%','23%','6%','5%','5%']})" style="font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar</button>
     </div>
     <div style="overflow-x:auto" id="cas-table1-wrap">
-      <table class="tbl" id="cas-table1" style="min-width:1180px;table-layout:fixed">
+      <table class="tbl" id="cas-table1" style="min-width:1320px;table-layout:fixed">
         <colgroup>
-          <col style="width:7%"><col style="width:10%"><col style="width:13%"><col style="width:7%">
-          <col style="width:9%"><col style="width:29%"><col style="width:7%"><col style="width:18%">
+          <col style="width:9%"><col style="width:12%"><col style="width:8%"><col style="width:28%">
+          <col style="width:19%"><col style="width:8%"><col style="width:8%"><col style="width:8%">
         </colgroup>
         <thead><tr>
-          <th>Coordinador</th>
           <th>Cliente</th>
           <th>Problema</th>
-          <th style="text-align:center">Estado</th>
           <th>Responsable</th>
           <th>Comentario</th>
-          <th style="text-align:center">Salesforce</th>
           <th>Acciones</th>
+          <th style="text-align:center">Fecha Ingreso Caso</th>
+          <th style="text-align:right">Valorizado Equipos MM$</th>
+          <th style="text-align:right">Ingreso Clientes 2026 MM$</th>
         </tr></thead>
         <tbody id="cas-tbody1"></tbody>
       </table>
@@ -721,36 +721,45 @@ function renderCasos() {
 
   const tbody1 = document.getElementById('cas-tbody1');
   if (tbody1) {
+    // Valorizado del cliente: el costo CIF de sus equipos detenidos. El
+    // ingreso 2026 sale de la hoja FACTURACIÓN. Los dos se cruzan con el mismo
+    // emparejador que usa el resumen de abajo, porque la hoja de casos escribe
+    // el cliente abreviado y a mano. Se repiten en cada fila del cliente: son
+    // del cliente, no del caso, y por eso NO se suman.
+    const _cifCli = {};
+    (CASOS_DATA.equipos || []).forEach(e => {
+      const k = _casNorm(e.nombre_cliente);
+      if (k) _cifCli[k] = (_cifCli[k] || 0) + (+e.costo_cif || 0);
+    });
     tbody1.innerHTML = casosFilt.map(c => {
-      const sfLink = c.salesforce
-        ? `<span class="pill pte" style="font-size:.52rem;font-family:'Roboto Mono',monospace">${_escH(c.salesforce)}</span>`
-        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
-      const est = (c.estado || '').trim().toUpperCase();
-      const eCol = est.indexOf('NO OPER') >= 0 ? 'var(--rd)'
-                 : est.indexOf('OPERATIVO') >= 0 ? 'var(--gn)' : 'var(--mut)';
-      const estBadge = est
-        ? `<span style="background:${eCol}1A;color:${eCol};border:1px solid ${eCol}55;padding:.08rem .35rem;
-             border-radius:3px;font-size:.55rem;font-weight:700;white-space:nowrap">${_escH(c.estado)}</span>`
-        : '<span style="color:var(--mut);font-size:.6rem">—</span>';
+      const full = _casCliente(c.cliente);
+      const cif = full ? (_cifCli[_casNorm(full)] || 0) : 0;
+      const g = full ? (_casIndice().desg[_casNorm(full)] || null) : null;
+      const ing = g ? +g.t26 || 0 : 0;
+      const cel = (v, col) => v
+        ? `<td style="text-align:right"><span style="font-size:.63rem;font-weight:700;color:${col};
+             font-variant-numeric:tabular-nums">${mm(v)}</span></td>`
+        : '<td style="text-align:right"><span style="color:var(--mut);font-size:.6rem">—</span></td>';
       return `<tr>
-        <td><span style="font-size:.62rem;font-weight:600;color:var(--az3)">${_escH(c.coordinador)||'<span style="color:var(--mut)">—</span>'}</span></td>
         <td><strong style="font-size:.64rem;line-height:1.35">${_escH(c.cliente)}</strong></td>
         <td>
           <div style="font-size:.62rem;font-weight:700;color:#e00000;line-height:1.4">${_escH(c.problema)}</div>
         </td>
-        <td style="text-align:center">${estBadge}</td>
         <td><span style="font-size:.62rem">${_escH(c.responsable)||'<span style="color:var(--mut)">No definido</span>'}</span></td>
         <td>
           <div style="font-size:.61rem;line-height:1.5;color:#111;font-weight:600;text-transform:uppercase">
             ${_escH(c.comentario)||'<span style="color:var(--mut);text-transform:none;font-weight:400">Sin comentario</span>'}
           </div>
         </td>
-        <td>${sfLink}</td>
         <td>
           <div style="font-size:.61rem;line-height:1.5;color:var(--az1)">
             ${_escH(c.acciones)||'<span style="color:var(--mut)">—</span>'}
           </div>
         </td>
+        <td style="text-align:center"><span style="font-size:.6rem;font-family:'Roboto Mono',monospace">
+          ${_escH(c.fecha_caso)||'<span style="color:var(--mut)">—</span>'}</span></td>
+        ${cel(cif, 'var(--or)')}
+        ${cel(ing, 'var(--az1)')}
       </tr>`;
     }).join('');
   }

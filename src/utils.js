@@ -475,6 +475,19 @@ window.exportarPanel = async function (o) {
       });
       cl.style.animation = 'none'; cl.style.transition = 'none';
       cl.style.maxHeight = 'none'; cl.style.overflow = 'visible';
+      // El nodo raíz también se normaliza, pero sólo si venía posicionado:
+      // un bloque que en la pantalla vive fuera del viewport (position:
+      // absolute; left:-99999px) arrastraba ese posicionamiento al clon, que
+      // dentro de la hoja quedaba desplazado, no aportaba altura y hacía que
+      // la captura saliera en blanco. Los bloques normales no se tocan, para
+      // no perder un ancho propio que sí importe.
+      const posB = getComputedStyle(b).position;
+      if (posB === 'absolute' || posB === 'fixed') {
+        cl.style.position = 'static';
+        cl.style.left = 'auto'; cl.style.top = 'auto';
+        cl.style.right = 'auto'; cl.style.bottom = 'auto';
+        cl.style.width = 'auto';
+      }
       // El botón que disparó la exportación no tiene nada que hacer en el PDF,
       // y además sale con el texto «Generando…».
       cl.querySelectorAll('button').forEach(b => {

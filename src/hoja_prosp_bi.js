@@ -24,7 +24,6 @@
   let _vidaMin = 7;          // umbral de la herramienta de prospección
   let _pLinea = 'todas';
   let _pRegion = 'todas';
-  let _metrica = 'n';        // 'n' = equipos · 'val' = valorización en $
   const _abReg = {}, _abLin = {}, _abCli = {};
   let _heatEje = 'linea';    // filas del mapa: 'linea' | 'region'
   let _heatLin = 'todas';    // filtro de línea del mapa
@@ -111,16 +110,13 @@
         <span class="ct">Mapa de renovación</span>
         <span style="font-size:.56rem;color:var(--mut)">año en que cada equipo cumple ${VU} años</span>
         <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
-                     margin-left:.6rem">Medir en</span>
-        <div id="pb-met-heat" style="display:flex;gap:.25rem"></div>
-        <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
-                     margin-left:.4rem">Filas</span>
+                     margin-left:.6rem">Filas</span>
         <div id="pb-heat-eje" style="display:flex;gap:.25rem"></div>
         <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
                      margin-left:.4rem">Línea</span>
         <select id="pb-heat-lin" onchange="window._pbHeatLin(this.value)" style="font-size:.6rem;padding:.2rem .4rem;
           border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt)"></select>
-        <button id="pb-heat-pdf" onclick="exportarPanel({ids:['pb-heat'],titulo:'Prospectos BI · Mapa de renovación',archivo:'Prospectos_BI_mapa_renovacion',btn:'pb-heat-pdf'})" style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar</button>
+        <button id="pb-heat-pdf" onclick="window._pbExpHeat()" style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar</button>
       </div>
       <div class="cb"><div id="pb-heat"></div></div>
     </div>
@@ -143,9 +139,6 @@
     <div class="card" style="margin-top:.9rem">
       <div class="ch" style="flex-wrap:wrap;gap:.5rem"><span class="ct">Base instalada por región</span>
         <span style="font-size:.56rem;color:var(--mut)" id="pb-reg-count">—</span>
-        <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
-                     margin-left:.4rem">Medir en</span>
-        <div id="pb-met-reg" style="display:flex;gap:.25rem"></div>
         <button id="pb-reg-pdf" onclick="exportarPanel({ids:['pb-reg-tabla'],titulo:'Prospectos BI · Base Instalada por Región',archivo:'Prospectos_BI_por_region',btn:'pb-reg-pdf'})"
           style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;
                  border-radius:4px;cursor:pointer;white-space:nowrap">Exportar</button></div>
@@ -168,9 +161,6 @@
     <div class="card" style="margin-top:.9rem">
       <div class="ch" style="flex-wrap:wrap;gap:.5rem"><span class="ct">Base instalada por línea de negocio</span>
         <span style="font-size:.56rem;color:var(--mut)" id="pb-lin-count">—</span>
-        <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
-                     margin-left:.4rem">Medir en</span>
-        <div id="pb-met-lin" style="display:flex;gap:.25rem"></div>
         <button id="pb-lin-pdf" onclick="exportarPanel({ids:['pb-lin-tabla'],titulo:'Prospectos BI · Base Instalada por Línea',archivo:'Prospectos_BI_por_linea',btn:'pb-lin-pdf'})"
           style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;
                  border-radius:4px;cursor:pointer;white-space:nowrap">Exportar</button></div>
@@ -230,14 +220,6 @@
   window._pbVida = v => { if (_vidaMin !== +v) { _vidaMin = +v; renderSelector(); } };
   window._pbLinea = v => { _pLinea = v; renderSelector(); };
   window._pbRegion = v => { _pRegion = v; renderSelector(); };
-  // El mismo estado se ofrece en tres tarjetas distintas; cambiarlo en una
-  // repinta las tres, para que no queden diciendo cosas distintas.
-  function pintaMetrica() {
-    const opts = [['n', 'N° de equipos'], ['val', 'Valorización $']];
-    ['pb-met-heat', 'pb-met-reg', 'pb-met-lin']
-      .forEach(id => botones(id, opts, _metrica, 'window._pbMetrica'));
-  }
-  window._pbMetrica = v => { if (_metrica !== v) { _metrica = v; render(); } };
   window._pbLimpiar = () => {
     _vidaMin = 7; _pLinea = 'todas'; _pRegion = 'todas';
     const s = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
@@ -427,10 +409,11 @@
     t.style.top = Math.min(ev.clientY + 12, window.innerHeight - 90) + 'px';
   }
 
-  function heatmap() {
-    const box = document.getElementById('pb-heat');
+  // boxId dibuja el mapa en un contenedor distinto al de pantalla; lo usa el
+  // exportable, que necesita más ancho para que las celdas no se aprieten.
+  function heatmap(boxId) {
+    const box = document.getElementById(boxId || 'pb-heat');
     if (!box) return;
-    pintaMetrica();
     botones('pb-heat-eje', [['linea', 'Línea de negocio'], ['region', 'Región']],
             _heatEje, 'window._pbHeatEje');
     const selL = document.getElementById('pb-heat-lin');
@@ -457,23 +440,31 @@
       const k = a < anioHoy ? 'venc' : (a >= anioHoy + N_ANIOS ? null : String(a));
       if (k === null) return;
       const r = eje(f);
-      const d = g[r] || (g[r] = { tot: 0, c: {} });
-      const v = esVal() ? f[cVAL] : 1;
-      d.tot += v;
-      d.c[k] = (d.c[k] || 0) + v;
+      const d = g[r] || (g[r] = { totN: 0, totV: 0, cn: {}, cv: {} });
+      d.totN += 1; d.totV += f[cVAL];
+      d.cn[k] = (d.cn[k] || 0) + 1;
+      d.cv[k] = (d.cv[k] || 0) + f[cVAL];
     });
 
-    const rows = Object.keys(g).sort((a, b) => g[b].tot - g[a].tot);
+    const rows = Object.keys(g).sort((a, b) => g[b].totV - g[a].totV || g[b].totN - g[a].totN);
     if (!rows.length) {
       box.innerHTML = '<div style="padding:1.4rem;text-align:center;color:var(--mut);font-size:.68rem">' +
         'Sin equipos con fecha de instalación para estos filtros.</div>';
       return;
     }
+    // El color sigue la VALORIZACIÓN: el mapa responde a cuánta plata hay que
+    // renovar cada año. Si siguiera al número de equipos, una sola celda —los
+    // 1.415 de Incardia en 2030, que valen cero— se llevaría todo el contraste
+    // y taparía la exposición real, que está en Esterilización.
     let max = 0;
-    rows.forEach(r => cols.forEach(c => { max = Math.max(max, g[r].c[c.k] || 0); }));
-    const totCol = {};
-    cols.forEach(c => { totCol[c.k] = rows.reduce((a, r) => a + (g[r].c[c.k] || 0), 0); });
-    const granTot = rows.reduce((a, r) => a + g[r].tot, 0);
+    rows.forEach(r => cols.forEach(c => { max = Math.max(max, g[r].cv[c.k] || 0); }));
+    const totColN = {}, totColV = {};
+    cols.forEach(c => {
+      totColN[c.k] = rows.reduce((a, r) => a + (g[r].cn[c.k] || 0), 0);
+      totColV[c.k] = rows.reduce((a, r) => a + (g[r].cv[c.k] || 0), 0);
+    });
+    const granTotN = rows.reduce((a, r) => a + g[r].totN, 0);
+    const granTotV = rows.reduce((a, r) => a + g[r].totV, 0);
 
     // Encabezados: el año, y la columna de vencidos marcada aparte porque no es
     // un año futuro sino todo lo que ya se pasó.
@@ -488,20 +479,20 @@
         'max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--txt)" title="' +
         esc(r) + '">' + esc(r) + '</td>' +
       cols.map(c => {
-        const v = g[r].c[c.k] || 0;
+        const n = g[r].cn[c.k] || 0, v = g[r].cv[c.k] || 0;
         const t = heatT(v, max);
-        const fg = !v ? 'transparent' : (t >= HEAT_INV ? '#fff' : '#3A2A18');
+        // Con fondo claro el texto va oscuro; pasado el punto en que el negro
+        // deja de leerse, se invierte a blanco.
+        const fg = !n ? 'transparent' : (t >= HEAT_INV ? '#fff' : '#3A2A18');
         return '<td class="pb-hc" data-r="' + esc(r) + '" data-c="' + esc(c.lbl) + '" ' +
-          'data-v="' + v + '" style="height:30px;padding:0;text-align:center;font-size:.57rem;' +
-          'font-variant-numeric:tabular-nums;border-radius:2px;cursor:default;' +
-          'background:' + heatColor(t) + ';color:' + fg + '">' +
-          // El número sólo donde aporta: en las celdas pálidas compite con el
-          // color y ensucia la mancha. El valor exacto está en el hover.
-          (t >= 0.28 ? fMet(v) : '') + '</td>';
+          'data-n="' + n + '" data-v="' + v + '" style="height:32px;padding:0 .2rem;' +
+          'text-align:center;font-size:.55rem;font-variant-numeric:tabular-nums;' +
+          'border-radius:2px;cursor:default;background:' + heatColor(t) + ';color:' + fg + '">' +
+          (n ? n0(n) + ' <span style="opacity:.8">(' + mm(v) + ')</span>' : '') + '</td>';
       }).join('') +
       '<td style="padding:0 0 0 .55rem;text-align:right;font-size:.62rem;font-weight:700;' +
         'white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--az1)">' +
-        fMet(g[r].tot) + '</td>' +
+        n0(g[r].totN) + ' <span style="opacity:.72">(' + mm(g[r].totV) + ')</span></td>' +
       '</tr>').join('');
 
     box.innerHTML =
@@ -515,9 +506,11 @@
       '<td style="padding:.35rem .5rem 0 0;font-size:.6rem;font-weight:700;color:var(--mut)">TOTAL</td>' +
       cols.map(c => '<td style="padding:.35rem .2rem 0;text-align:center;font-size:.59rem;' +
         'font-weight:700;font-variant-numeric:tabular-nums;color:var(--txt)">' +
-        (totCol[c.k] ? fMet(totCol[c.k]) : '·') + '</td>').join('') +
+        (totColN[c.k] ? n0(totColN[c.k]) + ' <span style="opacity:.72">(' +
+          mm(totColV[c.k] || 0) + ')</span>' : '·') + '</td>').join('') +
       '<td style="padding:.35rem 0 0 .55rem;text-align:right;font-size:.6rem;font-weight:700;' +
-        'font-variant-numeric:tabular-nums;color:var(--az1)">' + fMet(granTot) + '</td>' +
+        'font-variant-numeric:tabular-nums;color:var(--az1)">' +
+        n0(granTotN) + ' <span style="opacity:.72">(' + mm(granTotV) + ')</span></td>' +
       '</tr></tfoot></table></div>' +
       // Leyenda continua: la rampa completa, no seis parches sueltos.
       '<div style="display:flex;align-items:center;gap:.5rem;margin-top:.75rem;font-size:.56rem;' +
@@ -525,8 +518,9 @@
         '<span>0</span>' +
         '<span style="flex:0 0 190px;height:11px;border-radius:3px;background:linear-gradient(90deg,' +
           HEAT_RAMPA.join(',') + ')"></span>' +
-        '<span>' + fMet(max) + ' (celda más alta)</span>' +
-        '<span style="margin-left:auto;font-style:italic">pasa el cursor por una celda para el detalle</span>' +
+        '<span>' + mm(max) + ' (celda más alta)</span>' +
+        '<span style="margin-left:auto;font-style:italic">el color sigue la valorización; ' +
+        'cada celda muestra los equipos y, entre paréntesis, cuánto valen</span>' +
       '</div>' +
       '<p style="font-size:.57rem;color:var(--mut);margin:.55rem 0 0;line-height:1.55">' +
       'Cada equipo cae en el año en que cumple sus ' + VU + ' años de vida útil; los que ya lo hicieron ' +
@@ -536,12 +530,14 @@
       'después de ' + (anioHoy + N_ANIOS - 1) + ' queda fuera de la ventana.</p>';
 
     // Hover por celda: el número exacto y el contexto, sin cargar el mapa.
+    if (boxId) return;   // la copia para exportar no necesita hover
     box.querySelectorAll('.pb-hc').forEach(td => {
       td.addEventListener('pointermove', ev => {
-        const v = +td.dataset.v || 0;
-        heatTip(ev, td.dataset.r + '\n' + td.dataset.c + ': ' + (v ? fMet(v) : 'sin equipos') +
-          (v && granTot ? '\n' + (v / granTot * 100).toFixed(1).replace('.', ',') +
-            '% de la ventana' : ''));
+        const v = +td.dataset.v || 0, n = +td.dataset.n || 0;
+        heatTip(ev, td.dataset.r + '\n' + td.dataset.c + ': ' +
+          (n ? n0(n) + ' equipos · ' + mm(v) : 'sin equipos') +
+          (v && granTotV ? '\n' + (v / granTotV * 100).toFixed(1).replace('.', ',') +
+            '% de la valorización de la ventana' : ''));
         td.style.outline = '2px solid var(--az1)';
         td.style.outlineOffset = '-2px';
       });
@@ -598,17 +594,17 @@
   // El color de la vida media dice de un vistazo si el parque está por vencer.
   const colVida = v => v == null ? 'var(--mut)'
     : v >= VU ? 'var(--rd)' : v >= 7 ? 'var(--or)' : v >= 5 ? 'var(--am)' : 'var(--gn)';
-  // Las tablas muestran lo mismo medido en equipos o en pesos: el segmentador
-  // cambia de qué campo se leen las columnas, no la estructura de la tabla.
-  const esVal = () => _metrica === 'val';
-  const fMet = v => esVal() ? mm(v) : n0(v);
-  const mVig = d => esVal() ? d.valVig : d.nVig;
-  const mVen = d => esVal() ? d.val10 : d.v10;
-  const mTot = d => esVal() ? d.val : d.n;
-  const mSin = d => esVal() ? d.valSin : d.nSin;
+  // Las cifras se muestran siempre en las dos unidades: el número de equipos
+  // y, entre paréntesis, cuánto valen. Antes había un segmentador para elegir
+  // una u otra, y obligaba a cambiarlo para responder la mitad de las
+  // preguntas; con las dos juntas se lee de una sola pasada.
+  const dual = (n, v) => n0(n) + ' <span style="opacity:.72">(' + mm(v) + ')</span>';
+  const mVig = d => d.nVig;
+  const mVen = d => d.v10;
+  const mTot = d => d.n;
   // Proporción vencida dentro de lo clasificable (vigente + vencida): decir
   // «% de la BI total» sería engañoso cuando dos tercios no tienen fecha.
-  const pctVenNum = d => (mVig(d) + mVen(d)) ? mVen(d) / (mVig(d) + mVen(d)) * 100 : null;
+  const pctVenNum = d => (d.nVig + d.v10) ? d.v10 / (d.nVig + d.v10) * 100 : null;
   const pctVen = d => { const p = pctVenNum(d); return p == null ? '—' : p.toFixed(0) + '%'; };
 
   function tablaJerarquica(cfg) {
@@ -616,8 +612,9 @@
     if (!box) return;
     const filas = base();
     const D = acumula(filas, cfg.clave);
-    // El % del total se calcula sobre la misma métrica que se está mostrando.
-    const total = filas.reduce((a, f) => a + (esVal() ? f[cVAL] : 1), 0);
+    // El % del total va sobre el número de equipos, que es la cifra que
+    // encabeza cada celda.
+    const total = filas.length;
 
     let html = '<div style="overflow-x:auto;max-height:480px;overflow-y:auto">' +
       '<table style="width:100%;border-collapse:collapse;min-width:960px;table-layout:fixed"><colgroup>' +
@@ -638,11 +635,11 @@
           'text-overflow:ellipsis;' + SEP + '"><span style="display:inline-block;width:11px;color:var(--mut)">' +
           (ab ? '▾' : '▸') + '</span>' + esc(d.k) + '</td>' +
         num(n0(d.nCli)) +
-        num(fMet(mVig(d)), 'font-weight:700;color:var(--gn);') +
-        num(fMet(mVen(d)), mVen(d) ? 'font-weight:700;color:var(--rd);' : 'color:var(--mut);') +
-        num(fMet(mTot(d)), 'font-weight:700;color:var(--az1);') +
+        num(dual(d.nVig, d.valVig), 'font-weight:700;color:var(--gn);') +
+        num(d.v10 ? dual(d.v10, d.val10) : '—', d.v10 ? 'font-weight:700;color:var(--rd);' : 'color:var(--mut);') +
+        num(dual(d.n, d.val), 'font-weight:700;color:var(--az1);') +
         num(d.vida != null ? n1(d.vida) + ' a' : '—', 'font-weight:700;color:' + colVida(d.vida) + ';') +
-        num(total ? (mTot(d) / total * 100).toFixed(1).replace('.', ',') + '%' : '—', 'color:var(--mut);') +
+        num(total ? (d.n / total * 100).toFixed(1).replace('.', ',') + '%' : '—', 'color:var(--mut);') +
         num(pctVen(d), 'color:' + (pctVenNum(d) > 30 ? 'var(--rd)' : 'var(--mut)') + ';') +
         '</tr>';
       if (ab) {
@@ -651,11 +648,11 @@
             '<td style="' + TD + ';font-size:.62rem;padding-left:1.9rem;overflow:hidden;' +
               'text-overflow:ellipsis;' + SEP + '" title="' + esc(h.k) + '">' + esc(h.k) + '</td>' +
             num(n0(h.nCli)) +
-            num(fMet(mVig(h)), 'color:var(--gn);') +
-            num(fMet(mVen(h)), mVen(h) ? 'color:var(--rd);' : 'color:var(--mut);') +
-            num(fMet(mTot(h)), 'color:var(--az2);') +
+            num(dual(h.nVig, h.valVig), 'color:var(--gn);') +
+            num(h.v10 ? dual(h.v10, h.val10) : '—', h.v10 ? 'color:var(--rd);' : 'color:var(--mut);') +
+            num(dual(h.n, h.val), 'color:var(--az2);') +
             num(h.vida != null ? n1(h.vida) + ' a' : '—', 'color:' + colVida(h.vida) + ';') +
-            num(total ? (mTot(h) / total * 100).toFixed(1).replace('.', ',') + '%' : '—', 'color:var(--mut);') +
+            num(total ? (h.n / total * 100).toFixed(1).replace('.', ',') + '%' : '—', 'color:var(--mut);') +
             num(pctVen(h), 'color:var(--mut);') +
             '</tr>';
         });
@@ -666,9 +663,9 @@
     html += '</tbody><tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">' +
       '<td style="padding:.4rem .6rem;font-size:.64rem;' + SEP + '">TOTAL · ' + D.length + ' ' + cfg.unidad + '</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + n0(T.nCli) + '</td>' +
-      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + fMet(mVig(T)) + '</td>' +
-      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + fMet(mVen(T)) + '</td>' +
-      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + fMet(mTot(T)) + '</td>' +
+      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + dual(T.nVig, T.valVig) + '</td>' +
+      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + dual(T.v10, T.val10) + '</td>' +
+      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + dual(T.n, T.val) + '</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' +
         (T.vida != null ? n1(T.vida) + ' a' : '—') + '</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">100%</td>' +
@@ -681,7 +678,8 @@
       'equipos sin fecha en el Excel, que no se pueden clasificar y no se reparten entre las otras dos. ' +
       'Por lo mismo el <strong>% vencida</strong> se calcula sobre lo clasificable (vigente + vencida) y no ' +
       'sobre la BI total. La <strong>vida media</strong> corre sobre ese mismo universo con fecha. ' +
-      'El segmentador «Medir en» cambia estas columnas entre número de equipos y valorización en pesos.</p>';
+      'Cada celda trae el <strong>número de equipos</strong> y, entre paréntesis, <strong>su valorización</strong>; ' +
+      'los porcentajes van sobre el número de equipos.</p>';
 
     box.innerHTML = html;
     const c = document.getElementById(cfg.count);
@@ -844,6 +842,30 @@
   }
 
   // ── Exportables ─────────────────────────────────────────────
+  // El mapa se vuelve a dibujar en un contenedor aparte con las dos métricas
+  // por celda, se exporta ese y se descarta. La vista en pantalla no se toca.
+  window._pbExpHeat = async function () {
+    let cont = document.getElementById('pb-heat-exp');
+    if (!cont) {
+      cont = document.createElement('div');
+      cont.id = 'pb-heat-exp';
+      // Fuera de la pantalla pero renderizado: hace falta que tenga ancho real
+      // para que la tabla se distribuya antes de capturarla.
+      cont.style.cssText = 'position:absolute;left:-99999px;top:0;width:1700px';
+      document.body.appendChild(cont);
+    }
+    try {
+      heatmap('pb-heat-exp');
+      await exportarPanel({
+        ids: ['pb-heat-exp'], titulo: 'Prospectos BI · Mapa de renovación',
+        sub: 'equipos - valorización por año de vencimiento',
+        archivo: 'Prospectos_BI_mapa_renovacion', btn: 'pb-heat-pdf', ancho: 1700,
+      });
+    } finally {
+      cont.innerHTML = '';
+    }
+  };
+
   window.pbExportPDF = async function (idBox, nombre) {
     if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
       alert('Librerías PDF no cargadas. Verifique conexión a internet e intente de nuevo.');
@@ -894,7 +916,6 @@
   function render() {
     botones('pb-pot', [['todos', 'Todos'], ['si', 'Con potencial'], ['no', 'Sin potencial']],
             _pot, 'window._pbPot');
-    pintaMetrica();
     const filas = base();
     kpis(filas);
     heatmap();
