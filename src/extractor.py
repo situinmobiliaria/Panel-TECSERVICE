@@ -81,7 +81,8 @@ JS_FILES = [
     "hoja_facturacion.js", "hoja_panelfact.js", "hoja_base_instalada.js", "hoja_satisfaccion.js",
     "hoja_visitas.js", "hoja_mapa.js", "hoja_matriz.js", "hoja_casos.js", "hoja_alerta.js",
     "hoja_pdf.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js",
-    "hoja_prosp_bi.js", "hoja_cli_rel.js", "hoja_pipeline.js", "hoja_brechas.js",
+    "hoja_prosp_bi.js",
+    "hoja_citas.js", "hoja_cli_rel.js", "hoja_pipeline.js", "hoja_brechas.js",
 ]
 
 ANO   = date.today().year
@@ -1222,6 +1223,94 @@ def read_fact_desglose(wb):
     return out
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PIPELINE DE EQUIPOS SOBRE LA BASE INSTALADA
+# ══════════════════════════════════════════════════════════════════════════════
+# La hoja Detalle por Cliente necesita, junto al potencial de mantenimiento,
+# cuánto equipamiento tiene cada cliente en el pipeline y qué servicio técnico
+# arrastraría esa venta. Las dos fuentes se escriben distinto —el pipeline usa
+# nombres cortos y a veces la concesionaria en vez del hospital—, así que el
+# cruce es por nombre exacto y, si no calza, por las palabras distintivas.
+#
+# Alrededor de un tercio del pipeline es de clientes SIN base instalada:
+# concesionarias y hospitales nuevos, que es justamente donde se vende equipo.
+# Ese resto no se fuerza contra nadie: se devuelve aparte para que la tabla lo
+# muestre en su fila de cierre y el total cuadre con el Excel.
+
+# Porcentaje del equipo que se convierte en servicio técnico durante la
+# garantía. Mismo criterio que la hoja Potencial ST Garantías.
+_PIPE_TASA = {"Esterilización": 0.10, "Dental": 0.06, "Endoscopía": 0.06}
+
+_PIPE_STOP = {
+    "HP", "H", "HOSP", "HOSPITAL", "CLINICA", "CLINICO", "CENTRO", "CESFAM",
+    "DE", "DEL", "LA", "EL", "LOS", "LAS", "SA", "SPA", "LTDA", "DR", "DRA",
+    "SERVICIO", "SALUD", "COMPLEJO", "ASISTENCIAL", "BASE", "INSTITUTO",
+    "CORPORACION", "MUNICIPAL", "MUNICIPALIDAD", "SOCIEDAD", "CONCESIONARIA",
+    "CONCESIONARIO", "COMUNITARIO", "SS", "UNIVERSIDAD",
+}
+
+
+def _pipe_tokens(nombre):
+    return {t for t in _norm_cli(nombre).split()
+            if len(t) > 2 and t not in _PIPE_STOP}
+
+
+def cruzar_pipeline_bi(base_instalada, pipeline):
+    """Reparte el pipeline entre los clientes de la base instalada."""
+    clientes = (base_instalada or {}).get("clientes") or []
+    items = (pipeline or {}).get("items") or []
+    if not clientes or not items:
+        return
+    for c in clientes:
+        c["pipe_eq"] = 0.0
+        c["pipe_st"] = 0.0
+
+    exacto = {}
+    porToks = []
+    for c in clientes:
+        exacto.setdefault(_norm_cli(c["nombre"]), c)
+        porToks.append((c, _pipe_tokens(c["nombre"])))
+
+    resid_monto = resid_st = 0.0
+    resid_cli = set()
+    n_ok = 0
+    for it in items:
+        nom = it.get("na") or it.get("cli") or ""
+        monto = to_float(it.get("monto"))
+        st = monto * _PIPE_TASA.get(it.get("linea"), 0.0)
+        c = exacto.get(_norm_cli(nom))
+        if c is None:
+            # Sin coincidencia exacta: se acepta el cliente cuyo nombre CONTENGA
+            # todas las palabras distintivas del pipeline, con el menor sobrante.
+            t = _pipe_tokens(nom)
+            if t:
+                mejor, mejor_sc = None, None
+                for cand, ct in porToks:
+                    if not ct or not t <= ct:
+                        continue
+                    sc = -abs(len(ct) - len(t))
+                    if mejor_sc is None or sc > mejor_sc:
+                        mejor_sc, mejor = sc, cand
+                c = mejor
+        if c is None:
+            resid_monto += monto
+            resid_st += st
+            resid_cli.add(_norm_cli(nom))
+            continue
+        c["pipe_eq"] += monto
+        c["pipe_st"] += st
+        n_ok += 1
+
+    base_instalada["pipe_resid"] = {
+        "monto": resid_monto, "st": resid_st, "n": len(resid_cli),
+    }
+    tot = sum(to_float(i.get("monto")) for i in items)
+    print(f"       PIPELINE sobre BI: {n_ok} de {len(items)} oportunidades cruzadas | "
+          f"MM${(tot-resid_monto)/1e6:,.1f} de MM${tot/1e6:,.1f} | "
+          f"resto MM${resid_monto/1e6:,.1f} en {len(resid_cli)} clientes sin base instalada")
+
+
+
 def read_base_instalada(wb):
     ws = None
     for name in wb.sheetnames:
@@ -1348,15 +1437,22 @@ def read_base_instalada(wb):
                       if d["regiones"] else "Sin región")
 
         mmq_reas = ls.get("MMQ", 0) + ls.get("REAS", 0)
-        lineas_conocidas = {"DENTAL", "ESTERILIZACIÓN", "ESTERILIZACION", "INCARDIA", "ENDOSCOPIA", "MOBILIARIO CLINICO", "MMQ", "REAS"}
-        otros = sum(v for k, v in ls.items() if k not in lineas_conocidas and k not in ("MMQ", "REAS"))
+        # La comparación va sin tildes a propósito: la hoja escribe
+        # "ENDOSCOPÍA" acentuado, y con la lista sin acentos esos equipos
+        # caían a la vez en su propia línea y en "Otros", inflando la base
+        # instalada por línea en 434 equipos sobre un total de 12.558.
+        lineas_conocidas = {"DENTAL", "ESTERILIZACION", "INCARDIA",
+                            "ENDOSCOPIA", "MOBILIARIO CLINICO", "MMQ", "REAS"}
+        def _otros(dic):
+            return sum(v for k, v in dic.items() if _norm_cli(k) not in lineas_conocidas)
+        otros = _otros(ls)
 
         ls_si  = d["lineas_si"]
         ls_no  = d["lineas_no"]
         mmq_reas_si = ls_si.get("MMQ", 0) + ls_si.get("REAS", 0)
         mmq_reas_no = ls_no.get("MMQ", 0) + ls_no.get("REAS", 0)
-        otros_si = sum(v for k, v in ls_si.items() if k not in lineas_conocidas and k not in ("MMQ", "REAS"))
-        otros_no = sum(v for k, v in ls_no.items() if k not in lineas_conocidas and k not in ("MMQ", "REAS"))
+        otros_si = _otros(ls_si)
+        otros_no = _otros(ls_no)
 
         clientes.append({
             "nombre":            nombre,
@@ -2226,11 +2322,307 @@ _EQ_NATS = [
 _EQ_FAM_V = {"AUTOCLAVES": "Autoclave", "LAVADORA": "Lavadora descontaminadora"}
 _EQ_SIN = "Sin equipo identificado"
 
+# El campo «Equipo Asociado» de la hoja trae el equipo con su modelo y su número
+# de serie —«AUTOCLAVE STEELCO VS 1/2 EDX 9837»—, así que agrupando por su valor
+# crudo salían 115 familias y ninguna servía de resumen. Estas seis agrupan los
+# trece tipos que reconoce el clasificador; el orden es el de la tabla y «Otros»
+# va siempre al final.
+_EQ_FAMILIAS = ["Autoclaves", "Lavadoras", "Endoscopía",
+                "Apoyo a esterilización", "Dental", "Otros"]
+_EQ_FAM_CAT = {
+    "Autoclave":                 "Autoclaves",
+    "Lavadora ultrasónica":      "Lavadoras",
+    "Lavadora de endoscopios":   "Lavadoras",
+    "Lavadora descontaminadora": "Lavadoras",
+    "Lavacarros":                "Lavadoras",
+    "Endoscopio":                "Endoscopía",
+    "Secadora":                  "Apoyo a esterilización",
+    "Selladora":                 "Apoyo a esterilización",
+    "Maceradora":                "Apoyo a esterilización",
+    "Planta de agua / ósmosis":  "Apoyo a esterilización",
+    "Equipo dental":             "Dental",
+    "Incubadora / cuna":         "Otros",
+    "Monitor / diagnóstico":     "Otros",
+}
+_EQ_FAM_OTROS = "Otros"
+_EQ_RX_TIPOS = None
+
+
+def _eq_familia(row):
+    """Familia de producto de una venta de repuesto, en seis categorías."""
+    global _EQ_RX_TIPOS
+    if _EQ_RX_TIPOS is None:
+        _EQ_RX_TIPOS = [(t, re.compile(p)) for t, p in _EQ_TIPOS]
+    txt = _eq_texto(row)
+    for nombre, rx in _EQ_RX_TIPOS:
+        if rx.search(txt):
+            return _EQ_FAM_CAT.get(nombre, _EQ_FAM_OTROS)
+    return _EQ_FAM_OTROS
+
+
+def _eq_texto(row):
+    """Texto sobre el que se clasifica una venta de repuesto.
+
+    Mira toda la fila y no sólo el nombre de la cotización: ese campo suele
+    traer la instrucción de despacho («POR FAVOR ENVIAR A MARCHAN PEREIRA»)
+    mientras que el equipo aparece en el nombre de la oportunidad o en el del
+    producto. Sumando los tres el tipo de equipo pasa de reconocerse en el
+    47,6% de las filas al 70,1%, y ya no depende de «Equipo Asociado», que en
+    el libro del 11-09-2026 vino vacío.
+    """
+    partes = [row[5], row[3], row[13],          # cotización, oportunidad, producto
+              row[21] if len(row) > 21 else None]   # equipo asociado
+    return _eq_norm(" ".join(safe_str(p) for p in partes if p))
+
+
+# La misma marca aparece escrita de varias formas: erratas de digitación
+# (STELLCO, FLIGH DENTAL, PUTYTAS), el nombre corto junto al largo
+# (DOLPHIN / DDC DOLPHIN, DURR / DURR DENTAL) y las dos grafías con que cada
+# hoja nombra al mismo fabricante (AIR TECHNICS en inventario, AIR TECHNIQUES
+# en ventas). Sin unificarlas, una marca se parte en dos filas de la tabla y
+# ninguna refleja lo que realmente se vendió.
+# La tabla es explícita a propósito: una regla por parecido tipográfico
+# juntaría marcas distintas sin que nadie lo note.
+_MARCA_ALIAS = {
+    "STELLCO":         "STEELCO",
+    "FLIGH DENTAL":    "FLIGHT DENTAL",
+    "PUTYTAS":         "PURYTAS",
+    "DOLPHIN":         "DDC DOLPHIN",
+    "DDC":             "DDC DOLPHIN",
+    "MARCA MIXTA":     "MIXTA",
+    "AIR TECHNICS":    "AIR TECHNIQUES",
+    "DURR":            "DURR DENTAL",
+    "PENTAX MEDICAL":  "PENTAX",
+}
+
+
+def _marca_canon(m):
+    """Nombre único de una marca, resueltas sus variantes de escritura."""
+    m = safe_str(m).strip().upper()
+    m = " ".join(m.split())          # espacios dobles de la hoja
+    return _MARCA_ALIAS.get(m, m)
+
+
+# SKU → fabricante. Se arma una vez por corrida: la hoja tiene 3.128 SKU y
+# recorrerla por cada fila de venta sería un cruce cuadrático.
+_SKU_FAB = None
+
+
+def _sku_fabricante(wb, vocab=()):
+    """Marca por SKU, tomada de «Inventario Bodega» (Número de artículo →
+    FirmName). Rescata la marca cuando «Marca 2» quedó en #N/A porque el
+    diccionario de repuestos no tiene esa cotización: 340 de 580 filas.
+
+    El fabricante del inventario se acerca al vocabulario que ya usa la hoja
+    —«PENTAX MEDICAL» pasa a «PENTAX», «DDC» a «DDC DOLPHIN»— para que la
+    misma marca no aparezca dos veces con dos nombres.
+    """
+    global _SKU_FAB
+    if _SKU_FAB is not None:
+        return _SKU_FAB
+    ws = None
+    for name in wb.sheetnames:
+        if "inventario" in name.strip().lower():
+            ws = wb[name]
+            break
+    _SKU_FAB = {}
+    if ws is None:
+        return _SKU_FAB
+    voc = [v for v in vocab if v]
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if len(row) < 8 or not row[2] or not row[7]:
+            continue
+        sku = safe_str(row[2]).strip().upper()
+        firm = _marca_canon(row[7])
+        if not sku or not firm or sku in _SKU_FAB:
+            continue
+        for v in voc:
+            if firm == v or firm.startswith(v + " ") or v.startswith(firm + " "):
+                firm = v
+                break
+        _SKU_FAB[sku] = firm
+    return _SKU_FAB
+
+
+def _marca_fila(row, skufab):
+    """Marca de una venta: la de la hoja y, si no la hay, la del SKU."""
+    m = _marca_canon(row[19])
+    if m and m != "#N/A":
+        return m
+    return skufab.get(safe_str(row[11]).strip().upper(), "")
+
 
 def _eq_norm(s):
     t = unicodedata.normalize("NFD", safe_str(s).upper())
     t = "".join(c for c in t if unicodedata.category(c) != "Mn")
     return re.sub(r"\s+", " ", t).strip()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CITAS DE SERVICIO EN TERRENO
+# ══════════════════════════════════════════════════════════════════════════════
+# El nombre del recurso trae el cargo pegado con un guión —«Camila Castro -
+# Tecnico superviso»—, escrito sin tilde y a veces cortado. Se separa para poder
+# agrupar por rol, y las variantes se unifican para que un mismo cargo no
+# aparezca dos veces en la tabla.
+_CIT_ROLES = {
+    "TECNICO": "Técnico",
+    "TECNICO SUPERVISO": "Técnico supervisor",
+    "TECNICO SUPERVISOR": "Técnico supervisor",
+    "SUPERVISOR": "Supervisor",
+}
+_CIT_SIN_ROL = "Sin cargo declarado"
+
+# El tipo de trabajo viene codificado como PREFIJO_EQUIPO_PERIODICIDAD_SUFIJO.
+# El prefijo es la naturaleza de la visita y es lo que interesa medir; los
+# movimientos de equipo (ingreso a taller, entrega, retiro) se juntan porque
+# individualmente son pocos y responden a la misma logística.
+_CIT_TIPOS = {
+    "DX":             "Diagnóstico",
+    "MC":             "Mantención correctiva",
+    "MP":             "Mantención preventiva",
+    "INST":           "Instalación y puesta en marcha",
+    "INGRESO":        "Movimiento de equipo",
+    "ING":            "Movimiento de equipo",
+    "ENTREGA":        "Movimiento de equipo",
+    "RETIRO":         "Movimiento de equipo",
+    "DESINSTALACIÓN": "Movimiento de equipo",
+    "DESINSTALACION": "Movimiento de equipo",
+    "CONTROL":        "Movimiento de equipo",
+    "REV":            "Revisión y capacitación",
+    "CAPA":           "Revisión y capacitación",
+}
+_CIT_TIPO_OTRO = "Otros"
+# Orden de lectura: de la visita que diagnostica a la que cierra el ciclo.
+_CIT_TIPO_ORDEN = ["Diagnóstico", "Mantención correctiva", "Mantención preventiva",
+                   "Instalación y puesta en marcha", "Movimiento de equipo",
+                   "Revisión y capacitación", _CIT_TIPO_OTRO]
+
+
+def _cit_rol(nombre):
+    """Separa «Nombre - Cargo» en sus dos partes."""
+    txt = safe_str(nombre).strip()
+    if " - " in txt:
+        pers, cargo = txt.split(" - ", 1)
+    elif "-" in txt and len(txt.split("-")) == 2:
+        pers, cargo = txt.split("-", 1)
+    else:
+        return txt, _CIT_SIN_ROL
+    clave = _norm_cli(cargo)
+    return pers.strip(), _CIT_ROLES.get(clave, cargo.strip().capitalize())
+
+
+def _cit_tipo(tt):
+    """Naturaleza de la visita, desde el prefijo del tipo de trabajo."""
+    pre = safe_str(tt).strip().split("_")[0].strip().upper()
+    return _CIT_TIPOS.get(pre, _CIT_TIPO_OTRO)
+
+
+def _cit_equipo(tt):
+    """Equipo intervenido, desde el segundo segmento del tipo de trabajo."""
+    p = [x.strip() for x in safe_str(tt).strip().split("_")]
+    if len(p) < 2 or not p[1]:
+        return "Sin especificar"
+    e = p[1].upper()
+    if e in ("SR", "CR"):                 # tipos sin segmento de equipo
+        return "Sin especificar"
+    return e.capitalize() if len(e) > 3 else e
+
+
+def read_citas_servicios(wb):
+    """Citas de servicio en terreno, una fila por visita completada.
+
+    La duración se toma de «Duración Modificada» (col O) y no de «Duración
+    real»: la real mide el tiempo entre que el técnico abre y cierra la cita en
+    la app, así que arrastra visitas dejadas abiertas toda la noche —suma
+    2.043.125 minutos contra 610.451 de la modificada, que es la corregida a
+    mano. La fecha es «Fecha Modificada» (col P) por la misma razón.
+    """
+    ws = None
+    for name in wb.sheetnames:
+        n = name.strip().lower()
+        if "cita" in n and "servicio" in n:
+            ws = wb[name]
+            break
+    if ws is None:
+        return {}
+
+    tecnicos, roles, clientes, tipos, equipos = [], [], [], [], []
+    i_tec, i_rol, i_cli, i_tip, i_eq = {}, {}, {}, {}, {}
+    tec_rol = []                       # rol de cada técnico, por índice
+
+    def ref(lista, indice, valor):
+        if valor not in indice:
+            indice[valor] = len(lista)
+            lista.append(valor)
+        return indice[valor]
+
+    filas, meses_set = [], set()
+    sin_dur = 0
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 16 or not row[0]:
+            continue
+        f = row[15]
+        if not isinstance(f, (datetime, date)):
+            continue
+        ym = f.year * 12 + (f.month - 1)
+        meses_set.add(ym)
+
+        pers, rol = _cit_rol(row[0])
+        if not pers:
+            continue
+        it = ref(tecnicos, i_tec, pers)
+        if it == len(tec_rol):
+            tec_rol.append(ref(roles, i_rol, rol))
+
+        dur = to_float(row[14]) if isinstance(row[14], (int, float)) else 0.0
+        prog = to_float(row[12]) if isinstance(row[12], (int, float)) else 0.0
+        if not dur:
+            sin_dur += 1
+
+        tt = row[6]
+        filas.append([
+            it,
+            ref(clientes, i_cli, safe_str(row[5]).strip() or "(sin cliente)"),
+            ref(tipos, i_tip, _cit_tipo(tt)),
+            ref(equipos, i_eq, _cit_equipo(tt)),
+            ym,
+            round(dur),
+            round(prog),
+            1 if safe_str(tt).strip().upper().endswith("_CR") else 0,
+        ])
+
+    if not filas:
+        return {}
+
+    ms = sorted(meses_set)
+    idx_mes = {v: i for i, v in enumerate(ms)}
+    for fl in filas:
+        fl[4] = idx_mes[fl[4]]
+
+    ABR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+           "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    meses = [{"a": v // 12, "m": v % 12 + 1,
+              "lbl": "%s %02d" % (ABR[v % 12], (v // 12) % 100)} for v in ms]
+
+    # El orden de los tipos es el del ciclo de servicio, no el alfabético.
+    orden_tipo = [t for t in _CIT_TIPO_ORDEN if t in i_tip]
+    orden_tipo += [t for t in tipos if t not in orden_tipo]
+
+    return {
+        "tecnicos":  tecnicos,
+        "roles":     roles,
+        "tec_rol":   tec_rol,
+        "clientes":  clientes,
+        "tipos":     tipos,
+        "orden_tipo": orden_tipo,
+        "equipos":   equipos,
+        "meses":     meses,
+        # [técnico, cliente, tipo, equipo, mes, minutos, min. programados, con repuesto]
+        "filas":     filas,
+        "n":         len(filas),
+        "sin_dur":   sin_dur,
+    }
 
 
 def read_equipos_fallas(wb):
@@ -2257,12 +2649,22 @@ def read_equipos_fallas(wb):
             lista.append(valor)
         return indice[valor]
 
+    # El vocabulario de marcas sale de la propia hoja: así el fabricante que
+    # se tome del inventario se escribe como ya se escribe aquí.
+    vocab = set()
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if row and len(row) > 19:
+            m = _marca_canon(row[19])
+            if m and m != "#N/A":
+                vocab.add(m)
+    skufab = _sku_fabricante(wb, sorted(vocab, key=len, reverse=True))
+
     filas_out = []
     anios = set()
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not row or len(row) < 22:
             continue
-        marca = safe_str(row[19]).strip().upper()
+        marca = _marca_fila(row, skufab)
         if not marca:
             continue
         monto = to_float(row[15]) if isinstance(row[15], (int, float)) else 0.0
@@ -2274,15 +2676,14 @@ def read_equipos_fallas(wb):
         anio, mes = int(anio), int(mes)
         anios.add(anio)
 
-        txt = _eq_norm(row[5])
+        txt = _eq_texto(row)
         tipo = None
         for nombre, rx in rx_tipo:
             if rx.search(txt):
                 tipo = nombre
                 break
         if tipo is None:
-            # La cotización no nombra el equipo. «Equipo Asociado» (col V) se
-            # deduce del producto, así que sirve de respaldo grueso.
+            # Respaldo grueso por si «Equipo Asociado» (col V) sí viene.
             tipo = _EQ_FAM_V.get(safe_str(row[21]).strip().upper())
         modelo = ""
         for rx in rx_mod:
@@ -2370,10 +2771,20 @@ def read_repuestos_vendidos(wb):
     familias  = set()
     periodos = set()
 
+    # Mismo rescate de marca que en «equipos que fallan»: cuando el VLOOKUP de
+    # «Marca 2» no encuentra la cotizacion, la marca sale del SKU.
+    vocab = set()
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if row and len(row) > 19:
+            m = _marca_canon(row[19])
+            if m and m != "#N/A":
+                vocab.add(m)
+    skufab = _sku_fabricante(wb, sorted(vocab, key=len, reverse=True))
+
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not row or len(row) < 20:
             continue
-        marca = safe_str(row[19]).strip().upper()
+        marca = _marca_fila(row, skufab)
         if not marca:
             continue
         try:
@@ -2398,8 +2809,7 @@ def read_repuestos_vendidos(wb):
         cli_marca[cli][marca] += monto
         cli_mm[(cli, marca, anio, mes)][0] += monto
         cli_mm[(cli, marca, anio, mes)][1] += cant
-        fam = safe_str(row[21]).strip().upper() if len(row) > 21 else ""
-        fam = fam or "SIN CLASIFICAR"
+        fam = _eq_familia(row)
         familias.add(fam)
         fam_mes[(fam, anio, mes)][0] += monto
         fam_mes[(fam, anio, mes)][1] += cant
@@ -2538,7 +2948,11 @@ def read_repuestos_vendidos(wb):
             "marcas":    [{"k": k, "monto": round(v[0]), "cant": round(v[1])}
                           for k, v in sorted(por_marca.items(), key=lambda x: -x[1][0])],
         }
-    familias_sorted = sorted(fam_out, key=lambda f: -fam_out[f]["monto_tot"])
+    # De mayor a menor venta, que es como se lee la tabla, pero con «Otros»
+    # siempre al final: es el residuo de la clasificacion y no una familia que
+    # compita con las demas por posicion.
+    familias_sorted = sorted(
+        fam_out, key=lambda f: (f == _EQ_FAM_OTROS, -fam_out[f]["monto_tot"]))
 
     return {
         "meses":       meses,
@@ -2946,9 +3360,12 @@ def read_ratios2(wb):
     if ws is None:
         return {}
 
-    # Estructura: col B = etiqueta, Real de mes i = col (2 + i*4), 0-indexed
-    # Fila 7=Ingresos, 8=Contratos, 9=Otras, 10=CdV, 11=Margen, 12=Margen%,
-    # 14=Empleados, 15=Otros, 17=EBITDA Directo, 20=GAV Indirecto, 30=EBITDA Empresa
+    # Estructura: col B = etiqueta de la linea, y a partir de la col C un
+    # bloque de columnas por mes (Real / PTTO / Variacion). Ni las filas ni las
+    # columnas se toman por indice: las filas se buscan por su etiqueta (ver
+    # ETIQUETAS mas abajo) y las columnas se resuelven leyendo las dos filas de
+    # encabezado. La hoja se reordena seguido y con indices fijos el EERR
+    # quedaba descuadrado sin que nada avisara.
     MAX_MONTHS = 12
     MAX_COL    = max(2 + MAX_MONTHS * 4 + 1, 2 + MAX_MONTHS * 2 + 1)  # cubre formato EERR y RATIOS
 
@@ -4248,6 +4665,7 @@ def main():
     inv_ts = read_inventario_ts(wb2)
     rep_vend = read_repuestos_vendidos(wb2)
     eq_fallas = read_equipos_fallas(wb2)
+    citas     = read_citas_servicios(wb2)
     prosp_bi  = read_prospectos_bi(wb2)
     fact_desg = read_fact_desglose(wb2)
     br_oport = read_brecha_oport(wb2)
@@ -4278,6 +4696,7 @@ def main():
     app_data["inv_ts"] = inv_ts
     app_data["rep_vend"] = rep_vend
     app_data["eq_fallas"] = eq_fallas
+    app_data["citas"] = citas
     app_data["prosp_bi"] = prosp_bi
     app_data["fact_desglose"] = fact_desg
     app_data["br_oport"] = br_oport
@@ -4285,6 +4704,41 @@ def main():
     app_data["cli_rel"]  = cli_rel
     app_data["back_order"] = back_ord
     app_data["pipeline_st"] = pipe_st
+    # Un lector que no encuentra su hoja, o la encuentra rota, devuelve un dict
+    # vacío sin quejarse, y el tablero sale con esa sección en blanco sin que
+    # nadie lo note hasta que alguien la abre. Paso el 11-09-2026 con
+    # «Repuestos Vendidas»: las columnas año, mes y Equipo Asociado quedaron sin
+    # datos y tres hojas del panel salieron vacías. Esto lo deja a la vista.
+    _ESPERADOS = [
+        ("rep_vend",      rep_vend,  "data",     "Repuestos Vendidas"),
+        ("eq_fallas",     eq_fallas, "filas",    "Repuestos Vendidas"),
+        ("citas",         citas,     "filas",    "Citas Servicios Trimestrales"),
+        ("cli_rel",       cli_rel,   "clientes", "Repuestos Vendidas"),
+        ("inv_ts",        inv_ts,    "data",     "Inventario Bodega"),
+        ("prosp_bi",      prosp_bi,  "filas",    "BASE INSTALADA"),
+        ("br_stock",      br_stock,  "clientes_det", "Brecha Sin Stock"),
+        ("br_oport",      br_oport,  "por_cliente",  "Brecha Oport por Facturar"),
+        ("pipeline_st",   pipe_st,   "items",    "Pipeline ST"),
+        ("fact_desglose", fact_desg, None,       "FACTURACION"),
+    ]
+    _vacios = []
+    for _clave, _d, _campo, _hoja in _ESPERADOS:
+        if not _d:
+            _vacios.append((_clave, _hoja, "el lector no devolvió nada"))
+        elif _campo and not (_d.get(_campo) if isinstance(_d, dict) else None):
+            _vacios.append((_clave, _hoja, f"sin filas en «{_campo}»"))
+    if _vacios:
+        print()
+        print("  " + "!" * 58)
+        print("  ADVERTENCIA: hay secciones del tablero que saldran VACIAS")
+        for _clave, _hoja, _por in _vacios:
+            print(f"    - {_clave:<14} (hoja «{_hoja}»): {_por}")
+        print("  Revisa esas hojas en el Excel antes de publicar el tablero.")
+        print("  " + "!" * 58)
+        print()
+
+    # Va después de dejar el pipeline en APP_DATA: necesita las dos fuentes.
+    cruzar_pipeline_bi(app_data.get("base_instalada"), app_data.get("pipeline_st"))
     # Costo GD que no queda asignado a ningún cliente de la tabla
     if gd_costo:
         _hu = {_norm_cli(c["cliente"]) for c in app_data.get("fact_clientes", [])}

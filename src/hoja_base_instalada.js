@@ -252,6 +252,176 @@ function _biClientesFiltrados(){
   return list;
 }
 
+// Regiones desplegadas en la tabla de Detalle por Cliente. La tabla abre
+// mostrando sólo las regiones: con más de 200 clientes, la lista plana obliga
+// a buscar a ojo, mientras que el orden geográfico es el que usa el equipo
+// comercial para repartirse el trabajo.
+const _biRegAbierta = {};
+window._biTogReg = function (r) {
+  _biRegAbierta[r] = !_biRegAbierta[r];
+  _biRenderTabla();
+};
+window._biRegTodas = function (abrir) {
+  Object.keys(_biRegAbierta).forEach(k => delete _biRegAbierta[k]);
+  if (abrir) _biClientesFiltrados().forEach(c => { _biRegAbierta[c.region || 'Sin región'] = true; });
+  _biRenderTabla();
+};
+
+// Potencial de un cliente, abierto en sus tres componentes. El de
+// mantenimiento sólo cuenta en quien NO tiene contrato: donde ya lo hay no
+// queda nada por capturar. El de equipos y el de garantías vienen del
+// pipeline, que es venta futura y aplica tenga o no contrato hoy.
+// Pipeline de clientes que no están en la base instalada: concesionarias y
+// hospitales nuevos, que es donde justamente se vende equipo. Va en la fila de
+// cierre para que el total de la columna calce con la suma del Excel.
+function _biPipeResid(){
+  const r = (APP_DATA.base_instalada || {}).pipe_resid || {};
+  return { monto: +r.monto || 0, st: +r.st || 0, n: +r.n || 0 };
+}
+
+// ── VIDA MEDIA DE LA BASE INSTALADA ────────────────────────────
+// Los años desde la instalación salen de la hoja Prospectos BI, que lee la
+// «Fecha de Compra» equipo por equipo. Sólo un tercio de la base la trae, así
+// que junto al promedio se guarda sobre cuántos equipos se calculó: una vida
+// media de 6 años sobre el 20% del parque dice bastante menos que la misma
+// cifra sobre el 90%, y sin ese dato al lado no hay cómo distinguirlas.
+let _biVidaIdx = null;
+function _biVidaIndice(){
+  if(_biVidaIdx) return _biVidaIdx;
+  const P = APP_DATA.prosp_bi || {};
+  const cl = P.clientes || [], filas = P.filas || [], hoy = P.hoy_ym || 0;
+  const idx = {};
+  filas.forEach(f=>{
+    const k = _biNorm(cl[f[3]] || '');
+    if(!k) return;
+    const d = idx[k] || (idx[k] = { n:0, nf:0, suma:0 });
+    d.n++;
+    if(f[6] >= 0){ d.nf++; d.suma += (hoy - f[6]) / 12; }
+  });
+  _biVidaIdx = idx;
+  return idx;
+}
+
+// Vida de un grupo de clientes: promedio y cobertura del dato.
+function _biVida(cs){
+  const idx = _biVidaIndice();
+  let n = 0, nf = 0, suma = 0;
+  (cs||[]).forEach(c=>{
+    const d = idx[_biNorm(c.nombre)];
+    if(!d) return;
+    n += d.n; nf += d.nf; suma += d.suma;
+  });
+  return { vida: nf ? suma/nf : null, nf: nf, n: n, cob: n ? nf/n : 0 };
+}
+
+// Las líneas de negocio, con el color con que las pinta el resto de la hoja.
+// El texto va oscuro sobre los tonos claros: blanco sobre amarillo no se lee.
+const _BI_LIN = [
+  { label: 'Dental',             prop: 'dental',         color: 'FFC000', ink: '1A1A1A' },
+  { label: 'Esterilización',     prop: 'esterilizacion', color: '002D73', ink: 'FFFFFF' },
+  { label: 'Incardia',           prop: 'incardia',       color: 'D46000', ink: 'FFFFFF' },
+  { label: 'Endoscopía',         prop: 'endoscopia',     color: '28D2C3', ink: '1A1A1A' },
+  { label: 'Mobiliario Clínico', prop: 'mobiliario',     color: '7B2FBE', ink: 'FFFFFF' },
+  { label: 'MMQ / REAS',         prop: 'mmq_reas',       color: '00832F', ink: 'FFFFFF' },
+  { label: 'Otros',              prop: 'otros',          color: 'B8C1D8', ink: '1A1A1A' },
+];
+
+// El nombre de la línea en el Excel se agrupa igual que en la base instalada:
+// MMQ y REAS caen juntas y todo lo que no está en la lista va a «Otros». Si
+// las dos agrupaciones no coincidieran, los equipos por línea no sumarían el
+// total de la fila.
+function _biLineaProp(l) {
+  const u = String(l || '').trim().toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (u === 'DENTAL') return 'dental';
+  if (u === 'ESTERILIZACION') return 'esterilizacion';
+  if (u === 'INCARDIA') return 'incardia';
+  if (u === 'ENDOSCOPIA') return 'endoscopia';
+  if (u === 'MOBILIARIO CLINICO') return 'mobiliario';
+  if (u === 'MMQ' || u === 'REAS') return 'mmq_reas';
+  return 'otros';
+}
+
+// La misma vida media de antes, pero abierta por línea: un cliente con la
+// esterilización recién renovada y el dental de doce años tiene un promedio
+// que no describe ninguna de las dos, y es la línea vieja la que da la visita.
+let _biVidaLinIdx = null;
+function _biVidaLinIndice() {
+  if (_biVidaLinIdx) return _biVidaLinIdx;
+  const P = APP_DATA.prosp_bi || {};
+  const cl = P.clientes || [], ln = P.lineas || [], filas = P.filas || [], hoy = P.hoy_ym || 0;
+  const idx = {};
+  filas.forEach(f => {
+    const k = _biNorm(cl[f[3]] || '');
+    if (!k) return;
+    const pr = _biLineaProp(ln[f[1]] || '');
+    const c = idx[k] || (idx[k] = {});
+    const d = c[pr] || (c[pr] = { n: 0, nf: 0, suma: 0 });
+    d.n++;
+    if (f[6] >= 0) { d.nf++; d.suma += (hoy - f[6]) / 12; }
+  });
+  _biVidaLinIdx = idx;
+  return idx;
+}
+
+// Sobre 10 años el equipo pasó su vida útil de referencia; sobre 7 está cerca.
+function _biColVida(v){
+  return v == null ? 'var(--mut)' : v >= 10 ? 'var(--rd)'
+       : v >= 7 ? 'var(--or)' : v >= 5 ? 'var(--am)' : 'var(--gn)';
+}
+
+// Celda de monto: en blanco cuando es cero, para que la tabla no se llene de
+// ceros y las cifras que sí existen se vean.
+function _biCelPot(v, col, fuerte){
+  if(!v) return '<td style="text-align:right;color:var(--mut)">—</td>';
+  return `<td style="text-align:right;font-family:'Roboto Mono',monospace;color:${col}` +
+    (fuerte ? ';font-weight:700' : '') + `">${mm(v)}</td>`;
+}
+
+// Potencial de un cliente, abierto en sus tres componentes. El de
+// mantenimiento sólo cuenta en quien NO tiene contrato: donde ya lo hay no
+// queda nada por capturar. El de equipos y el de garantías vienen del
+// pipeline, que es venta futura y aplica tenga o no contrato hoy.
+function _biPot3(c, p, d){
+  const conContrato = (d && d.n > 0) || (p && p.tiene_contrato);
+  const mant = conContrato ? 0 : (_biPotAnual(c) || 0);
+  const eq   = +c.pipe_eq || 0;
+  const gar  = +c.pipe_st || 0;
+  return { mant: mant, eq: eq, gar: gar, st: mant + gar, total: eq + mant + gar };
+}
+
+// Suma de una columna en un grupo de clientes.
+function _biSumaCol(cs, campo) {
+  return cs.reduce((s, c) => s + _biVal(c, campo), 0);
+}
+
+// Facturación de un grupo, sin contar dos veces al cliente que aparece con
+// más de un nombre en la base instalada.
+function _biFacGrupo(cs) {
+  const vistos = new Set();
+  let fac = 0, contr = 0, pot = 0, conContrato = 0, eq = 0, gar = 0;
+  cs.forEach(c => {
+    const p = _biLookupPanel(c.nombre);
+    const d = _biLookupContrato(c.nombre);
+    if ((d && d.n > 0) || (p && p.tiene_contrato)) conContrato++;
+    const t = _biPot3(c, p, d);
+    pot += t.mant;   // ya viene en cero si el cliente tiene contrato
+    eq  += t.eq;
+    gar += t.gar;
+    if (!p || vistos.has(p.cliente)) return;
+    vistos.add(p.cliente);
+    fac += _biFac(p);
+    contr += p.presup_contr_ytd || 0;
+  });
+  return { fac: fac, contr: contr, pot: pot, conContrato: conContrato,
+           eq: eq, gar: gar, st: pot + gar, total: eq + pot + gar };
+}
+
+function _biEsc(x){
+  return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 function _biRenderTabla(){
   const list = _biClientesFiltrados();
   const tb = document.getElementById('tb-bi-cli');
@@ -260,14 +430,73 @@ function _biRenderTabla(){
   if(list.length === 0){
     tb.innerHTML = `<tr><td colspan="13" style="text-align:center;color:var(--mut);padding:1.2rem;font-style:italic">Sin resultados para los filtros seleccionados</td></tr>`;
   } else {
-    tb.innerHTML = list.map((c,i)=>{
-      const p=_biLookupPanel(c.nombre);
-      const d=_biLookupContrato(c.nombre);
-      const fac2026=p?(mm(_biFac(p))):'—';
-      const facContr=p?(mm(p.presup_contr_ytd||0)):'—';
-      return `<tr>
-      <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">${i+1}</td>
-      <td><strong style="font-size:.7rem">${shortN(c.nombre)}</strong></td>
+    // ── Agrupación por región ──
+    const porReg = {};
+    list.forEach(c => {
+      const r = c.region || 'Sin región';
+      (porReg[r] || (porReg[r] = [])).push(c);
+    });
+    // Las regiones se ordenan por tamaño de base instalada; «Sin región» va al
+    // final porque no es un lugar sino la falta del dato.
+    const regs = Object.keys(porReg).sort((a, b) => {
+      if (a === 'Sin región') return 1;
+      if (b === 'Sin región') return -1;
+      return _biSumaCol(porReg[b], 'total') - _biSumaCol(porReg[a], 'total');
+    });
+
+    const cel = (v, col, peso) =>
+      `<td style="text-align:right;font-family:'Roboto Mono',monospace;color:${col}` +
+      (peso ? ';font-weight:700' : '') + `">${v}</td>`;
+
+    tb.innerHTML = regs.map((r, ri) => {
+      const cs = porReg[r];
+      const ab = !!_biRegAbierta[r];
+      const g = _biFacGrupo(cs);
+      const filaReg = `<tr onclick="window._biTogReg(${JSON.stringify(r).replace(/"/g,'&quot;')})"
+        style="cursor:pointer;background:var(--gy);border-top:1px solid var(--brd)">
+        <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">${ri+1}</td>
+        <td><span style="display:inline-block;width:12px;color:var(--mut)">${ab?'▾':'▸'}</span>
+          <strong style="font-size:.71rem;color:var(--az1)">${_biEsc(r)}</strong>
+          <span style="font-size:.58rem;color:var(--mut)"> · ${cs.length} cliente${cs.length===1?'':'s'}</span></td>
+        ${cel(_biSumaCol(cs,'total').toLocaleString('es-CL'),'var(--az1)',1)}
+        ${cel(_biSumaCol(cs,'dental').toLocaleString('es-CL')||'—','var(--am)',1)}
+        ${cel(_biSumaCol(cs,'esterilizacion').toLocaleString('es-CL')||'—','var(--az2)',1)}
+        ${cel(_biSumaCol(cs,'incardia').toLocaleString('es-CL')||'—','var(--or)',1)}
+        ${cel(_biSumaCol(cs,'endoscopia').toLocaleString('es-CL')||'—','var(--teal)',1)}
+        ${cel(_biSumaCol(cs,'mobiliario').toLocaleString('es-CL')||'—','#7B2FBE',1)}
+        ${cel(_biSumaCol(cs,'mmq_reas').toLocaleString('es-CL')||'—','var(--gn)',1)}
+        ${(()=>{const v=_biVida(cs);return v.vida==null
+          ? '<td style="text-align:right;color:var(--mut)">—</td>'
+          : `<td style="text-align:right;font-family:'Roboto Mono',monospace;font-weight:700;
+               color:${_biColVida(v.vida)}">${fN1(v.vida)} a
+               <span style="font-weight:400;font-size:.55rem;color:var(--mut)">(${Math.round(v.cob*100)}%)</span></td>`;})()}
+        <td style="font-size:.58rem;color:var(--mut)">${g.conContrato} con contrato</td>
+        <td style="text-align:right;color:var(--az1);font-weight:700">${g.fac?mm(g.fac):'—'}</td>
+        <td style="text-align:right;color:var(--teal);font-weight:700">${g.contr?mm(g.contr):'—'}</td>
+        <td style="text-align:right"><strong style="color:var(--am);font-family:'Roboto Mono',monospace">${g.pot?mm(g.pot):'—'}</strong></td>
+        ${_biCelPot(g.eq,'var(--az2)')}
+        ${_biCelPot(g.gar,'var(--teal)')}
+        ${_biCelPot(g.eq,'var(--az1)',1)}
+        ${_biCelPot(g.st,'var(--am)',1)}
+        ${_biCelPot(g.total,'var(--az1)',1)}
+      </tr>`;
+      if (!ab) return filaReg;
+
+      // Dentro de la región manda el potencial total: es el orden en que
+      // conviene visitarlos, y no el alfabético ni el del número de equipos.
+      const csOrd = cs.slice().sort((a,b)=>{
+        const ta = _biPot3(a, _biLookupPanel(a.nombre), _biLookupContrato(a.nombre)).total;
+        const tb = _biPot3(b, _biLookupPanel(b.nombre), _biLookupContrato(b.nombre)).total;
+        return tb - ta || _biVal(b,'total') - _biVal(a,'total');
+      });
+      return filaReg + csOrd.map((c,i)=>{
+        const p=_biLookupPanel(c.nombre);
+        const d=_biLookupContrato(c.nombre);
+        const fac2026=p?(mm(_biFac(p))):'—';
+        const facContr=p?(mm(p.presup_contr_ytd||0)):'—';
+        return `<tr>
+      <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.6rem;padding-left:1.1rem">${i+1}</td>
+      <td style="padding-left:1.6rem"><strong style="font-size:.7rem">${shortN(c.nombre)}</strong></td>
       <td style="text-align:right;font-family:'Roboto Mono',monospace;font-weight:700;color:var(--az1)">${_biVal(c,'total').toLocaleString('es-CL')}</td>
       <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--am)">${_biVal(c,'dental')||'—'}</td>
       <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--az2)">${_biVal(c,'esterilizacion')||'—'}</td>
@@ -275,11 +504,18 @@ function _biRenderTabla(){
       <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--teal)">${_biVal(c,'endoscopia')||'—'}</td>
       <td style="text-align:right;font-family:'Roboto Mono',monospace;color:#7B2FBE">${_biVal(c,'mobiliario')||'—'}</td>
       <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--gn)">${_biVal(c,'mmq_reas')||'—'}</td>
+      ${(()=>{const v=_biVida([c]);return v.vida==null
+        ? '<td style="text-align:right;color:var(--mut)">—</td>'
+        : `<td style="text-align:right;font-family:'Roboto Mono',monospace;color:${_biColVida(v.vida)}">${fN1(v.vida)} a</td>`;})()}
       <td>${_biEstadoBadge(c.estado)}</td>
       <td style="text-align:right;color:var(--az1);font-weight:700">${fac2026}</td>
       <td style="text-align:right;color:var(--teal)">${facContr}</td>
       <td style="text-align:right">${_biPotCelda(c,p,d)}</td>
+      ${(()=>{const t=_biPot3(c,p,d);return _biCelPot(t.eq,'var(--az2)')+
+        _biCelPot(t.gar,'var(--teal)')+_biCelPot(t.eq,'var(--az1)',1)+
+        _biCelPot(t.st,'var(--am)',1)+_biCelPot(t.total,'var(--az1)',1);})()}
     </tr>`;
+      }).join('');
     }).join('');
 
     // Fila de cierre: lo que facturan los clientes sin base instalada
@@ -292,14 +528,22 @@ function _biRenderTabla(){
           <strong style="font-size:.7rem;color:var(--mut)">Otros clientes</strong>
           <span style="font-size:.58rem;color:var(--mut)"> · ${otros.n} sin base instalada cargada</span></td>
         <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--mut)">—</td>
-        <td colspan="7" style="text-align:center;font-size:.58rem;color:var(--mut);font-style:italic">
-          facturan sin equipos registrados en esta hoja</td>
+        <td colspan="8" style="text-align:center;font-size:.58rem;color:var(--mut);font-style:italic">
+          facturan o tienen pipeline sin equipos registrados en esta hoja</td>
         <td style="text-align:right;color:var(--az1);font-weight:700">${mm(otros.monto)}</td>
         <td style="text-align:right;color:var(--mut)">—</td>
         <td style="text-align:right;color:var(--mut)">—</td>
+        ${_biCelPot(_biPipeResid().monto,'var(--az2)')}
+        ${_biCelPot(_biPipeResid().st,'var(--teal)')}
+        ${_biCelPot(_biPipeResid().monto,'var(--az1)',1)}
+        ${_biCelPot(_biPipeResid().st,'var(--am)',1)}
+        ${_biCelPot(_biPipeResid().monto+_biPipeResid().st,'var(--az1)',1)}
       </tr>`;
     }
   }
+
+  // La matriz mira los mismos clientes filtrados que la tabla.
+  if (typeof _biRenderMatriz === 'function') setTimeout(_biRenderMatriz, 0);
 
   // Footer
   const foot = document.getElementById('tfoot-bi-cli');
@@ -323,18 +567,376 @@ function _biRenderTabla(){
       if((d2&&d2.n>0)||(p2&&p2.tiene_contrato)) return s2;
       return s2+_biPotAnual(c);
     },0);
+    // El pipeline del pie incluye el residuo de la fila de cierre, así la
+    // columna cuadra con la suma total del Excel y no sólo con lo cruzado.
+    const rp = _biSinFiltros() ? _biPipeResid() : { monto:0, st:0 };
+    const pipeEq = list.reduce((a,c)=>a+(+c.pipe_eq||0),0) + rp.monto;
+    const pipeSt = list.reduce((a,c)=>a+(+c.pipe_st||0),0) + rp.st;
     const st='text-align:right;font-family:\'Roboto Mono\',monospace;color:rgba(255,255,255,.75)';
     foot.innerHTML = `<td colspan="2" style="font-weight:700;font-size:.62rem;color:rgba(255,255,255,.85)">${list.length} clientes · ${conContr} con contrato activo${otrosF.n?' · +'+otrosF.n+' sin base instalada':''}</td>
       <td style="${st};font-weight:700;color:#fff">${tot.toLocaleString('es-CL')}</td>
       <td style="${st}">${dent}</td><td style="${st}">${este}</td>
       <td style="${st}">${inc}</td><td style="${st}">${endo}</td>
       <td style="${st}">${mob}</td><td style="${st}">${mmq}</td>
+      ${(()=>{const v=_biVida(list);return v.vida==null?'<td></td>'
+        :`<td style="${st};font-weight:700;color:#fff">${fN1(v.vida)} a
+          <span style="font-weight:400;font-size:.55rem;opacity:.7">(${Math.round(v.cob*100)}%)</span></td>`;})()}
       <td></td>
       <td style="${st};font-weight:700;color:#FFC000">${mm(facTotal)}</td>
       <td></td>
-      <td style="${st};font-weight:700;color:#FFC000" title="Potencial de los clientes sin contrato">${mm(potTotal)}</td>`;
+      <td style="${st};font-weight:700;color:#FFC000" title="Potencial de los clientes sin contrato">${mm(potTotal)}</td>
+      <td style="${st};color:#fff">${mm(pipeEq)}</td>
+      <td style="${st};color:#fff">${mm(pipeSt)}</td>
+      <td style="${st};font-weight:700;color:#fff">${mm(pipeEq)}</td>
+      <td style="${st};font-weight:700;color:#FFC000">${mm(potTotal+pipeSt)}</td>
+      <td style="${st};font-weight:700;color:#fff">${mm(pipeEq+potTotal+pipeSt)}</td>`;
   }
 }
+
+// ── MATRIZ DE PROSPECCIÓN ──────────────────────────────────────
+// Cruza las dos preguntas que la tabla responde por separado: qué tan vieja
+// está la base de cada cliente y cuánto servicio técnico hay ahí por capturar.
+// Un solo color para todos los puntos: la guía de visualización limita a tres
+// los tonos de un gráfico de dispersión, y acá hay diecisiete regiones, así
+// que la región se elige en el filtro y se lee en el tooltip, no en el color.
+let _biMxChart = null, _biMxRegion = 'todas';
+
+window._biMxReg = function (v) { _biMxRegion = v; _biRenderMatriz(); };
+window._biMxReset = function () { if (_biMxChart && _biMxChart.resetZoom) _biMxChart.resetZoom(); };
+
+// Datos de la matriz: un punto por cliente con vida media conocida.
+function _biMxDatos() {
+  const list = _biClientesFiltrados().filter(c =>
+    _biMxRegion === 'todas' || (c.region || 'Sin región') === _biMxRegion);
+  const pts = [];
+  let sinVida = 0;
+  list.forEach(c => {
+    const v = _biVida([c]);
+    const p = _biLookupPanel(c.nombre);
+    const d = _biLookupContrato(c.nombre);
+    const t = _biPot3(c, p, d);
+    if (!t.st) return;                 // sin potencial ST no hay nada que prospectar
+    if (v.vida == null) { sinVida++; return; }
+    pts.push({
+      nombre: c.nombre, region: c.region || 'Sin región',
+      x: +v.vida.toFixed(2), y: t.st, st: t.st, mant: t.mant, gar: t.gar,
+      eq: t.eq, total: t.total, equipos: _biVal(c, 'total'), cob: v.cob,
+      contrato: (d && d.n > 0) || (p && p.tiene_contrato),
+      // La base instalada abierta por línea viaja con el punto: el gráfico no
+      // la usa, pero el exportable la necesita y así no se recorre dos veces.
+      lin: _BI_LIN.reduce((o, l) => { o[l.prop] = _biVal(c, l.prop); return o; }, {}),
+      vidaLin: _biVidaLinIndice()[_biNorm(c.nombre)] || {},
+    });
+  });
+  return { pts: pts, sinVida: sinVida };
+}
+
+const _biMediana = (a) => {
+  if (!a.length) return 0;
+  const o = a.slice().sort((x, y) => x - y), m = o.length >> 1;
+  return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
+};
+
+// Las medianas se dibujan como plugin porque Chart.js no trae anotaciones y
+// cargar otra librería por dos líneas no se justifica.
+const _biMxGuias = {
+  id: 'biMxGuias',
+  beforeDatasetsDraw(ch, args, opt) {
+    if (!opt || !isFinite(opt.mx) || !isFinite(opt.my)) return;
+    const { ctx, chartArea: a, scales } = ch;
+    const px = scales.x.getPixelForValue(opt.mx), py = scales.y.getPixelForValue(opt.my);
+    ctx.save();
+    // Cuadrante de prioridad: base más vieja y más potencial que la mediana.
+    ctx.fillStyle = 'rgba(212,96,0,.07)';
+    ctx.fillRect(px, a.top, a.right - px, py - a.top);
+    ctx.strokeStyle = 'rgba(107,123,168,.55)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(px, a.top); ctx.lineTo(px, a.bottom);
+    ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#A34515';
+    ctx.font = '600 10px Roboto, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('Visitar primero', a.right - 8, a.top + 14);
+    ctx.restore();
+  },
+};
+
+function _biRenderMatriz() {
+  const box = document.getElementById('cBiMatriz');
+  if (!box || typeof Chart === 'undefined') return;
+
+  // Filtro de región, con las que existen en el conjunto filtrado
+  const sel = document.getElementById('bi-mx-reg');
+  if (sel && !sel.dataset.listo) {
+    const regs = [...new Set(_biClientesFiltrados().map(c => c.region || 'Sin región'))].sort();
+    sel.innerHTML = ['<option value="todas">Todas</option>']
+      .concat(regs.map(r => `<option value="${_biEsc(r)}">${_biEsc(r)}</option>`)).join('');
+    sel.dataset.listo = '1';
+  }
+
+  const { pts, sinVida } = _biMxDatos();
+  const lbl = document.getElementById('bi-mx-lbl');
+  if (lbl) {
+    lbl.textContent = pts.length + ' clientes en la matriz' +
+      (sinVida ? ' · ' + sinVida + ' sin fecha de instalación quedan fuera' : '');
+  }
+  if (_biMxChart) { _biMxChart.destroy(); _biMxChart = null; }
+  if (!pts.length) return;
+
+  const maxST = Math.max.apply(null, pts.map(p => p.st));
+  // Radio por raíz del monto: el área del punto queda proporcional al valor, y
+  // el mínimo de 5 px mantiene el punto visible y agarrable en el hover.
+  pts.forEach(p => { p.r = 5 + Math.sqrt(p.st / maxST) * 17; });
+
+  _biMxChart = new Chart(box.getContext('2d'), {
+    type: 'bubble',
+    data: {
+      datasets: [{
+        label: 'Clientes',
+        data: pts,
+        backgroundColor: 'rgba(0,45,115,.55)',
+        borderColor: '#fff',          // anillo del color de la superficie
+        borderWidth: 2,
+        hoverBackgroundColor: 'rgba(0,45,115,.8)',
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },   // una sola serie: la titula la tarjeta
+        biMxGuias: {
+          mx: _biMediana(pts.map(p => p.x)),
+          my: _biMediana(pts.map(p => p.y)),
+        },
+        // Con seiscientos clientes los puntos se apiñan cerca del origen y no
+        // hay forma de elegir uno. La rueda acerca sobre el cursor, arrastrar
+        // desplaza y el botón vuelve a la vista completa. Los límites impiden
+        // alejarse más allá de la vista original o acercarse hasta un vacío
+        // sin puntos de referencia.
+        zoom: {
+          limits: { x: { min: 'original', max: 'original', minRange: 0.5 },
+                    y: { min: 'original', max: 'original' } },
+          pan: {
+            enabled: true, mode: 'xy', threshold: 4,
+            // El cursor es la única señal de que el lienzo se puede arrastrar.
+            onPanStart:    ({ chart }) => { chart.canvas.style.cursor = 'grabbing'; },
+            onPanComplete: ({ chart }) => { chart.canvas.style.cursor = 'grab'; },
+          },
+          zoom: {
+            wheel: { enabled: true, speed: 0.08 },
+            pinch: { enabled: true },
+            mode: 'xy',
+          },
+        },
+        tooltip: {
+          callbacks: {
+            title: c => c[0].raw.nombre,
+            label: c => {
+              const p = c.raw;
+              return [
+                p.region + (p.contrato ? ' · con contrato' : ''),
+                'Vida media: ' + fN1(p.x) + ' años  (' + Math.round(p.cob * 100) + '% con fecha)',
+                'Equipos: ' + p.equipos.toLocaleString('es-CL'),
+                'Potencial ST: ' + mm(p.st),
+                '   mantenimiento ' + mm(p.mant) + ' · garantías ' + mm(p.gar),
+                'Pipeline equipos: ' + mm(p.eq),
+              ];
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Vida media de la base instalada (años)',
+                   font: { size: 9 }, color: '#6B7BA8' },
+          grid: { color: '#E2E6F0' }, ticks: { font: { size: 9 } },
+          beginAtZero: true,
+        },
+        y: {
+          title: { display: true, text: 'Potencial ST (MM$)', font: { size: 9 }, color: '#6B7BA8' },
+          grid: { color: '#E2E6F0' },
+          ticks: { font: { size: 9 }, callback: v => Math.round(v / 1e6) },
+          beginAtZero: true,
+        },
+      },
+    },
+    // El plugin de zoom se registra solo al cargarse, pero no hace nada donde
+    // no se declaren opciones de zoom: los demás gráficos del panel quedan
+    // igual y sólo esta matriz responde a la rueda.
+    plugins: [_biMxGuias],
+  });
+  // La mano abierta desde el inicio: sin ella nadie descubre que se arrastra.
+  box.style.cursor = 'grab';
+}
+
+// El exportable es un Excel con una hoja por región, cada una con sus diez
+// clientes a visitar y una columna en blanco para escribir el plan de acción:
+// la lista no es para mirarla sino para repartirla y que vuelva completada.
+// Los clientes sin región quedan fuera — no hay a quién asignárselos.
+window._biMxExport = function () {
+  if (typeof XLSX === 'undefined') {
+    alert('Librería Excel no cargada. Verifique conexión a internet e intente de nuevo.');
+    return;
+  }
+  const btn = document.getElementById('bi-mx-pdf');
+  const txt = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+  try {
+    const { pts } = _biMxDatos();
+    // Sólo la base instalada de hoy y lo que ella puede rendir en
+    // mantenimiento. El pipeline de equipos y las garantías que traería son
+    // venta futura, no base instalada, y quien ya tiene contrato no deja nada
+    // por capturar: por eso quedan fuera los de potencial cero.
+    const porReg = {};
+    pts.forEach(p => {
+      if (p.region === 'Sin región') return;      // no hay a quién asignárselos
+      if (!(p.mant > 0)) return;
+      (porReg[p.region] || (porReg[p.region] = [])).push(p);
+    });
+    const regs = Object.keys(porReg).sort((a, b) =>
+      porReg[b].reduce((s, p) => s + p.mant, 0) - porReg[a].reduce((s, p) => s + p.mant, 0));
+    if (!regs.length) {
+      alert('No hay clientes con región y potencial de mantenimiento para exportar.');
+      return;
+    }
+
+    const M = v => Math.round((v || 0) / 1e5) / 10;   // a MM$ con un decimal
+
+    // ── Formato ──
+    // Los montos llevan separador de miles con un decimal; la vida, uno solo.
+    // El formato se aplica a la celda, no al texto, para que Excel los siga
+    // tratando como números y se puedan ordenar y sumar.
+    const FMT_MM = '#,##0.0', FMT_N = '#,##0', FMT_V = '0.0';
+    const BORDE = { style: 'thin', color: { rgb: 'D4D5E8' } };
+    const bordes = { top: BORDE, bottom: BORDE, left: BORDE, right: BORDE };
+    const cab = (bg, ink) => ({
+      font: { bold: true, sz: 9, color: { rgb: ink || 'FFFFFF' } },
+      fill: { patternType: 'solid', fgColor: { rgb: bg } },
+      alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+      border: bordes,
+    });
+    const sCab = cab('002D73');
+    const sCel = (par, extra) => Object.assign({
+      font: { sz: 9 },
+      fill: { patternType: 'solid', fgColor: { rgb: par ? 'F7F9FC' : 'FFFFFF' } },
+      border: bordes,
+    }, extra || {});
+    const sTot = {
+      font: { bold: true, sz: 9, color: { rgb: 'FFFFFF' } },
+      fill: { patternType: 'solid', fgColor: { rgb: '0E2D55' } },
+      border: bordes,
+    };
+
+    const wb = XLSX.utils.book_new();
+    const usados = {};
+    regs.forEach(r => {
+      const top = porReg[r].slice().sort((a, b) => b.mant - a.mant).slice(0, 10);
+      // Sólo las líneas que la región efectivamente tiene: una columna de ceros
+      // para una línea ausente estorba la lectura y no dice nada.
+      const lins = _BI_LIN.filter(l => top.some(p => (p.lin[l.prop] || 0) > 0));
+      const L = lins.length;
+      const cEq = 2 + 2 * L, cVi = 3 + 2 * L, cMt = 4 + 2 * L, cPl = 5 + 2 * L;
+      const nC = 6 + 2 * L;
+
+      // Cabecera en dos pisos: arriba la línea, abajo sus equipos y su vida.
+      // Sin ese techo no se ve a qué línea pertenece cada par de columnas.
+      const g = ['#', 'Cliente'], h = ['', ''];
+      lins.forEach(l => { g.push(l.label, ''); h.push('Equipos', 'Vida (años)'); });
+      g.push('Base Instalada Total', ''); h.push('Equipos', 'Vida Media (años)');
+      g.push('Pot. Mantenimiento MM$', 'Plan de Acción'); h.push('', '');
+
+      const vid = d => (d && d.nf) ? Math.round(d.suma / d.nf * 10) / 10 : '';
+      const filas = top.map((p, i) => {
+        const f = [i + 1, p.nombre];
+        lins.forEach(l => { f.push(p.lin[l.prop] || '', vid(p.vidaLin[l.prop])); });
+        f.push(p.equipos, Math.round(p.x * 10) / 10, M(p.mant), '');
+        return f;                              // Plan de Acción: se llena a mano
+      });
+
+      // Fila de total: la vida se promedia pesada por equipos con fecha, no
+      // promediando promedios — un cliente de dos equipos no puede mover la
+      // media igual que uno de doscientos.
+      const ag = {}; lins.forEach(l => ag[l.prop] = { eq: 0, nf: 0, suma: 0 });
+      let tEq = 0, tNf = 0, tSu = 0, tMt = 0;
+      top.forEach(p => {
+        lins.forEach(l => {
+          const a = ag[l.prop]; a.eq += p.lin[l.prop] || 0;
+          const d = p.vidaLin[l.prop]; if (d) { a.nf += d.nf; a.suma += d.suma; }
+        });
+        tEq += p.equipos; tMt += p.mant;
+        Object.keys(p.vidaLin).forEach(k => { tNf += p.vidaLin[k].nf; tSu += p.vidaLin[k].suma; });
+      });
+      const ft = ['', 'TOTAL · ' + top.length + ' clientes'];
+      lins.forEach(l => { const a = ag[l.prop]; ft.push(a.eq || '', vid(a)); });
+      ft.push(tEq, vid({ nf: tNf, suma: tSu }), M(tMt), '');
+      filas.push(ft);
+
+      const ws = XLSX.utils.aoa_to_sheet([g, h].concat(filas));
+      const uF = filas.length + 1;             // índice de la fila de total
+      for (let c = 0; c < nC; c++) {
+        for (let f = 0; f <= uF; f++) {
+          const ref = XLSX.utils.encode_cell({ r: f, c: c });
+          if (!ws[ref]) ws[ref] = { t: 's', v: '' };
+          if (f <= 1) {
+            // Cada línea lleva el color con que la pinta el resto de la hoja.
+            const li = (c >= 2 && c < cEq) ? lins[(c - 2) >> 1] : null;
+            ws[ref].s = li ? cab(li.color, li.ink) : c === cPl ? cab('B26A00') : sCab;
+            continue;
+          }
+          if (f === uF) ws[ref].s = sTot;
+          else {
+            // El plan va en ámbar y el potencial en verde: se ve de inmediato
+            // cuál columna hay que llenar y cuál es la cifra que la justifica.
+            const ex = c === cPl ? { fill: { patternType: 'solid', fgColor: { rgb: 'FFF8E1' } } }
+                     : c === cMt ? { fill: { patternType: 'solid', fgColor: { rgb: 'E8F5EC' } } }
+                     : null;
+            ws[ref].s = sCel(f % 2 === 1, ex);
+          }
+          if (c === cMt) ws[ref].z = FMT_MM;
+          else if (c === cVi || (c >= 2 && c < cEq && (c - 2) % 2 === 1)) ws[ref].z = FMT_V;
+          else if (c === cEq || (c >= 2 && c < cEq)) ws[ref].z = FMT_N;
+          if (c >= 2 && c <= cMt) ws[ref].s = Object.assign({}, ws[ref].s,
+            { alignment: { horizontal: 'right' } });
+        }
+      }
+
+      // Los dos pisos de la cabecera se unen: la línea sobre su par de
+      // columnas, y las columnas sueltas de arriba abajo.
+      const mg = [{ s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },
+                  { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } }];
+      lins.forEach((l, i) => mg.push({ s: { r: 0, c: 2 + 2 * i }, e: { r: 0, c: 3 + 2 * i } }));
+      mg.push({ s: { r: 0, c: cEq }, e: { r: 0, c: cVi } });
+      mg.push({ s: { r: 0, c: cMt }, e: { r: 1, c: cMt } });
+      mg.push({ s: { r: 0, c: cPl }, e: { r: 1, c: cPl } });
+      ws['!merges'] = mg;
+
+      const cols = [{ wch: 4 }, { wch: 44 }];
+      lins.forEach(() => cols.push({ wch: 9 }, { wch: 11 }));
+      cols.push({ wch: 10 }, { wch: 13 }, { wch: 20 }, { wch: 46 });
+      ws['!cols'] = cols;
+      ws['!rows'] = [{ hpt: 20 }, { hpt: 30 }];
+      // El filtro cuelga del piso de abajo y deja el total fuera.
+      ws['!autofilter'] = { ref: 'A2:' + XLSX.utils.encode_col(nC - 1) + uF };
+      ws['!freeze'] = { xSplit: 2, ySplit: 2 };
+      // Excel no admite : \ / ? * [ ] en el nombre de la hoja, ni más de 31
+      // caracteres, y no acepta dos hojas con el mismo nombre.
+      let nom = String(r).replace(/[:\\\/\?\*\[\]]/g, '-').slice(0, 28) || 'Región';
+      if (usados[nom]) { nom = nom.slice(0, 26) + '_' + (++usados[nom]); }
+      else usados[nom] = 1;
+      XLSX.utils.book_append_sheet(wb, ws, nom);
+    });
+
+    const hoy = (window.APP_DATA || {}).hoy || '';
+    XLSX.writeFile(wb, 'Plan_Visitas_BI_TS_' + (hoy || '').replace(/[\s/]+/g, '-') + '.xlsx');
+  } catch (err) {
+    console.error('_biMxExport:', err);
+    alert('Error al generar el Excel: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = txt; }
+  }
+};
 
 function biFiltrarLinea(btn){
   document.querySelectorAll('#bi-filt-linea .btn').forEach(b=>b.classList.remove('on'));
@@ -936,7 +1538,12 @@ function initBaseInstalada(){
 
   <!-- Filtros + Tabla compacta -->
   <div class="sh" style="margin-bottom:.5rem"><h2>Detalle por Cliente</h2><div class="sh-line"></div>
-    <span class="sh-tag">Filtro: <span id="bi-filter-info">Todos</span></span>
+    <span style="font-size:.56rem;color:var(--mut);margin-right:.5rem">clic en una región para ver sus clientes</span>
+    <button class="btn" onclick="window._biRegTodas(true)"
+      style="font-size:.57rem;padding:.18rem .55rem">Expandir todo</button>
+    <button class="btn" onclick="window._biRegTodas(false)"
+      style="font-size:.57rem;padding:.18rem .55rem;margin-left:.25rem">Colapsar todo</button>
+    <span class="sh-tag" style="margin-left:.6rem">Filtro: <span id="bi-filter-info">Todos</span></span>
   </div>
   <div style="display:flex;flex-wrap:wrap;gap:.45rem;margin-bottom:.6rem;align-items:center">
     <div id="bi-filt-linea" style="display:flex;gap:.25rem;flex-wrap:wrap">
@@ -968,15 +1575,57 @@ function initBaseInstalada(){
         <th onclick="biSortCol(6,this)" class="num" style="color:#28D2C3">Endosc.</th>
         <th onclick="biSortCol(7,this)" class="num" style="color:#C0A0F0">Mobil.</th>
         <th onclick="biSortCol(8,this)" class="num" style="color:#80D080">MMQ/REAS</th>
+        <th class="num" title="Años promedio desde la fecha de instalación de los equipos.&#10;Sólo se puede calcular sobre los equipos que traen fecha en el Excel: en la fila de región se muestra entre paréntesis qué proporción de su base instalada tiene ese dato.">Vida Media BI</th>
         <th onclick="biSortCol(9,this)">Estado BI</th>
         <th onclick="biSortCol(10,this)" class="num" style="color:#FFC000" title="Facturación del año del cliente, misma base que «Ingresos Totales» de la portada.&#10;Sólo cubre a los clientes de la base instalada: los que facturan sin tener equipos registrados aquí no aparecen.">Fac. 2026</th>
         <th class="num">F. Contr.</th>
         <th class="num" style="color:#FFC000" title="Potencial de servicio técnico anual sobre la base instalada.&#10;&#10;Tarifa anual de mantención por equipo:&#10;  · Esterilización   50 UF   ($2.043.239)&#10;  · Endoscopía       22 UF   ($898.585)&#10;  · Dental           15 UF   ($612.671)&#10;&#10;Se valorizan sólo los equipos con Potencial ST = Sí, según el filtro del inicio de la hoja.&#10;Los clientes con contrato vigente se marcan como Contrato activo y no suman al total.">Potencial ST Anual<br><span style="font-weight:400;font-size:.55rem">(Mantenimiento BI)</span></th>
-      </tr></thead>
+      <th style="text-align:right">PIPELINE<br>EQUIPOS</th>
+      <th style="text-align:right">POTENCIAL ST<br>GARANTÍAS</th>
+      <th style="text-align:right;background:var(--az3)">Σ POTENCIAL<br>EQUIPOS</th>
+      <th style="text-align:right;background:var(--az3)">Σ POTENCIAL<br>ST</th>
+      <th style="text-align:right;background:var(--az3)">POTENCIAL<br>TOTAL</th>
       <tbody id="tb-bi-cli"></tbody>
       <tfoot><tr id="tfoot-bi-cli" style="background:var(--az3);font-size:.62rem"></tr></tfoot>
     </table>
   </div>
+
+  <div class="card" style="margin-top:.9rem" id="bi-mx-card">
+    <div class="ch" style="flex-wrap:wrap;gap:.5rem">
+      <span class="ct">Matriz de Prospección · Vida de la Base vs Potencial ST</span>
+      <span style="font-size:.56rem;color:var(--mut)" id="bi-mx-lbl">&mdash;</span>
+      <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
+                   margin-left:.6rem">Región</span>
+      <select id="bi-mx-reg" onchange="window._biMxReg(this.value)" style="font-size:.6rem;padding:.2rem .4rem;
+        border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt)"></select>
+      <button id="bi-mx-reset" onclick="window._biMxReset()" title="Volver a la vista completa"
+        style="font-size:.57rem;padding:.2rem .55rem;border-radius:3px;cursor:pointer;
+               border:1px solid var(--brd);background:var(--bg2);color:var(--mut)">Restablecer zoom</button>
+      <button id="bi-mx-pdf" onclick="window._biMxExport()"
+        title="Un Excel con una hoja por región: sus diez clientes a visitar, la base instalada y su vida media abiertas por línea, el potencial de mantenimiento y una columna para el plan de acción"
+        style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#0F7B3F;color:#fff;border:none;
+               border-radius:4px;cursor:pointer;white-space:nowrap">Exportar Excel</button>
+    </div>
+    <div class="cb">
+      <div id="bi-mx-box" style="position:relative;height:420px"><canvas id="cBiMatriz"></canvas></div>
+      <p style="font-size:.57rem;color:var(--mut);margin:.6rem 0 0;line-height:1.55">
+        Cada punto es un cliente. El eje horizontal son los años promedio de su base instalada y el vertical
+        el potencial de servicio técnico —mantenimiento de la base más las garantías del pipeline—; el tamaño
+        del punto repite ese potencial. Las líneas marcan la mediana de cada eje: el
+        <strong>cuadrante superior derecho</strong> reúne a los clientes con la base más antigua y más
+        potencial, que son los que conviene visitar primero.
+        Usa la <strong>rueda del mouse para acercar</strong> y arrastra para moverte: cerca del origen los
+        puntos se apiñan y el zoom es la forma de separarlos y elegir uno.
+        Sólo entran los clientes cuyos equipos traen
+        fecha de instalación; sin ella no hay eje horizontal donde ubicarlos.
+        El <strong>exportable</strong> es un Excel con una hoja por región: sus diez clientes de mayor
+        <strong>potencial de mantenimiento</strong>, con la base instalada y su vida media abiertas
+        línea por línea, y una columna en blanco para el plan de acción. Sólo mira la base instalada de
+        hoy —el pipeline de equipos y las garantías que traería son venta futura, no base instalada—, y
+        los clientes sin región no entran porque no hay a quién asignárselos.</p>
+    </div>
+  </div>
+
   <p id="bi-fac-nota" style="font-size:.6rem;color:var(--mut);margin:.5rem .2rem 0;line-height:1.6"></p>`;
 
   // KPIs, cards por línea, gráficos y tabla se delegan a _biRefreshDynamic

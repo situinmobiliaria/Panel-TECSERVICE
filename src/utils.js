@@ -57,7 +57,8 @@ function sv(name,btn){
     visitas:initVisitas,
     alertas:initAlertas,
     brechas:()=>{ if(window.initBrechas) window.initBrechas(); },
-    invts:()=>{ if(window.initInvTS) window.initInvTS(); if(window.initRepVend) window.initRepVend(); }
+    invts:()=>{ if(window.initInvTS) window.initInvTS(); if(window.initRepVend) window.initRepVend(); },
+    citas:()=>{ if(window.initCitas) window.initCitas(); }
   };
   const k='_i_'+name;
   if(inits[name]&&!window[k]){inits[name]();window[k]=true;}

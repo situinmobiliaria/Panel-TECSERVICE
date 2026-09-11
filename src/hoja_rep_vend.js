@@ -294,8 +294,13 @@
     if (!box) return;
     const I  = idxs();
     const ms = mesesSel();
-    const fams = (RV.familias || []).filter(f => _fam === 'todas' || f === _fam);
+    // Esta tabla es el resumen de las familias, así que las muestra todas
+    // aunque haya una seleccionada arriba: filtrándola quedaba una sola fila
+    // con un 100% que no era el 100% de nada. La familia activa se resalta y
+    // se abre sola; el filtro sigue mandando en el resto de la hoja.
+    const fams = RV.familias || [];
     if (!fams.length) { box.innerHTML = ''; return; }
+    if (_fam !== 'todas' && fams.indexOf(_fam) >= 0) _famOpen.add(_fam);
 
     const kM = esMonto() ? 'monto' : 'cant';
     const kD = esMonto() ? 'm' : 'q';
@@ -314,10 +319,12 @@
       const tf   = sumaSel(sf);
       const open = _famOpen.has(f);
       const col  = COLORS[i % COLORS.length];
-      rows += `<tr style="background:var(--bg2);cursor:pointer;border-left:3px solid ${col}"
+      const act  = _fam !== 'todas' && f === _fam;      // la seleccionada arriba
+      rows += `<tr style="background:${act ? 'rgba(0,45,115,.10)' : 'var(--bg2)'};
+          cursor:pointer;border-left:3px solid ${col}"
           onclick="window._rvFamToggle(${JSON.stringify(f).replace(/"/g, '&quot;')})">
         <td style="padding:.35rem .55rem;font-size:.68rem;font-weight:700;white-space:nowrap;
-                   position:sticky;left:0;background:var(--bg2);z-index:1;${SEPc}">
+                   position:sticky;left:0;background:${act ? '#E4EAF4' : 'var(--bg2)'};z-index:1;${SEPc}">
           <span style="display:inline-block;width:.8rem;font-size:.52rem;color:var(--mut);
             transform:rotate(${open ? 90 : 0}deg);transition:transform .15s">&#9654;</span>${esc(f)}
         </td>
@@ -368,7 +375,14 @@
         </table>
       </div>
       <p style="font-size:.56rem;color:var(--mut);margin:.5rem 0 0;line-height:1.4">
-        Familia de producto = campo «Equipo Asociado» de la hoja «Repuestos Vendidas».</p>`;
+        <strong>Familia de producto</strong>: seis categorías deducidas de cada línea de venta —nombre de la
+        cotización, de la oportunidad, del producto y el campo «Equipo Asociado»—. Ese campo trae el equipo con su
+        modelo y su número de serie, así que agrupar por su valor tal cual daba 115 familias y ningún resumen;
+        estas seis reúnen los trece tipos de equipo que reconoce el clasificador. «Otros» recoge lo que no se
+        pudo identificar más el equipamiento clínico suelto.${_fam === 'todas' ? '' :
+        ` <br><strong>El filtro «${esc(_fam)}» no se aplica aquí</strong>: esta tabla resume siempre las seis
+          familias para que los porcentajes sean sobre el total vendido. La familia elegida va resaltada, y el
+          filtro sigue mandando en las tarjetas, el gráfico y la tabla por marca.`}</p>`;
   }
 
   // ── Tabla marca × mes ────────────────────────────────────────

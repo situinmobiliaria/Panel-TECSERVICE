@@ -36,7 +36,7 @@ function _casosHTML() {
     <div class="ch" style="background:linear-gradient(135deg,rgba(51,68,141,.16),rgba(51,68,141,.05));flex-wrap:wrap;gap:.5rem">
       <span class="ct" style="color:var(--az1)">Equipos Detenidos por Estado</span>
       <span style="font-size:.58rem;color:var(--mut)" id="cas-flujo-sub">&mdash;</span>
-      <button id="cas-flujo-pdf" onclick="exportarPanel({ids:['cas-flujo'],titulo:'Flujo de Equipos Detenidos',archivo:'Casos_Flujo',btn:'cas-flujo-pdf'})"
+      <button id="cas-flujo-pdf" onclick="exportarPanel({ids:['cas-flujo'],titulo:'Flujo de Equipos Detenidos',archivo:'Casos_Flujo',btn:'cas-flujo-pdf',ancho:1500})"
         style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;
                border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar</button>
     </div>
@@ -427,17 +427,40 @@ function _renderCasosFlujo(equipos) {
   const pctPanel = facPanel ? D.ytd / facPanel * 100 : 0;
   const pc0 = v => (v || 0).toFixed(0) + '%';
 
-  // Chevron: punta a la derecha salvo en la última etapa
+  // Las cabeceras y las tarjetas viven en dos rejillas con la misma plantilla:
+  // una columna por etapa más la del total. Antes eran dos flex distintos
+  // —seis flechas repartiéndose el ancho arriba y siete tarjetas abajo— y
+  // ninguna flecha caía sobre su tarjeta.
+  const NCOL = _FLUJO.length + 1;
+  const GRID = 'display:grid;grid-template-columns:repeat(' + NCOL + ',minmax(0,1fr));gap:6px';
+  const HB = 28;                     // alto de la banda, en px
+
+  // La punta es un triángulo de bordes dentro de la propia banda, no un
+  // recorte ni una capa superpuesta. Las dos alternativas fallaban en el
+  // exportable: html2canvas ignora clip-path —las flechas salían cuadradas— y
+  // exportarPanel fuerza position:static en todo el clon, con lo que un
+  // triángulo absoluto se habría desprendido de su banda.
   const chev = (f, i) => {
     const ult   = i === _FLUJO.length - 1;
     const claro = i < 2;
-    return '<div style="flex:1;min-width:0;background:' + f.col +
-      ';color:' + (claro ? '#1B2A6B' : '#fff') + ';font-size:.63rem;font-weight:700;text-align:center;' +
-      'padding:.4rem .5rem .4rem ' + (i ? '1.1rem' : '.6rem') + ';white-space:nowrap;overflow:hidden;' +
-      'text-overflow:ellipsis;clip-path:polygon(0 0,' +
-      (ult ? '100% 0,100% 50%,100% 100%' : 'calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%') +
-      ',0 100%' + (i ? ',14px 50%' : '') + ')">' + f.k + '</div>';
+    return '<div style="display:flex;height:' + HB + 'px;min-width:0">' +
+      '<div style="flex:1;min-width:0;background:' + f.col +
+        ';color:' + (claro ? '#1B2A6B' : '#fff') + ';font-size:.63rem;font-weight:700;' +
+        'line-height:' + HB + 'px;text-align:center;padding:0 6px;box-sizing:border-box;' +
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + f.k + '</div>' +
+      (ult ? '' :
+        '<div style="flex:0 0 auto;align-self:flex-start;width:0;height:0;border-top:' + (HB / 2) +
+        'px solid transparent;border-bottom:' + (HB / 2) + 'px solid transparent;' +
+        'border-left:12px solid ' + f.col + '"></div>') +
+      '</div>';
   };
+
+  // El total no es una etapa por la que pase un equipo, así que su cabecera va
+  // cuadrada y en negativo: se lee como lo que es, la suma de las de al lado.
+  const cabTotal = () =>
+    '<div style="border:1px solid var(--az1);color:var(--az1);background:rgba(0,45,115,.06);' +
+    'font-size:.63rem;font-weight:800;letter-spacing:.05em;height:' + HB + 'px;' +
+    'line-height:' + (HB - 2) + 'px;text-align:center;box-sizing:border-box">TOTAL</div>';
 
   const li = (t, v, col) =>
     '<li style="display:flex;justify-content:space-between;gap:.4rem;margin-bottom:.26rem;line-height:1.4">' +
@@ -464,7 +487,7 @@ function _renderCasosFlujo(equipos) {
       '<div style="margin:.1rem 0 0 .5rem;font-size:.6rem;line-height:1.35">• ' + _escH(m.modelo) +
       ' <span style="color:var(--mut)">(' + m.eq + ' eq)</span></div>').join('') || vacio;
 
-    return '<div style="flex:1 1 200px;min-width:200px;border:1px solid ' + f.col +
+    return '<div style="min-width:0;border:1px solid ' + f.col +
       ';border-top:3px solid ' + f.col + ';border-radius:5px;padding:.55rem .6rem;background:var(--wh)">' +
       '<ul style="list-style:none;margin:0;padding:0;font-size:.62rem">' +
         li('N° Equipos', d.eq, f.col) +
@@ -512,7 +535,7 @@ function _renderCasosFlujo(equipos) {
         d.nCli + ' cli <span style="color:var(--mut)">(' + pc0(nCli ? d.nCli / nCli * 100 : 0) +
         ')</span></span></div>';
     }).join('') || vacio;
-    return '<div style="flex:1 1 200px;min-width:200px;border:1px solid var(--az1);border-top:3px solid var(--az1);' +
+    return '<div style="min-width:0;border:1px solid var(--az1);border-top:3px solid var(--az1);' +
       'border-radius:5px;padding:.55rem .6rem;background:rgba(0,45,115,.04)">' +
       '<div style="font-size:.66rem;font-weight:800;color:var(--az1);margin-bottom:.35rem">TOTAL</div>' +
       '<ul style="list-style:none;margin:0;padding:0;font-size:.62rem">' +
@@ -538,10 +561,16 @@ function _renderCasosFlujo(equipos) {
       '</div>';
   };
 
+  // Por debajo de este ancho las tarjetas se vuelven ilegibles: mejor que la
+  // sección se desplace de lado a que se aplasten o se repartan en dos filas
+  // desalineadas de las cabeceras.
   box.innerHTML =
-    '<div style="display:flex;gap:3px;margin-bottom:.5rem">' + _FLUJO.map(chev).join('') + '</div>' +
-    '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:stretch">' +
-      _FLUJO.map(tarjeta).join('') + tarjetaTotal() + '</div>' +
+    '<div style="overflow-x:auto"><div style="min-width:1400px">' +
+      '<div style="' + GRID + ';margin-bottom:.5rem">' +
+        _FLUJO.map(chev).join('') + cabTotal() + '</div>' +
+      '<div style="' + GRID + ';align-items:stretch">' +
+        _FLUJO.map(tarjeta).join('') + tarjetaTotal() + '</div>' +
+    '</div></div>' +
     '<div style="margin-top:.7rem;padding:.55rem .8rem;background:rgba(40,210,195,.09);' +
       'border-left:3px solid var(--teal);border-radius:4px;font-size:.63rem;line-height:1.6">' +
       '<div>• Total <strong>' + nEq + ' equipos detenidos</strong>, en <strong>' + nCli +

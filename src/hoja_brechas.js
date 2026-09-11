@@ -581,6 +581,37 @@
   // Gris claro necesita texto oscuro; el resto de los tonos aguanta blanco
   const rotTxt = r => (rotColor(r) === '#B8C1D8' ? '#1B2A5B' : '#fff');
 
+  // Barra apilada con la mezcla de rotacion, proporcional al valorizado.
+  // El % va dentro del segmento; los muy angostos lo omiten y quedan en el tooltip.
+  // La comparten «Brecha por cliente» y «Que comprar por cliente»: es el mismo
+  // dato mirado dos veces y tiene que verse igual en las dos.
+  // `base` nombra sobre que esta calculado el %: «Brecha por cliente» pesa la
+  // brecha valorizada y «Que comprar» pesa lo que falta comprar, que son dos
+  // repartos distintos del mismo universo de SKU.
+  const barraRot = (rot, alto, base) => {
+    const partes = Object.entries(rot || {});
+    if (!partes.length) return '';
+    const h = alto || 15, b = base || 'del valorizado';
+    return `<div style="display:flex;height:${h}px;border-radius:3px;overflow:hidden;min-width:110px">` +
+      partes.map(([k, v]) =>
+        `<div style="width:${v.pct}%;background:${rotColor(k)};color:${rotTxt(k)};
+           display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:700;
+           line-height:1;overflow:hidden" title="${esc(k)}: ${nCLP(v.monto)} · ${v.pct}% ${b} · ${v.n} SKU"
+         >${v.pct >= 7 ? v.pct.toString().replace('.', ',') + '%' : ''}</div>`
+      ).join('') + '</div>';
+  };
+
+  // Mezcla de rotacion de un grupo. `acum` trae el peso en $ de cada rotacion
+  // y `monto` el total sobre el que se saca el porcentaje; segun la tabla ese
+  // peso es la brecha valorizada o lo que falta comprar.
+  const mezclaRot = (acum, monto) => {
+    const out = {};
+    Object.entries(acum || {}).sort((a, b) => b[1].monto - a[1].monto).forEach(([k, v]) => {
+      out[k] = { monto: v.monto, n: v.n, pct: monto ? +(v.monto / monto * 100).toFixed(1) : 0 };
+    });
+    return out;
+  };
+
   const _stOpen = new Set();
   window._brCli = function (c) {
     if (_stOpen.has(c)) _stOpen.delete(c); else _stOpen.add(c);
@@ -598,21 +629,6 @@
     const dat = ST.clientes_det || [];
     if (!dat.length) { box.innerHTML = ''; return; }
     const maxV = Math.max(...dat.map(d => d.monto), 1);
-
-    // Barra apilada con la mezcla de rotacion, proporcional al valorizado.
-    // El % va dentro del segmento; los muy angostos lo omiten y quedan en el tooltip.
-    const barraRot = (rot, alto) => {
-      const partes = Object.entries(rot || {});
-      if (!partes.length) return '';
-      const h = alto || 15;
-      return `<div style="display:flex;height:${h}px;border-radius:3px;overflow:hidden;min-width:120px">` +
-        partes.map(([k, v]) =>
-          `<div style="width:${v.pct}%;background:${rotColor(k)};color:${rotTxt(k)};
-             display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:700;
-             line-height:1;overflow:hidden" title="${esc(k)}: ${nCLP(v.monto)} · ${v.pct}% del valorizado · ${v.n} SKU"
-           >${v.pct >= 7 ? v.pct.toString().replace('.', ',') + '%' : ''}</div>`
-        ).join('') + '</div>';
-    };
 
     // Mezcla global, misma forma que el `rot` de cada cliente
     const rotTotal = {};
@@ -750,10 +766,22 @@
     (ST.clientes_det || []).forEach(c => (c.skus || []).forEach(k => {
       const id = c.cliente + '\u0000' + k.cod;
       const d = dem[id] || (dem[id] = {
-        cliente: c.cliente, cod: k.cod, prod: k.prod, cant: 0, monto: 0, rot: k.rot,
+        cliente: c.cliente, cod: k.cod, prod: k.prod, cant: 0, monto: 0, rot: k.rot, rotAc: {},
       });
       d.cant += k.cant; d.monto += k.monto;
+      // El mismo cliente puede pedir el mismo repuesto en dos ordenes y la
+      // hoja clasificarlas con rotaciones distintas —pasa en SS Chiloe con el
+      // R659548—. Se guardan las dos: la insignia muestra la que pesa mas y la
+      // mezcla del cliente las suma, que es como las cuenta «Brecha por
+      // cliente». Quedarse con la primera desviaba esa mezcla.
+      const rm = d.rotAc[k.rot] || (d.rotAc[k.rot] = { monto: 0, n: 0 });
+      rm.monto += k.monto; rm.n++;
     }));
+    Object.values(dem).forEach(d => {
+      const ord = Object.entries(d.rotAc).sort((a, b) => b[1].monto - a[1].monto);
+      d.rot = ord.length ? ord[0][0] : d.rot;
+      d.rotMix = ord.length > 1;
+    });
 
     // Reparto por SKU, de mayor a menor monto detenido.
     const porSku = {};
@@ -771,6 +799,24 @@
         d.valComprar = d.comprar * d.pu;
       });
     });
+
+    // La mezcla de esta tabla pesa lo que falta comprar, no la brecha entera:
+    // un SKU que el stock ya cubrio no obliga a comprar nada y no puede seguir
+    // tiñendo la barra. En el par de rotacion mixta lo por comprar se reparte
+    // en la misma proporcion en que las rotaciones reparten su monto detenido;
+    // el par se cuenta una sola vez, en la rotacion que pesa mas.
+    Object.values(dem).forEach(d => {
+      d.rotComprar = {};
+      if (!(d.valComprar > 0)) return;
+      const ord = Object.entries(d.rotAc).sort((a, b) => b[1].monto - a[1].monto);
+      const tot = ord.reduce((s, e) => s + e[1].monto, 0);
+      ord.forEach(e => {
+        d.rotComprar[e[0]] = {
+          monto: tot ? d.valComprar * e[1].monto / tot : 0,
+          n: e[0] === d.rot ? 1 : 0,
+        };
+      });
+    });
     return Object.values(dem);
   }
 
@@ -784,16 +830,35 @@
     const g = {};
     items.forEach(d => {
       const c = g[d.cliente] || (g[d.cliente] = {
-        cliente: d.cliente, n: 0, cant: 0, monto: 0, st: 0, bo: 0, comprar: 0, val: 0, skus: [],
+        cliente: d.cliente, n: 0, cant: 0, monto: 0, st: 0, bo: 0, comprar: 0, val: 0,
+        skus: [], rotAc: {},
       });
       c.n++; c.cant += d.cant; c.monto += d.monto;
       c.st += d.st; c.bo += d.bo; c.comprar += d.comprar; c.val += d.valComprar;
       c.skus.push(d);
+      Object.entries(d.rotComprar).forEach(([k, v]) => {
+        const rm = c.rotAc[k] || (c.rotAc[k] = { monto: 0, n: 0 });
+        rm.monto += v.monto; rm.n += v.n;
+      });
     });
+    Object.values(g).forEach(c => { c.rot = mezclaRot(c.rotAc, c.val); });
     // De mayor a menor brecha en $: es el mismo orden en que se reparte el
     // stock, así que la tabla se lee en el orden en que se prioriza.
     let D = Object.values(g).sort((a, b) => b.monto - a.monto || b.val - a.val);
     if (_cmpSoloComprar) D = D.filter(c => c.comprar > 0);
+
+    // Mezcla del total: se arma sobre D, no sobre todo, para que siga al
+    // filtro de «solo con compra pendiente».
+    const rotAcT = {};
+    let montoT = 0;
+    D.forEach(c => {
+      montoT += c.val;
+      Object.entries(c.rotAc).forEach(([k, v]) => {
+        const r = rotAcT[k] || (rotAcT[k] = { monto: 0, n: 0 });
+        r.monto += v.monto; r.n += v.n;
+      });
+    });
+    const rotT = mezclaRot(rotAcT, montoT);
 
     const T = D.reduce((a, c) => ({
       n: a.n + c.n, cant: a.cant + c.cant, monto: a.monto + c.monto, st: a.st + c.st,
@@ -814,15 +879,23 @@
         '<span style="font-size:.57rem;color:var(--mut)">' + D.length + ' clientes · ' + T.n +
           ' pares cliente-SKU · clic en un cliente para el detalle</span>' +
       '</div>' +
+      '<div style="padding:.1rem 0 .45rem;border-bottom:1px solid var(--brd);margin-bottom:.45rem">' +
+        Object.entries(rotT).map(([k, v]) =>
+          '<span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.56rem;margin-right:.8rem">' +
+            '<span style="width:9px;height:9px;border-radius:2px;background:' + rotColor(k) + '"></span>' +
+            esc(k) + ' <strong>' + String(v.pct).replace('.', ',') + '%</strong>' +
+            '<span style="color:var(--mut)">· ' + v.n + ' SKU</span></span>').join('') +
+      '</div>' +
       '<div style="overflow-x:auto;max-height:520px;overflow-y:auto">' +
-      '<table style="width:100%;border-collapse:collapse;min-width:940px;table-layout:fixed"><colgroup>' +
-      '<col style="width:26%"><col style="width:7%"><col style="width:9%"><col style="width:11%">' +
-      '<col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:12%">' +
-      '<col style="width:8%">' +
+      '<table style="width:100%;border-collapse:collapse;min-width:1120px;table-layout:fixed"><colgroup>' +
+      '<col style="width:22%"><col style="width:5%"><col style="width:7%"><col style="width:9%">' +
+      '<col style="width:7%"><col style="width:8%"><col style="width:8%"><col style="width:10%">' +
+      '<col style="width:6%"><col style="width:18%">' +
       '</colgroup><thead><tr>' +
       th('CLIENTE / SKU') + th('SKU', 'right') + th('UN. SOLIC.', 'right') + th('BRECHA', 'right') +
       th('DE STOCK', 'right') + th('DE BACK ORDER', 'right') + th('POR COMPRAR', 'right') +
       th('VALOR A COMPRAR', 'right') + th('% CUBIERTO', 'right') +
+      th('ROTACIÓN (% DE LO POR COMPRAR)', 'left') +
       '</tr></thead><tbody>';
 
     D.forEach((c, i) => {
@@ -842,6 +915,9 @@
             c.comprar ? 'font-weight:700;color:#C00000;' : 'font-weight:700;color:var(--gn);') +
         num(c.val ? nMM(c.val) : '—', c.val ? 'font-weight:700;color:#C00000;' : 'color:var(--gn);') +
         num(cub.toFixed(0) + '%', 'color:' + (cub >= 99 ? 'var(--gn)' : cub >= 50 ? 'var(--or)' : 'var(--rd)') + ';') +
+        '<td style="padding:.3rem .55rem">' + (c.val
+          ? barraRot(c.rot, 14, 'de lo por comprar')
+          : '<span style="font-size:.55rem;color:var(--gn);font-weight:700">cubierto</span>') + '</td>' +
         '</tr>';
 
       if (ab) {
@@ -860,6 +936,16 @@
             num(d.comprar ? nUn(d.comprar) : '0', d.comprar ? 'color:#C00000;font-weight:700;' : 'color:var(--gn);') +
             num(d.valComprar ? nMM(d.valComprar) : '—', d.valComprar ? 'color:#C00000;' : 'color:var(--gn);') +
             num(cb.toFixed(0) + '%', 'color:var(--mut);') +
+            '<td style="padding:.22rem .55rem">' +
+              (d.valComprar ? '' : '<span style="font-size:.53rem;color:var(--gn);margin-right:.3rem" ' +
+                'title="El stock y el back order alcanzan: no entra en la mezcla">✓</span>') +
+              '<span title="' + (d.rotMix
+                ? esc(Object.entries(d.rotAc).sort((a, b) => b[1].monto - a[1].monto)
+                    .map(([k, v]) => k + ': ' + nCLP(v.monto)).join(' · '))
+                : '') + '" style="background:' + rotColor(d.rot) + '22;color:' + rotColor(d.rot) + ';' +
+              'border:1px solid ' + rotColor(d.rot) + '55;padding:.04rem .3rem;border-radius:3px;' +
+              'font-size:.53rem;font-weight:700;white-space:nowrap">' + esc(d.rot) +
+              (d.rotMix ? ' <span style="opacity:.7">+</span>' : '') + '</span></td>' +
             '</tr>';
         });
       }
@@ -875,7 +961,8 @@
       '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + nUn(T.bo) + '</td>' +
       '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + nUn(T.comprar) + '</td>' +
       '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + nMM(T.val) + '</td>' +
-      '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem">' + cubT.toFixed(0) + '%</td>' +
+      '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + cubT.toFixed(0) + '%</td>' +
+      '<td style="padding:.35rem .55rem">' + barraRot(rotT, 14, 'de lo por comprar') + '</td>' +
       '</tr></tfoot></table></div>' +
       '<p style="font-size:.56rem;color:var(--mut);margin:.5rem 0 0;line-height:1.55">' +
       '<strong>Por comprar = Un. solicitadas − stock asignado − back order asignado.</strong> ' +
@@ -885,7 +972,13 @@
       'aparecer sin cobertura aunque el SKU figure con stock: ese stock ya quedó comprometido con una brecha ' +
       'mayor. Restarle el stock completo a cada cliente por separado —que es lo intuitivo— haría aparecer ' +
       'cubierta una demanda que la bodega no alcanza a servir. ' +
-      '«no está» significa que el código no aparece en el inventario y se computa como cero.</p>';
+      '«no está» significa que el código no aparece en el inventario y se computa como cero. ' +
+      'La <strong>rotación</strong> es la del SKU en la fila de detalle y, en la fila del cliente, la mezcla ' +
+      'de las rotaciones de sus SKU ponderada por el <strong>valor que falta comprar</strong> de cada uno. ' +
+      'Un SKU que el stock o el back order ya cubren queda fuera de la mezcla —va marcado con ✓— porque no ' +
+      'obliga a comprar nada; por eso esta barra no coincide con la de «Brecha por cliente», que pesa la ' +
+      'brecha valorizada completa. Así, una barra mayoritariamente verde señala que la compra pendiente es ' +
+      'de repuestos que se mueven, y una roja o naranja, que se compraría inventario de baja rotación.</p>';
 
     box.innerHTML = html;
     const cEl = document.getElementById('br-cmp-count');
@@ -903,7 +996,7 @@
       if (!src) throw new Error('No se encontró el contenido');
       const hoy = A.hoy || '';
       wrap = document.createElement('div');
-      wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:1240px;' +
+      wrap.style.cssText = 'position:absolute;left:-99999px;top:0;background:#fff;width:1460px;' +
         'padding:18px 24px 22px;font-family:Arial,sans-serif;color:#111;box-sizing:border-box';
       const enc = document.createElement('div');
       enc.style.cssText = 'border-bottom:2.5px solid #002D73;padding-bottom:7px;margin-bottom:12px';
