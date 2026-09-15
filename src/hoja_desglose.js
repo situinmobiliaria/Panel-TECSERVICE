@@ -122,7 +122,10 @@
                        '#c44569','#574b90','#3c9d4e','#b5451b','#888','#333','#aaa'];
 
   if(regiones.length > 0){
-    let selReg      = null;
+    // Conjunto vacío = todas. Comparar dos o tres regiones entre sí es la
+    // pregunta natural de esta hoja y con selección única había que ir
+    // alternando y recordar lo anterior de memoria.
+    const selRegs   = new Set();
     let chartReg    = null;
     let _regMapL    = null;
     let _regMapLyr  = null;
@@ -130,14 +133,138 @@
     const regSub  = document.getElementById('desg-reg-sub');
     const regBtns = document.getElementById('desg-reg-btns');
 
+    // Las regiones activas, en el orden en que vienen: así la tabla y el
+    // gráfico no cambian de orden según el orden en que se hizo clic.
+    const regsSel = () => selRegs.size ? regiones.filter(r=>selRegs.has(r)) : regiones;
+    const etqSel  = () => selRegs.size===1 ? regsSel()[0]
+                        : selRegs.size ? selRegs.size+' regiones' : null;
+
+    // r null limpia la selección; cualquier otra la agrega o la quita.
     function setRegion(r){
-      selReg = r;
-      regBtns && regBtns.querySelectorAll('.btn').forEach(x=>x.classList.remove('on'));
-      const btn = regBtns && regBtns.querySelector(`[data-reg="${r||'__todas__'}"]`);
-      if(btn) btn.classList.add('on');
+      if(r===null) selRegs.clear();
+      else if(selRegs.has(r)) selRegs.delete(r);
+      else selRegs.add(r);
+      pintarBtns();
       renderRegTable();
       renderRegChart();
       renderRegMap();
+    }
+
+    // Excel con la misma información que la tabla: por cada región elegida sus
+    // tres líneas, el total de contratos, los otros ingresos y el total, mes a
+    // mes, con el total del año y la comparación con los dos años anteriores;
+    // al final el total de la selección. Los montos van como número (MM$) y
+    // las variaciones como porcentaje, para que se puedan seguir trabajando.
+    window._desgRegExport = function(){
+      if (typeof XLSX === 'undefined') {
+        alert('Librería Excel no cargada. Verifique conexión a internet e intente de nuevo.');
+        return;
+      }
+      const list = regsSel();
+      const LINEAS = ['Esterilización','Endoscopía','Dental'];
+      const A1 = ANO_ACTUAL - 1, A2 = ANO_ACTUAL - 2;
+      const cab = ['Concepto'].concat(meses.map(m => m.slice(0,3)),
+        ['Total ' + ANO_ACTUAL, 'Acum. ' + A1, 'Var. vs ' + A1, 'Acum. ' + A2, 'Var. vs ' + A2]);
+      const NC = cab.length;
+      const var_ = (act, ant) => ant ? (act - ant) / ant : '';
+      const filas = [];   // { tipo, color, v: [...] }
+      const fila = (tipo, lbl, arr, a25, a24, color) => {
+        const act = (arr || [])[n] || 0;
+        filas.push({ tipo: tipo, color: color, v: [lbl].concat(
+          Array.from({ length: n + 1 }, (_, k) => +(((arr || [])[k] || 0).toFixed(3))),
+          [a25 || '', var_(act, a25), a24 || '', var_(act, a24)]) });
+      };
+
+      list.forEach(r => {
+        const rd  = regData[r] || { contratos:[], otros:[], total:[], lineas:{}, aa_2025:{}, aa_2024:{} };
+        const clr = PALETTE_REG[regiones.indexOf(r) % PALETTE_REG.length];
+        const L = rd.lineas || {}, a25 = rd.aa_2025 || {}, a24 = rd.aa_2024 || {};
+        filas.push({ tipo: 'region', color: clr, v: [r] });
+        LINEAS.forEach(ln => fila('linea', '   ' + ln, L[ln], (a25.lineas||{})[ln], (a24.lineas||{})[ln]));
+        fila('contratos', 'Total Contratos', rd.contratos, a25.contratos, a24.contratos);
+        fila('otros', 'Otros Ingresos', rd.otros, a25.otros, a24.otros);
+        fila('total', 'TOTAL FACTURACIÓN', rd.total, rd.acum_2025, rd.acum_2024);
+        filas.push({ tipo: 'vacia', v: [] });
+      });
+      // Total de la selección
+      const suma = k => list.reduce((s2, r) => s2 + ((regData[r] && regData[r].total[k]) || 0), 0);
+      const g26 = suma(n);
+      const g25 = list.reduce((s2, r) => s2 + ((regData[r] && regData[r].acum_2025) || 0), 0);
+      const g24 = list.reduce((s2, r) => s2 + ((regData[r] && regData[r].acum_2024) || 0), 0);
+      filas.push({ tipo: 'gran', v: [(etqSel() ? etqSel() + ' · TOTAL' : 'TOTAL GENERAL')].concat(
+        Array.from({ length: n + 1 }, (_, k) => +suma(k).toFixed(3)), [g25 || '', var_(g26, g25), g24 || '', var_(g26, g24)]) });
+
+      const titulo = 'Facturación por Región (MM$) · ' +
+        (!selRegs.size ? 'todas las regiones (' + regiones.length + ')' : list.join(', '));
+      const aoa = [[titulo], [], cab].concat(filas.map(f => f.v));
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+      const BORDE = { style: 'thin', color: { rgb: 'D4D5E8' } };
+      const BOX = { top: BORDE, bottom: BORDE, left: BORDE, right: BORDE };
+      const hex = c => { let h = String(c).replace('#', '').toUpperCase();
+        if (h.length === 3) h = h.split('').map(x => x + x).join('');
+        return h.padEnd(6, '0').slice(0, 6); };
+      // Texto oscuro sobre los colores claros de región (amarillo, turquesa, gris).
+      const tinta = c => { const h = hex(c); const lum = (parseInt(h.slice(0,2),16)*299 +
+        parseInt(h.slice(2,4),16)*587 + parseInt(h.slice(4,6),16)*114) / 1000;
+        return lum > 150 ? '1A1A1A' : 'FFFFFF'; };
+      const estilo = (f, ci) => {
+        const der = ci > 0;
+        const base = { font: { sz: 9 }, border: BOX, alignment: { horizontal: der ? 'right' : 'left', vertical: 'center' } };
+        if (f.tipo === 'region') return { font: { bold: true, sz: 10, color: { rgb: tinta(f.color) } },
+          fill: { patternType: 'solid', fgColor: { rgb: hex(f.color) } }, border: BOX };
+        if (f.tipo === 'contratos') return Object.assign(base, { font: { bold: true, sz: 9, color: { rgb: '1A5FA8' } },
+          fill: { patternType: 'solid', fgColor: { rgb: 'E6F4FA' } } });
+        if (f.tipo === 'otros') return Object.assign(base, { font: { sz: 9, color: { rgb: '666666' } } });
+        if (f.tipo === 'total' || f.tipo === 'gran') return Object.assign(base, { font: { bold: true, sz: 9, color: { rgb: 'FFFFFF' } },
+          fill: { patternType: 'solid', fgColor: { rgb: f.tipo === 'gran' ? '0E2D55' : '1F3F75' } } });
+        if (f.tipo === 'vacia') return {};
+        return base;
+      };
+      const R0 = 3;   // primera fila de datos (0-based): título, vacía, cabecera
+      ws['A1'].s = { font: { bold: true, sz: 12, color: { rgb: '002D73' } } };
+      cab.forEach((c, ci) => {
+        ws[XLSX.utils.encode_cell({ r: 2, c: ci })].s = { font: { bold: true, sz: 9, color: { rgb: 'FFFFFF' } },
+          fill: { patternType: 'solid', fgColor: { rgb: ci > n ? '1A3A6B' : '002D73' } },
+          alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: BOX };
+      });
+      const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NC - 1 } }];
+      filas.forEach((f, ri) => {
+        const r = R0 + ri;
+        if (f.tipo === 'region') merges.push({ s: { r: r, c: 0 }, e: { r: r, c: NC - 1 } });
+        if (f.tipo === 'vacia') return;
+        for (let ci = 0; ci < NC; ci++) {
+          const ref = XLSX.utils.encode_cell({ r: r, c: ci });
+          if (!ws[ref]) ws[ref] = { t: 's', v: '' };
+          ws[ref].s = estilo(f, ci);
+          if (f.tipo === 'region' || ci === 0) continue;
+          const esVar = ci === NC - 3 || ci === NC - 1;
+          if (typeof ws[ref].v === 'number') ws[ref].z = esVar ? '+0.0%;-0.0%' : '#,##0.0';
+          // Las variaciones se pintan como en la tabla: verde si crece, rojo si cae.
+          if (esVar && typeof ws[ref].v === 'number' && f.tipo !== 'total' && f.tipo !== 'gran') {
+            ws[ref].s = Object.assign({}, ws[ref].s, { font: { bold: true, sz: 9, color: { rgb: ws[ref].v >= 0 ? '00832F' : 'C00000' } } });
+          }
+          if (esVar && ws[ref].v === '') ws[ref].v = 's/d';
+        }
+      });
+      ws['!merges'] = merges;
+      ws['!cols'] = [{ wch: 26 }].concat(meses.map(() => ({ wch: 8 })), [{ wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }]);
+      ws['!rows'] = [{ hpt: 20 }, { hpt: 6 }, { hpt: 28 }];
+      ws['!freeze'] = { xSplit: 1, ySplit: 3 };
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Facturación por región');
+      const hoy = ((window.APP_DATA || {}).hoy || '').replace(/[\s/]+/g, '-');
+      const sufijo = !selRegs.size ? 'todas' : (list.length === 1 ? list[0] : list.length + '_regiones');
+      XLSX.writeFile(wb, 'Facturacion_por_region_' + sufijo.replace(/[^\wÁÉÍÓÚáéíóúÑñ]+/g, '_') + '_' + hoy + '.xlsx');
+    };
+
+    function pintarBtns(){
+      if(!regBtns) return;
+      regBtns.querySelectorAll('.btn').forEach(x=>{
+        const r = x.dataset.reg;
+        x.classList.toggle('on', r==='__todas__' ? !selRegs.size : selRegs.has(r));
+      });
     }
 
     // ── Botones de filtro ───────────────────────────────────
@@ -145,6 +272,7 @@
       const allBtn = document.createElement('button');
       allBtn.className='btn on'; allBtn.textContent='Todas';
       allBtn.dataset.reg='__todas__';
+      allBtn.title='Quitar el filtro y volver a las '+regiones.length+' regiones';
       allBtn.addEventListener('click',()=>setRegion(null));
       regBtns.appendChild(allBtn);
 
@@ -153,9 +281,14 @@
         b.className='btn'; b.textContent=r;
         b.dataset.reg=r;
         b.style.cssText=`font-size:.57rem;border-left:3px solid ${PALETTE_REG[i%PALETTE_REG.length]}`;
+        b.title='Clic para sumar o quitar esta región de la comparación';
         b.addEventListener('click',()=>setRegion(r));
         regBtns.appendChild(b);
       });
+      const pista = document.createElement('span');
+      pista.style.cssText='font-size:.54rem;color:var(--mut);margin-left:.4rem;align-self:center';
+      pista.textContent='se pueden combinar varias';
+      regBtns.appendChild(pista);
     }
 
     // ── Tabla detallada por región (espeja estructura de tabla global) ─────────
@@ -166,7 +299,7 @@
       const H  = 'background:var(--az3);color:rgba(255,255,255,.85);font-size:.57rem;font-weight:700;text-align:center;padding:.26rem .38rem;white-space:nowrap';
       const Ht = 'background:#1a3a6b;color:rgba(255,255,255,.85);font-size:.57rem;font-weight:700;text-align:center;padding:.26rem .38rem';
       const thM = meses.map(m=>`<th style="${H}">${m.slice(0,3)}</th>`).join('');
-      const list = selReg ? [selReg] : regiones;
+      const list = regsSel();
 
       const LINEAS = ['Esterilización','Endoscopía','Dental'];
       const LCLR   = {'Esterilización':'#002D73','Endoscopía':'#28D2C3','Dental':'#FFC000'};
@@ -243,7 +376,7 @@
           <tbody>
             ${rows.join('')}
             <tr class="desg-azul" style="background:var(--az3)">
-              <td style="font-size:.6rem;font-weight:700;color:#fff;padding:.3rem .55rem;position:sticky;left:0;background:var(--az3);white-space:nowrap">${selReg?selReg+' · TOTAL':'TOTAL GENERAL'}</td>
+              <td style="font-size:.6rem;font-weight:700;color:#fff;padding:.3rem .55rem;position:sticky;left:0;background:var(--az3);white-space:nowrap">${etqSel()?etqSel()+' · TOTAL':'TOTAL GENERAL'}</td>
               ${grandCells}
               ${(function(){
                 const g26 = list.reduce((s2,r)=>s2+((regData[r]&&regData[r].total[n])||0),0);
@@ -266,16 +399,26 @@
       const labels = meses.map(m=>m.slice(0,3));
       let datasets, title;
 
-      if(!selReg){
-        datasets=regiones.map((r,i)=>({
+      // Con una sola región se abre por línea de negocio, que es el detalle que
+      // interesa; con varias se apilan las regiones entre sí, que es la
+      // comparación que se buscaba al seleccionarlas.
+      if(selRegs.size!==1){
+        const list=regsSel();
+        datasets=list.map(r=>({
           label:r,
           data:(regData[r]||{contratos:[]}).contratos.slice(0,n),
-          backgroundColor:PALETTE_REG[i%PALETTE_REG.length],
+          backgroundColor:PALETTE_REG[regiones.indexOf(r)%PALETTE_REG.length],
           stack:'s1',borderRadius:2,
         }));
         title='Contratos por Región (MM$)';
-        if(regSub) regSub.textContent=regiones.length+' regiones';
+        if(regSub){
+          const ytd=list.reduce((s2,r)=>s2+((regData[r]&&regData[r].total[n])||0),0);
+          regSub.textContent = selRegs.size
+            ? list.length+' regiones seleccionadas · YTD MM$'+fmm(ytd)
+            : regiones.length+' regiones';
+        }
       } else {
+        const selReg=regsSel()[0];
         const rd=regData[selReg]||{};
         const lineas=rd.lineas||{};
         datasets=[
@@ -351,7 +494,7 @@
         if(!geo) return;
         const val = rd.total[n]||0;
         const clr = PALETTE_REG[i%PALETTE_REG.length];
-        const isSel = selReg===r;
+        const isSel = selRegs.has(r);
         const radius = Math.max(8, Math.sqrt(val/maxV)*36);
 
         const circ = L.circleMarker([geo.lat,geo.lon],{
@@ -366,15 +509,21 @@
           `<span style="font-size:.62rem">Contratos: <strong>MM$${fN1((rd.contratos||[])[n]||0)}</strong></span>`,
           {sticky:true,opacity:.95}
         );
-        circ.on('click',()=>setRegion(selReg===r?null:r));
+        circ.on('click',()=>setRegion(r));
         _regMapLyr.addLayer(circ);
       });
 
-      // Si hay región seleccionada, centrar mapa en ella
-      if(selReg && GEO_CL[selReg]){
-        _regMapL.setView([GEO_CL[selReg].lat,GEO_CL[selReg].lon],6,{animate:true});
-      } else {
+      // Una región se centra; varias se encuadran juntas, que para eso se
+      // seleccionaron. Chile es largo y con dos extremos el encuadre es la
+      // única forma de ver las dos a la vez.
+      const geos = regsSel().map(r=>GEO_CL[r]).filter(Boolean);
+      if(!selRegs.size || !geos.length){
         _regMapL.setView([-35.5,-70.5],4,{animate:true});
+      } else if(geos.length===1){
+        _regMapL.setView([geos[0].lat,geos[0].lon],6,{animate:true});
+      } else {
+        _regMapL.fitBounds(L.latLngBounds(geos.map(g=>[g.lat,g.lon])),
+                           {padding:[40,40],maxZoom:7,animate:true});
       }
     }
 

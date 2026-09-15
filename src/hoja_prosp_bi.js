@@ -11,7 +11,11 @@
 
   const REG = P.regiones, LIN = P.lineas, TIP = P.tipos, CLI = P.clientes, EST = P.estados;
   const HOY_YM = P.hoy_ym;
-  const VU = P.vida_util || 10;          // vida útil de referencia, en años
+  // Vida útil de referencia de cada tipo de equipo, en años. Sale de la tabla
+  // que se mantiene aparte (Tipos_Equipo_por_Linea_BI.xlsx). Antes la hoja
+  // suponía 10 años para todo el parque: una turbina dental de 2 años de vida
+  // útil y un autoclave de 15 se medían con la misma vara.
+  const VUT = (A.vida_util && typeof A.vida_util === 'object') ? A.vida_util : {};
 
   // Índices de columna de cada fila, para que el código se lea solo.
   const cREG = 0, cLIN = 1, cTIP = 2, cCLI = 3, cEST = 4, cPOT = 5, cYM = 6, cVAL = 7,
@@ -21,7 +25,7 @@
 
   // ── Estado de los segmentadores ─────────────────────────────
   let _pot = 'todos';        // 'todos' | 'si' | 'no'  ← Potencial ST, manda en toda la hoja
-  let _vidaMin = 7;          // umbral de la herramienta de prospección
+  let _vidaMin = 80;         // umbral de la herramienta de prospección, en % de vida útil
   let _pLinea = 'todas';
   let _pRegion = 'todas';
   const _abReg = {}, _abLin = {}, _abCli = {};
@@ -35,9 +39,21 @@
   const mm = v => window.fmtMM ? fmtMM(v) : 'MM$' + (v / 1e6).toFixed(1);
   const n0 = v => Math.round(v || 0).toLocaleString('es-CL');
   const n1 = v => (+v || 0).toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  // Vida del equipo en años. null cuando la fila no trae fecha de instalación:
-  // se distingue de «recién instalado» para no ensuciar los promedios.
+  // Años desde la instalación. null cuando la fila no trae fecha: se distingue
+  // de «recién instalado» para no ensuciar los promedios.
   const vida = f => f[cYM] >= 0 ? (HOY_YM - f[cYM]) / 12 : null;
+  // Vida útil del tipo del equipo, en años; 0 si su tipo no tiene referencia.
+  const vuDe = f => +VUT[String(TIP[f[cTIP]] || '').trim().toUpperCase()] || 0;
+  // Cuánto de su vida útil lleva consumido el equipo, en %. Sobre 100 ya la
+  // cumplió. null si falta la fecha o la vida útil del tipo: sin las dos cosas
+  // no hay desgaste que afirmar.
+  const pctVU = f => {
+    const v = vida(f), u = vuDe(f);
+    return (v != null && u > 0) ? v / u * 100 : null;
+  };
+  // Año calendario en que el equipo cumple la vida útil de SU tipo.
+  const anioCumple = f => Math.floor((f[cYM] + vuDe(f) * 12) / 12);
+  const pc = v => n1(v) + '%';
   // Fecha de instalación en formato chileno. El Excel no siempre trae el día;
   // cuando falta se muestra sólo mes y año en vez de inventar un 1.
   const fechaInst = f => {
@@ -56,32 +72,33 @@
     filas.forEach(f => {
       const k = clave(f);
       const d = g[k] || (g[k] = {
-        k: k, n: 0, nf: 0, vsum: 0, v7: 0, v10: 0, v5: 0,
-        val: 0, valf: 0, val7: 0, val10: 0, cli: {}, nval: 0,
+        k: k, n: 0, nf: 0, psum: 0, asum: 0, vVen: 0,
+        val: 0, valf: 0, valVen: 0, cli: {}, nval: 0,
       });
       d.n++;
       d.val += f[cVAL];
       if (f[cVAL]) d.nval++;
       d.cli[f[cCLI]] = 1;
-      const v = vida(f);
-      if (v != null) {
-        // valf: valorización sólo de los equipos con fecha. Es el universo
-        // sobre el que tiene sentido hablar de vigente y vencida; el resto de
-        // la base no se puede clasificar y se muestra aparte.
-        d.nf++; d.vsum += v; d.valf += f[cVAL];
-        if (v >= 5) d.v5++;
-        if (v >= 7) { d.v7++; d.val7 += f[cVAL]; }
-        if (v >= VU) { d.v10++; d.val10 += f[cVAL]; }
+      const p = pctVU(f);
+      if (p != null) {
+        // nf / valf: sólo los equipos medibles —con fecha y con vida útil de
+        // referencia—. Es el universo sobre el que tiene sentido hablar de
+        // vigente y vencida; el resto no se puede clasificar y va aparte.
+        d.nf++; d.psum += p; d.asum += vida(f); d.valf += f[cVAL];
+        if (p >= 100) { d.vVen++; d.valVen += f[cVAL]; }
       }
     });
     return Object.keys(g).map(k => {
       const d = g[k];
-      d.vida = d.nf ? d.vsum / d.nf : null;
+      // pct: % medio de vida útil consumida, equipo por equipo (cada equipo
+      // pesa 1). anios: la antigüedad media detrás, para los tooltips.
+      d.pct = d.nf ? d.psum / d.nf : null;
+      d.anios = d.nf ? d.asum / d.nf : null;
       d.nCli = Object.keys(d.cli).length;
-      // Vigente = con fecha y por debajo de la vida útil. Vencida = con fecha
-      // y por encima. Sin fecha = no clasificable, ni vigente ni vencida.
-      d.nVig   = d.nf - d.v10;
-      d.valVig = d.valf - d.val10;
+      // Vigente = medible y bajo el 100% de su vida útil. Vencida = medible y
+      // en 100% o más. No medible = ni vigente ni vencida.
+      d.nVig   = d.nf - d.vVen;
+      d.valVig = d.valf - d.valVen;
       d.nSin   = d.n - d.nf;
       d.valSin = d.val - d.valf;
       return d;
@@ -108,7 +125,7 @@
     <div class="card" style="margin-top:.9rem">
       <div class="ch" style="flex-wrap:wrap;gap:.5rem">
         <span class="ct">Mapa de renovación</span>
-        <span style="font-size:.56rem;color:var(--mut)">año en que cada equipo cumple ${VU} años</span>
+        <span style="font-size:.56rem;color:var(--mut)">año en que cada equipo cumple la vida útil de su tipo</span>
         <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
                      margin-left:.6rem">Filas</span>
         <div id="pb-heat-eje" style="display:flex;gap:.25rem"></div>
@@ -123,14 +140,14 @@
 
     <div class="g2" style="margin-top:.9rem;display:grid;grid-template-columns:1.15fr 1fr;gap:.9rem">
       <div class="card">
-        <div class="ch" style="flex-wrap:wrap;gap:.4rem"><span class="ct">Antigüedad de la base instalada</span>
+        <div class="ch" style="flex-wrap:wrap;gap:.4rem"><span class="ct">Consumo de vida útil</span>
           <span style="font-size:.56rem;color:var(--mut)">equipos y valorización por tramo</span>
-          <button id="pb-age-pdf" onclick="exportarPanel({ids:['pb-age-box'],titulo:'Prospectos BI · Antigüedad de la base instalada',archivo:'Prospectos_BI_antiguedad',btn:'pb-age-pdf'})" style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar</button></div>
+          <button id="pb-age-pdf" onclick="exportarPanel({ids:['pb-age-box'],titulo:'Prospectos BI · Consumo de vida útil',archivo:'Prospectos_BI_antiguedad',btn:'pb-age-pdf'})" style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar</button></div>
         <div class="cb"><div id="pb-age-box" style="position:relative;height:290px"><canvas id="cPbAging"></canvas></div></div>
       </div>
       <div class="card">
         <div class="ch" style="flex-wrap:wrap;gap:.4rem"><span class="ct">Ventana de renovación</span>
-          <span style="font-size:.56rem;color:var(--mut)">cumple ${VU} años</span>
+          <span style="font-size:.56rem;color:var(--mut)">año en que cumple su vida útil</span>
           <button id="pb-vent-pdf" onclick="exportarPanel({ids:['pb-vent-box'],titulo:'Prospectos BI · Ventana de renovación',archivo:'Prospectos_BI_ventana',btn:'pb-vent-pdf'})" style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:.3rem"><svg width="11" height="13" viewBox="0 0 11 13" fill="none" style="flex-shrink:0"><path d="M1.5 1h6l2.5 2.5V12a.5.5 0 01-.5.5h-8A.5.5 0 011 12V1.5A.5.5 0 011.5 1z" stroke="#fff" stroke-width="1" fill="none"/><path d="M7 1v3h3" stroke="#fff" stroke-width="1" fill="none"/><path d="M3 6.5h5M3 8.5h5M3 10.5h3" stroke="#fff" stroke-width=".9" stroke-linecap="round"/></svg>Exportar</button></div>
         <div class="cb"><div id="pb-vent-box" style="position:relative;height:290px"><canvas id="cPbVent"></canvas></div></div>
       </div>
@@ -168,14 +185,14 @@
     </div>
 
     <div class="sh" style="margin-top:1.5rem"><h2>Selector de prospectos</h2><div class="sh-line"></div>
-      <span class="sh-tag">Clientes con equipos sobre el umbral de vida ·
+      <span class="sh-tag">Clientes con equipos sobre el umbral de vida útil ·
         <strong id="pb-sel-tag">—</strong></span></div>
 
     <div class="card">
       <div class="ch" style="flex-wrap:wrap;gap:.5rem">
         <span class="ct">Filtros</span>
         <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em"
-              title="Años transcurridos entre la fecha de instalación del equipo y hoy">Antigüedad mínima del equipo</span>
+              title="Porcentaje de su vida útil que lleva consumido el equipo: años desde la instalación divididos por la vida útil de referencia de su tipo">Consumo mínimo de vida útil</span>
         <div id="pb-vida" style="display:flex;gap:.25rem"></div>
         <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-left:.4rem">Línea</span>
         <select id="pb-f-linea" onchange="window._pbLinea(this.value)" style="font-size:.6rem;padding:.2rem .4rem;
@@ -190,12 +207,13 @@
       <div class="cb">
         <p style="font-size:.6rem;color:var(--mut);margin:0 0 .8rem;line-height:1.6;
                   border-left:3px solid var(--az2);padding-left:.7rem">
-          La <strong>antigüedad</strong> de un equipo son los años entre su fecha de instalación
-          (columna «Fecha de Compra» del Excel) y hoy. El filtro deja pasar a los clientes que tengan
-          <strong>al menos un equipo</strong> con esa antigüedad o más, y todas las cifras de la tabla
-          se refieren sólo a esos equipos, no a todo el parque del cliente.
-          Con la vida útil de referencia en ${VU} años, un umbral de 7 busca lo que va a
-          necesitar reposición dentro de los próximos ${VU - 7}.
+          El <strong>% de vida útil</strong> de un equipo son los años desde su instalación (columna
+          «Fecha de Compra» del Excel) divididos por la vida útil de referencia de su tipo: una turbina de
+          2 años de vida útil con 1,8 encima está al 90%, y un autoclave de 15 con esos mismos 1,8 va en el
+          12%. <strong>Sobre 100% el equipo ya cumplió su vida útil.</strong> El filtro deja pasar a los
+          clientes que tengan <strong>al menos un equipo</strong> con ese consumo o más, y todas las cifras
+          de la tabla se refieren sólo a esos equipos, no a todo el parque del cliente.
+          Un umbral de 80% busca los equipos a los que les queda menos de una quinta parte de su vida.
           <strong>Haz clic en un cliente</strong> para ver sus equipos uno a uno.</p>
         <div id="pb-sel-kpi" class="g5" style="grid-template-columns:repeat(4,1fr);margin-bottom:.9rem"></div>
         <div id="pb-sel-tabla"></div>
@@ -221,7 +239,7 @@
   window._pbLinea = v => { _pLinea = v; renderSelector(); };
   window._pbRegion = v => { _pRegion = v; renderSelector(); };
   window._pbLimpiar = () => {
-    _vidaMin = 7; _pLinea = 'todas'; _pRegion = 'todas';
+    _vidaMin = 80; _pLinea = 'todas'; _pRegion = 'todas';
     const s = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
     s('pb-f-linea', 'todas'); s('pb-f-region', 'todas');
     renderSelector();
@@ -236,7 +254,7 @@
   function kpis(filas) {
     const box = document.getElementById('pb-kpi');
     if (!box) return;
-    const t = acumula(filas, () => 'x')[0] || { n: 0, val: 0, vida: null, v10: 0, val10: 0, nf: 0, nval: 0 };
+    const t = acumula(filas, () => 'x')[0] || { n: 0, val: 0, pct: null, anios: null, vVen: 0, valVen: 0, nf: 0, nval: 0 };
     const card = (lbl, val, sub, col) =>
       '<div class="kpi" style="border-top:3px solid ' + col + '">' +
         '<div class="kl">' + lbl + '</div>' +
@@ -245,16 +263,17 @@
     box.innerHTML =
       card('Equipos en la BI', n0(t.n), t.nCli + ' clientes', 'var(--az1)') +
       card('Valorización', mm(t.val), n0(t.nval) + ' equipos valorizados', 'var(--teal)') +
-      card('Vida media', t.vida != null ? n1(t.vida) + ' años' : '—',
-           'sobre ' + n0(t.nf) + ' con fecha', 'var(--am)') +
-      card('Sobre ' + VU + ' años', n0(t.v10),
-           (t.nf ? (t.v10 / t.nf * 100).toFixed(0) : 0) + '% de los que tienen fecha', 'var(--rd)') +
-      card('Valor a renovar', mm(t.val10), 'equipos que ya cumplieron su vida útil', 'var(--or)');
+      card('% Vida útil consumida', t.pct != null ? pc(t.pct) : '—',
+           (t.anios != null ? n1(t.anios) + ' años de antigüedad media · ' : '') +
+           'sobre ' + n0(t.nf) + ' medibles', 'var(--am)') +
+      card('Vida útil cumplida', n0(t.vVen),
+           (t.nf ? (t.vVen / t.nf * 100).toFixed(0) : 0) + '% de los medibles están en 100% o más', 'var(--rd)') +
+      card('Valor a renovar', mm(t.valVen), 'equipos que ya cumplieron su vida útil', 'var(--or)');
 
     const cob = document.getElementById('pb-cob');
     if (cob) {
       cob.innerHTML = 'Cobertura del dato: <strong>' + (t.n ? (t.nf / t.n * 100).toFixed(0) : 0) +
-        '%</strong> con fecha de instalación · <strong>' +
+        '%</strong> medible (fecha de instalación y vida útil de su tipo) · <strong>' +
         (t.n ? (t.nval / t.n * 100).toFixed(0) : 0) + '%</strong> con valorización';
     }
     const tag = document.getElementById('pb-tag');
@@ -262,13 +281,15 @@
       : _pot === 'si' ? 'sólo equipos con Potencial de ST' : 'sólo equipos sin Potencial de ST';
   }
 
-  // ── Curva de antigüedad ─────────────────────────────────────
+  // ── Curva de consumo de vida útil ───────────────────────────
+  // Los cortes de 60, 80 y 100% son los mismos de la hoja Base Instalada, para
+  // que un equipo «por reponer» signifique lo mismo en las dos.
   const TRAMOS = [
-    { k: '0 a 3 años',   min: 0,  max: 3,   col: '#00832F' },
-    { k: '3 a 5 años',   min: 3,  max: 5,   col: '#5AA02C' },
-    { k: '5 a 7 años',   min: 5,  max: 7,   col: '#C9A227' },
-    { k: '7 a 10 años',  min: 7,  max: VU,  col: '#D46000' },
-    { k: VU + ' años o más', min: VU, max: 1e9, col: '#C00000' },
+    { k: 'Menos de 40%',  min: 0,   max: 40,  col: '#00832F' },
+    { k: '40 a 60%',      min: 40,  max: 60,  col: '#5AA02C' },
+    { k: '60 a 80%',      min: 60,  max: 80,  col: '#C9A227' },
+    { k: '80 a 100%',     min: 80,  max: 100, col: '#D46000' },
+    { k: '100% o más',    min: 100, max: 1e9, col: '#C00000' },
   ];
 
   function chartAging(filas) {
@@ -277,10 +298,10 @@
     if (_chAging) { _chAging.destroy(); _chAging = null; }
     const eq = TRAMOS.map(() => 0), val = TRAMOS.map(() => 0);
     filas.forEach(f => {
-      const v = vida(f);
-      if (v == null) return;
+      const p = pctVU(f);
+      if (p == null) return;
       for (let i = 0; i < TRAMOS.length; i++) {
-        if (v >= TRAMOS[i].min && v < TRAMOS[i].max) { eq[i]++; val[i] += f[cVAL]; break; }
+        if (p >= TRAMOS[i].min && p < TRAMOS[i].max) { eq[i]++; val[i] += f[cVAL]; break; }
       }
     });
     _chAging = new Chart(ctx.getContext('2d'), {
@@ -313,7 +334,7 @@
     });
   }
 
-  // ── Ventana de renovación: cuándo cumple sus 10 años cada equipo ──
+  // ── Ventana de renovación: cuándo cumple su vida útil cada equipo ──
   function chartVentana(filas) {
     const ctx = document.getElementById('cPbVent');
     if (!ctx || typeof Chart === 'undefined') return;
@@ -321,9 +342,9 @@
     const anioHoy = Math.floor(HOY_YM / 12);
     const g = {};
     filas.forEach(f => {
-      if (f[cYM] < 0) return;
-      // Año calendario en que el equipo cumple la vida útil de referencia.
-      const a = Math.floor((f[cYM] + VU * 12) / 12);
+      if (pctVU(f) == null) return;
+      // Año calendario en que el equipo cumple la vida útil de su tipo.
+      const a = anioCumple(f);
       const k = a <= anioHoy ? 'Ya cumplida' : (a > anioHoy + 5 ? 'Más de 5 años' : String(a));
       const d = g[k] || (g[k] = { n: 0, val: 0 });
       d.n++; d.val += f[cVAL];
@@ -429,12 +450,12 @@
       Array.from({ length: N_ANIOS }, (_, i) => ({ k: String(anioHoy + i), lbl: String(anioHoy + i) })));
 
     const filas = base().filter(f =>
-      f[cYM] >= 0 && (_heatLin === 'todas' || LIN[f[cLIN]] === _heatLin));
+      pctVU(f) != null && (_heatLin === 'todas' || LIN[f[cLIN]] === _heatLin));
     const eje = f => _heatEje === 'linea' ? LIN[f[cLIN]] : REG[f[cREG]];
 
     const g = {};
     filas.forEach(f => {
-      const a = Math.floor((f[cYM] + VU * 12) / 12);
+      const a = anioCumple(f);
       // Lo que vence más allá de la ventana queda fuera: son equipos nuevos, no
       // cartera de renovación de los próximos años.
       const k = a < anioHoy ? 'venc' : (a >= anioHoy + N_ANIOS ? null : String(a));
@@ -449,7 +470,7 @@
     const rows = Object.keys(g).sort((a, b) => g[b].totV - g[a].totV || g[b].totN - g[a].totN);
     if (!rows.length) {
       box.innerHTML = '<div style="padding:1.4rem;text-align:center;color:var(--mut);font-size:.68rem">' +
-        'Sin equipos con fecha de instalación para estos filtros.</div>';
+        'Sin equipos medibles (con fecha de instalación y vida útil de su tipo) para estos filtros.</div>';
       return;
     }
     // El color sigue la VALORIZACIÓN: el mapa responde a cuánta plata hay que
@@ -523,10 +544,12 @@
         'cada celda muestra los equipos y, entre paréntesis, cuánto valen</span>' +
       '</div>' +
       '<p style="font-size:.57rem;color:var(--mut);margin:.55rem 0 0;line-height:1.55">' +
-      'Cada equipo cae en el año en que cumple sus ' + VU + ' años de vida útil; los que ya lo hicieron ' +
+      'Cada equipo cae en el año en que cumple la vida útil de referencia <strong>de su tipo</strong> ' +
+      '—una turbina a los 2 años, un autoclave a los 15—; los que ya la cumplieron ' +
       'quedan en «Vencida». El color compara contra la celda más alta del propio mapa —dice dónde está ' +
       'la concentración, no un monto absoluto— y la escala va comprimida en raíz cuadrada para que una ' +
-      'celda muy grande no aplaste al resto. Sólo entran equipos con fecha de instalación; lo que vence ' +
+      'celda muy grande no aplaste al resto. Sólo entran equipos con fecha de instalación y vida útil ' +
+      'definida para su tipo; lo que vence ' +
       'después de ' + (anioHoy + N_ANIOS - 1) + ' queda fuera de la ventana.</p>';
 
     // Hover por celda: el número exacto y el contexto, sin cargar el mapa.
@@ -559,7 +582,7 @@
         datasets: [
           { label: 'Valorización total', data: top.map(d => d.val),
             backgroundColor: color + '99', borderRadius: 3 },
-          { label: 'De equipos sobre ' + VU + ' años', data: top.map(d => d.val10),
+          { label: 'De equipos con vida útil cumplida', data: top.map(d => d.valVen),
             backgroundColor: '#C00000CC', borderRadius: 3 },
         ],
       },
@@ -575,8 +598,8 @@
           legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 8.5 } } },
           tooltip: { callbacks: {
             label: c => c.dataset.label + ': ' + mm(c.raw),
-            afterLabel: c => n0(top[c.dataIndex].n) + ' equipos · vida media ' +
-              (top[c.dataIndex].vida != null ? n1(top[c.dataIndex].vida) + ' años' : 's/d'),
+            afterLabel: c => n0(top[c.dataIndex].n) + ' equipos · ' +
+              (top[c.dataIndex].pct != null ? pc(top[c.dataIndex].pct) + ' de vida útil consumida' : 'sin dato de vida útil'),
           } },
         },
       },
@@ -591,20 +614,22 @@
     ';white-space:nowrap;' + SEP + '">' + t + '</th>';
   const num = (v, extra) => '<td style="' + TD + ';text-align:right;font-size:.64rem;' +
     'font-variant-numeric:tabular-nums;' + (extra || '') + SEP + '">' + v + '</td>';
-  // El color de la vida media dice de un vistazo si el parque está por vencer.
+  // El color del % de vida útil dice de un vistazo si el parque está por
+  // vencer. Mismos cortes que Base Instalada: 100 agotada, 80 por reponer,
+  // 60 en vigilancia.
   const colVida = v => v == null ? 'var(--mut)'
-    : v >= VU ? 'var(--rd)' : v >= 7 ? 'var(--or)' : v >= 5 ? 'var(--am)' : 'var(--gn)';
+    : v >= 100 ? 'var(--rd)' : v >= 80 ? 'var(--or)' : v >= 60 ? 'var(--am)' : 'var(--gn)';
   // Las cifras se muestran siempre en las dos unidades: el número de equipos
   // y, entre paréntesis, cuánto valen. Antes había un segmentador para elegir
   // una u otra, y obligaba a cambiarlo para responder la mitad de las
   // preguntas; con las dos juntas se lee de una sola pasada.
   const dual = (n, v) => n0(n) + ' <span style="opacity:.72">(' + mm(v) + ')</span>';
   const mVig = d => d.nVig;
-  const mVen = d => d.v10;
+  const mVen = d => d.vVen;
   const mTot = d => d.n;
   // Proporción vencida dentro de lo clasificable (vigente + vencida): decir
   // «% de la BI total» sería engañoso cuando dos tercios no tienen fecha.
-  const pctVenNum = d => (d.nVig + d.v10) ? d.v10 / (d.nVig + d.v10) * 100 : null;
+  const pctVenNum = d => (d.nVig + d.vVen) ? d.vVen / (d.nVig + d.vVen) * 100 : null;
   const pctVen = d => { const p = pctVenNum(d); return p == null ? '—' : p.toFixed(0) + '%'; };
 
   function tablaJerarquica(cfg) {
@@ -623,7 +648,7 @@
       '</colgroup><thead><tr>' +
       th(cfg.titulo) + th('CLIENTES', 'right') +
       th('BI VIGENTE', 'right') + th('BI VENCIDA', 'right') + th('BI TOTAL', 'right') +
-      th('VIDA MEDIA', 'right') + th('% DEL TOTAL', 'right') + th('% VENCIDA', 'right') +
+      th('% VIDA ÚTIL', 'right') + th('% DEL TOTAL', 'right') + th('% VENCIDA', 'right') +
       '</tr></thead><tbody>';
 
     D.forEach((d, i) => {
@@ -636,9 +661,9 @@
           (ab ? '▾' : '▸') + '</span>' + esc(d.k) + '</td>' +
         num(n0(d.nCli)) +
         num(dual(d.nVig, d.valVig), 'font-weight:700;color:var(--gn);') +
-        num(d.v10 ? dual(d.v10, d.val10) : '—', d.v10 ? 'font-weight:700;color:var(--rd);' : 'color:var(--mut);') +
+        num(d.vVen ? dual(d.vVen, d.valVen) : '—', d.vVen ? 'font-weight:700;color:var(--rd);' : 'color:var(--mut);') +
         num(dual(d.n, d.val), 'font-weight:700;color:var(--az1);') +
-        num(d.vida != null ? n1(d.vida) + ' a' : '—', 'font-weight:700;color:' + colVida(d.vida) + ';') +
+        num(d.pct != null ? pc(d.pct) : '—', 'font-weight:700;color:' + colVida(d.pct) + ';') +
         num(total ? (d.n / total * 100).toFixed(1).replace('.', ',') + '%' : '—', 'color:var(--mut);') +
         num(pctVen(d), 'color:' + (pctVenNum(d) > 30 ? 'var(--rd)' : 'var(--mut)') + ';') +
         '</tr>';
@@ -649,9 +674,9 @@
               'text-overflow:ellipsis;' + SEP + '" title="' + esc(h.k) + '">' + esc(h.k) + '</td>' +
             num(n0(h.nCli)) +
             num(dual(h.nVig, h.valVig), 'color:var(--gn);') +
-            num(h.v10 ? dual(h.v10, h.val10) : '—', h.v10 ? 'color:var(--rd);' : 'color:var(--mut);') +
+            num(h.vVen ? dual(h.vVen, h.valVen) : '—', h.vVen ? 'color:var(--rd);' : 'color:var(--mut);') +
             num(dual(h.n, h.val), 'color:var(--az2);') +
-            num(h.vida != null ? n1(h.vida) + ' a' : '—', 'color:' + colVida(h.vida) + ';') +
+            num(h.pct != null ? pc(h.pct) : '—', 'color:' + colVida(h.pct) + ';') +
             num(total ? (h.n / total * 100).toFixed(1).replace('.', ',') + '%' : '—', 'color:var(--mut);') +
             num(pctVen(h), 'color:var(--mut);') +
             '</tr>';
@@ -659,25 +684,26 @@
       }
     });
 
-    const T = acumula(filas, () => 'x')[0] || { n: 0, nCli: 0, nf: 0, vida: null, v10: 0, val: 0, val10: 0 };
+    const T = acumula(filas, () => 'x')[0] || { n: 0, nCli: 0, nf: 0, pct: null, vVen: 0, val: 0, valVen: 0 };
     html += '</tbody><tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">' +
       '<td style="padding:.4rem .6rem;font-size:.64rem;' + SEP + '">TOTAL · ' + D.length + ' ' + cfg.unidad + '</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + n0(T.nCli) + '</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + dual(T.nVig, T.valVig) + '</td>' +
-      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + dual(T.v10, T.val10) + '</td>' +
+      '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + dual(T.vVen, T.valVen) + '</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + dual(T.n, T.val) + '</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' +
-        (T.vida != null ? n1(T.vida) + ' a' : '—') + '</td>' +
+        (T.pct != null ? pc(T.pct) : '—') + '</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">100%</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem">' + pctVen(T) + '</td>' +
       '</tr></tfoot></table></div>' +
       '<p style="font-size:.57rem;color:var(--mut);margin:.5rem 0 0;line-height:1.55">' +
-      '<strong>BI vigente</strong> son los equipos que todavía no cumplen los ' + VU + ' años de vida útil ' +
-      'de referencia y <strong>BI vencida</strong> los que ya los cumplieron. Ambas se calculan sólo sobre ' +
-      'los equipos con fecha de instalación, así que <strong>no suman la BI total</strong>: el resto son ' +
-      'equipos sin fecha en el Excel, que no se pueden clasificar y no se reparten entre las otras dos. ' +
-      'Por lo mismo el <strong>% vencida</strong> se calcula sobre lo clasificable (vigente + vencida) y no ' +
-      'sobre la BI total. La <strong>vida media</strong> corre sobre ese mismo universo con fecha. ' +
+      '<strong>BI vigente</strong> son los equipos que todavía no cumplen la vida útil de referencia de ' +
+      'su tipo (bajo 100%) y <strong>BI vencida</strong> los que ya la cumplieron (100% o más). Ambas se ' +
+      'calculan sólo sobre los equipos medibles —con fecha de instalación y vida útil definida para su ' +
+      'tipo—, así que <strong>no suman la BI total</strong>: el resto no se puede clasificar y no se ' +
+      'reparte entre las otras dos. Por lo mismo el <strong>% vencida</strong> se calcula sobre lo ' +
+      'clasificable (vigente + vencida) y no sobre la BI total. El <strong>% vida útil</strong> es el ' +
+      'promedio, equipo por equipo, de cuánto de su vida útil lleva consumido cada uno. ' +
       'Cada celda trae el <strong>número de equipos</strong> y, entre paréntesis, <strong>su valorización</strong>; ' +
       'los porcentajes van sobre el número de equipos.</p>';
 
@@ -707,23 +733,24 @@
     };
     sel('pb-f-linea', [['todas', 'Todas']].concat(LIN.slice().sort().map(l => [l, l])), _pLinea);
     sel('pb-f-region', [['todas', 'Todas']].concat(REG.slice().sort().map(r => [r, r])), _pRegion);
-    botones('pb-vida', [[5, '5+ años'], [7, '7+ años'], [8, '8+ años'],
-                        [10, '10+ años'], [12, '12+ años']], _vidaMin, 'window._pbVida');
+    botones('pb-vida', [[60, '60%+'], [80, '80%+'], [90, '90%+'],
+                        [100, '100%+'], [120, '120%+']], _vidaMin, 'window._pbVida');
   }
 
   function renderSelector() {
     poblarFiltros();
-    // Sólo entran equipos con fecha: sin fecha no se puede afirmar la vida, y
-    // meterlos como «desconocidos» inflaría el potencial con humo.
+    // Sólo entran equipos medibles: sin fecha o sin vida útil de referencia no
+    // se puede afirmar el desgaste, y meterlos como «desconocidos» inflaría el
+    // potencial con humo.
     const filas = base().filter(f => {
-      const v = vida(f);
-      if (v == null || v < _vidaMin) return false;
+      const p = pctVU(f);
+      if (p == null || p < _vidaMin) return false;
       if (_pLinea !== 'todas' && LIN[f[cLIN]] !== _pLinea) return false;
       if (_pRegion !== 'todas' && REG[f[cREG]] !== _pRegion) return false;
       return true;
     });
 
-    const T = acumula(filas, () => 'x')[0] || { n: 0, nCli: 0, val: 0, vida: null };
+    const T = acumula(filas, () => 'x')[0] || { n: 0, nCli: 0, val: 0, pct: null, anios: null };
     const box = document.getElementById('pb-sel-kpi');
     const card = (lbl, val, sub, col) =>
       '<div class="kpi" style="border-top:3px solid ' + col + '">' +
@@ -732,15 +759,16 @@
     if (box) {
       box.innerHTML =
         card('Clientes prospectables', n0(T.nCli), 'con al menos un equipo sobre el umbral', 'var(--az1)') +
-        card('Equipos', n0(T.n), 'vida ≥ ' + _vidaMin + ' años', 'var(--am)') +
+        card('Equipos', n0(T.n), '≥ ' + _vidaMin + '% de su vida útil', 'var(--am)') +
         card('Valorización', mm(T.val), 'valor de reposición del parque', 'var(--teal)') +
-        card('Vida media', T.vida != null ? n1(T.vida) + ' años' : '—',
-             'de los equipos seleccionados', 'var(--or)');
+        card('% Vida útil consumida', T.pct != null ? pc(T.pct) : '—',
+             'media de los equipos seleccionados' +
+             (T.anios != null ? ' · ' + n1(T.anios) + ' años' : ''), 'var(--or)');
     }
 
     const tag = document.getElementById('pb-sel-tag');
     if (tag) {
-      tag.textContent = 'vida ≥ ' + _vidaMin + ' años' +
+      tag.textContent = '≥ ' + _vidaMin + '% de vida útil' +
         (_pLinea !== 'todas' ? ' · ' + _pLinea : '') +
         (_pRegion !== 'todas' ? ' · ' + _pRegion : '');
     }
@@ -760,13 +788,13 @@
       '<col style="width:32%"><col style="width:8%"><col style="width:10%"><col style="width:10%">' +
       '<col style="width:12%"><col style="width:14%"><col style="width:14%">' +
       '</colgroup><thead><tr>' +
-      th('CLIENTE') + th('EQUIPOS', 'right') + th('ANTIGÜEDAD MEDIA', 'right') +
-      th('MÁS ANTIGUO', 'right') + th('LÍNEAS') + th('VALORIZACIÓN', 'right') + th('% DEL TOTAL', 'right') +
+      th('CLIENTE') + th('EQUIPOS', 'right') + th('% VIDA ÚTIL MEDIA', 'right') +
+      th('MÁS DESGASTADO', 'right') + th('LÍNEAS') + th('VALORIZACIÓN', 'right') + th('% DEL TOTAL', 'right') +
       '</tr></thead><tbody>';
 
     D.forEach((d, i) => {
       const propias = filas.filter(f => CLI[f[cCLI]] === d.k);
-      const maxV = Math.max.apply(null, propias.map(f => vida(f) || 0));
+      const maxV = Math.max.apply(null, propias.map(f => pctVU(f) || 0));
       const ls = {};
       propias.forEach(f => { ls[LIN[f[cLIN]]] = (ls[LIN[f[cLIN]]] || 0) + 1; });
       const lsTxt = Object.keys(ls).sort((a, b) => ls[b] - ls[a])
@@ -779,8 +807,8 @@
           '<span style="display:inline-block;width:11px;color:var(--mut)">' + (ab ? '▾' : '▸') + '</span>' +
           esc(d.k) + '</td>' +
         num(n0(d.n), 'font-weight:700;') +
-        num(d.vida != null ? n1(d.vida) + ' a' : '—', 'color:' + colVida(d.vida) + ';font-weight:700;') +
-        num(n1(maxV) + ' a', 'color:' + colVida(maxV) + ';') +
+        num(d.pct != null ? pc(d.pct) : '—', 'color:' + colVida(d.pct) + ';font-weight:700;') +
+        num(pc(maxV), 'color:' + colVida(maxV) + ';') +
         '<td style="' + TD + ';font-size:.58rem;color:var(--mut);overflow:hidden;text-overflow:ellipsis;' +
           SEP + '" title="' + esc(lsTxt) + '">' + esc(lsTxt) + '</td>' +
         num(mm(d.val), 'font-weight:700;color:var(--az1);') +
@@ -789,18 +817,19 @@
 
       if (ab) {
         // Detalle equipo por equipo: lo que el ejecutivo necesita para salir a
-        // visitar. Se ordena del más antiguo al más nuevo, que es el orden en
-        // que conviene atacarlos.
+        // visitar. Se ordena del más desgastado al menos, que es el orden en
+        // que conviene atacarlos: un equipo nuevo con vida útil corta puede ir
+        // antes que uno más viejo que todavía tiene recorrido.
         html += '<tr><td colspan="7" style="padding:0;background:var(--gy)">' +
           '<table style="width:100%;border-collapse:collapse"><thead><tr>' +
           [['EQUIPO', 'left'], ['MARCA / MODELO', 'left'], ['N° SERIE', 'left'], ['LÍNEA', 'left'],
            ['REGIÓN', 'left'], ['ESTADO', 'left'], ['INSTALADO', 'right'], ['ANTIGÜEDAD', 'right'],
-           ['VALORIZACIÓN', 'right']].map(h =>
+           ['VIDA ÚTIL', 'right'], ['% VIDA ÚTIL', 'right'], ['VALORIZACIÓN', 'right']].map(h =>
             '<th style="padding:.24rem .6rem;font-size:.53rem;letter-spacing:.04em;color:var(--mut);' +
             'text-align:' + h[1] + ';border-bottom:1px solid var(--brd);white-space:nowrap">' +
             h[0] + '</th>').join('') + '</tr></thead><tbody>' +
-          propias.slice().sort((a, b) => (vida(b) || 0) - (vida(a) || 0)).map(f => {
-            const v = vida(f);
+          propias.slice().sort((a, b) => (pctVU(b) || 0) - (pctVU(a) || 0)).map(f => {
+            const v = vida(f), p = pctVU(f), u = vuDe(f);
             const td2 = (c, al, st) => '<td style="padding:.24rem .6rem;font-size:.58rem;text-align:' +
               (al || 'left') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' +
               (st || '') + '">' + c + '</td>';
@@ -814,8 +843,9 @@
               td2(esc(REG[f[cREG]]), 'left', 'color:var(--mut)') +
               td2(esc(EST[f[cEST]]), 'left', 'color:var(--mut)') +
               td2(fechaInst(f), 'right', "font-family:'Roboto Mono',monospace;font-size:.55rem") +
-              td2(v != null ? n1(v) + ' a' : '—', 'right',
-                  'font-weight:700;color:' + colVida(v)) +
+              td2(v != null ? n1(v) + ' a' : '—', 'right', 'color:var(--mut)') +
+              td2(u ? n0(u) + ' a' : '—', 'right', 'color:var(--mut)') +
+              td2(p != null ? pc(p) : '—', 'right', 'font-weight:700;color:' + colVida(p)) +
               td2(f[cVAL] ? mm(f[cVAL]) : '<span style="color:var(--mut)">sin valorizar</span>',
                   'right', 'font-variant-numeric:tabular-nums');
           }).join('</tr>') + '</tr></tbody></table></td></tr>';
@@ -826,18 +856,19 @@
       '<td style="padding:.4rem .6rem;font-size:.64rem;' + SEP + '">TOTAL · ' + D.length + ' clientes</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + n0(T.n) + '</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' +
-        (T.vida != null ? n1(T.vida) + ' a' : '—') + '</td>' +
+        (T.pct != null ? pc(T.pct) : '—') + '</td>' +
       '<td style="' + SEP + '"></td><td style="' + SEP + '"></td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + mm(T.val) + '</td>' +
       '<td style="padding:.4rem .6rem;text-align:right;font-size:.64rem">100%</td>' +
       '</tr></tfoot></table></div>' +
       '<p style="font-size:.57rem;color:var(--mut);margin:.5rem 0 0;line-height:1.55">' +
-      'Sólo entran equipos <strong>con fecha de instalación</strong>: sin ella no se puede afirmar la vida ' +
-      'del equipo, y contarlos como candidatos inflaría el potencial. La valorización de la columna ' +
-      'corresponde a los equipos seleccionados, no a todo el parque del cliente. ' +
-      'La vida útil de referencia son ' + VU + ' años. ' +
+      'Sólo entran equipos <strong>con fecha de instalación y vida útil definida para su tipo</strong>: ' +
+      'sin las dos cosas no se puede afirmar el desgaste, y contarlos como candidatos inflaría el potencial. ' +
+      'La valorización de la columna corresponde a los equipos seleccionados, no a todo el parque del cliente. ' +
+      'Cada tipo de equipo tiene su propia vida útil de referencia, así que <strong>100% significa que el ' +
+      'equipo ya la cumplió</strong>, sea a los 2 años o a los 15. ' +
       '<strong>Haz clic en un cliente</strong> para desplegar sus equipos con marca, modelo, número de ' +
-      'serie, fecha de instalación y antigüedad, ordenados del más antiguo al más nuevo.</p>';
+      'serie, fecha de instalación, antigüedad, vida útil y % consumido, ordenados del más desgastado al menos.</p>';
     tb.innerHTML = html;
   }
 

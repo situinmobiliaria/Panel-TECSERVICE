@@ -285,33 +285,51 @@ function _biPipeResid(){
 // que junto al promedio se guarda sobre cuántos equipos se calculó: una vida
 // media de 6 años sobre el 20% del parque dice bastante menos que la misma
 // cifra sobre el 90%, y sin ese dato al lado no hay cómo distinguirlas.
+// Vida útil de referencia de cada tipo de equipo, en años. Sale de la tabla
+// que se mantiene aparte, no del sistema.
+const _BI_VU = APP_DATA.vida_util || {};
+const _biVU = t => +_BI_VU[String(t || '').trim().toUpperCase()] || 0;
+
+// El desgaste se mide como proporción de la vida útil y no en años absolutos:
+// una turbina dental de 2 años de vida útil con 1,8 encima está al 90% y toca
+// renovarla, mientras que un autoclave de 15 años con esos mismos 1,8 va en el
+// 12%. El promedio en años de los dos no describe a ninguno.
+// Un equipo entra al promedio sólo si trae fecha de instalación Y su tipo
+// tiene vida útil de referencia; los demás quedan fuera y se reportan en la
+// cobertura, para no inventar un desgaste que no se puede calcular.
 let _biVidaIdx = null;
 function _biVidaIndice(){
   if(_biVidaIdx) return _biVidaIdx;
   const P = APP_DATA.prosp_bi || {};
-  const cl = P.clientes || [], filas = P.filas || [], hoy = P.hoy_ym || 0;
+  const cl = P.clientes || [], tp = P.tipos || [], filas = P.filas || [], hoy = P.hoy_ym || 0;
   const idx = {};
   filas.forEach(f=>{
     const k = _biNorm(cl[f[3]] || '');
     if(!k) return;
-    const d = idx[k] || (idx[k] = { n:0, nf:0, suma:0 });
+    const d = idx[k] || (idx[k] = { n:0, nf:0, suma:0, sumaA:0 });
     d.n++;
-    if(f[6] >= 0){ d.nf++; d.suma += (hoy - f[6]) / 12; }
+    const vu = _biVU(tp[f[2]]);
+    if(f[6] >= 0 && vu > 0){
+      const anios = (hoy - f[6]) / 12;
+      d.nf++; d.suma += anios / vu * 100; d.sumaA += anios;
+    }
   });
   _biVidaIdx = idx;
   return idx;
 }
 
-// Vida de un grupo de clientes: promedio y cobertura del dato.
+// Desgaste de un grupo de clientes: % medio de vida útil consumida, los años
+// que hay detrás y sobre qué parte del parque se pudo calcular.
 function _biVida(cs){
   const idx = _biVidaIndice();
-  let n = 0, nf = 0, suma = 0;
+  let n = 0, nf = 0, suma = 0, sumaA = 0;
   (cs||[]).forEach(c=>{
     const d = idx[_biNorm(c.nombre)];
     if(!d) return;
-    n += d.n; nf += d.nf; suma += d.suma;
+    n += d.n; nf += d.nf; suma += d.suma; sumaA += d.sumaA;
   });
-  return { vida: nf ? suma/nf : null, nf: nf, n: n, cob: n ? nf/n : 0 };
+  return { vida: nf ? suma/nf : null, anios: nf ? sumaA/nf : null,
+           nf: nf, n: n, cob: n ? nf/n : 0 };
 }
 
 // Las líneas de negocio, con el color con que las pinta el resto de la hoja.
@@ -342,32 +360,57 @@ function _biLineaProp(l) {
   return 'otros';
 }
 
-// La misma vida media de antes, pero abierta por línea: un cliente con la
-// esterilización recién renovada y el dental de doce años tiene un promedio
-// que no describe ninguna de las dos, y es la línea vieja la que da la visita.
+// El mismo desgaste, abierto por línea: un cliente con la esterilización recién
+// renovada y el dental al final de su vida tiene un promedio que no describe
+// ninguna de las dos, y es la línea gastada la que da la visita.
 let _biVidaLinIdx = null;
 function _biVidaLinIndice() {
   if (_biVidaLinIdx) return _biVidaLinIdx;
   const P = APP_DATA.prosp_bi || {};
-  const cl = P.clientes || [], ln = P.lineas || [], filas = P.filas || [], hoy = P.hoy_ym || 0;
+  const cl = P.clientes || [], ln = P.lineas || [], tp = P.tipos || [],
+        filas = P.filas || [], hoy = P.hoy_ym || 0;
   const idx = {};
   filas.forEach(f => {
     const k = _biNorm(cl[f[3]] || '');
     if (!k) return;
     const pr = _biLineaProp(ln[f[1]] || '');
     const c = idx[k] || (idx[k] = {});
-    const d = c[pr] || (c[pr] = { n: 0, nf: 0, suma: 0 });
+    const d = c[pr] || (c[pr] = { n: 0, nf: 0, suma: 0, sumaA: 0 });
     d.n++;
-    if (f[6] >= 0) { d.nf++; d.suma += (hoy - f[6]) / 12; }
+    const vu = _biVU(tp[f[2]]);
+    if (f[6] >= 0 && vu > 0) {
+      const anios = (hoy - f[6]) / 12;
+      d.nf++; d.suma += anios / vu * 100; d.sumaA += anios;
+    }
   });
   _biVidaLinIdx = idx;
   return idx;
 }
 
-// Sobre 10 años el equipo pasó su vida útil de referencia; sobre 7 está cerca.
+// Sobre el 100% el parque ya agotó su vida útil de referencia; sobre el 80%
+// está entrando en la ventana de reposición.
 function _biColVida(v){
-  return v == null ? 'var(--mut)' : v >= 10 ? 'var(--rd)'
-       : v >= 7 ? 'var(--or)' : v >= 5 ? 'var(--am)' : 'var(--gn)';
+  return v == null ? 'var(--mut)' : v >= 100 ? 'var(--rd)'
+       : v >= 80 ? 'var(--or)' : v >= 60 ? 'var(--am)' : 'var(--gn)';
+}
+
+// Los mismos cuatro tramos, en rgba: el canvas de la matriz no resuelve
+// variables CSS, así que si se dejaran var(--rd) los puntos salen negros. Los
+// valores son los del panel (--rd, --or, --am, --gn) y tienen que moverse
+// junto con _biColVida o la tabla y la matriz dirían cosas distintas.
+const _BI_TRAMOS = [
+  { min: 100, lbl: 'Vida útil agotada (≥100%)', hex: '#C00000' },
+  { min:  80, lbl: 'Por reponer (80–100%)',     hex: '#D46000' },
+  { min:  60, lbl: 'En vigilancia (60–80%)',    hex: '#FFC000' },
+  { min:   0, lbl: 'Con recorrido (<60%)',      hex: '#00832F' },
+];
+function _biTramo(v){
+  return _BI_TRAMOS.find(t => v >= t.min) || _BI_TRAMOS[_BI_TRAMOS.length - 1];
+}
+// El hex a rgba, para poder bajarle la opacidad sin duplicar la paleta.
+function _biRgba(hex, a){
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')';
 }
 
 // Celda de monto: en blanco cuando es cero, para que la tabla no se llene de
@@ -468,7 +511,7 @@ function _biRenderTabla(){
         ${(()=>{const v=_biVida(cs);return v.vida==null
           ? '<td style="text-align:right;color:var(--mut)">—</td>'
           : `<td style="text-align:right;font-family:'Roboto Mono',monospace;font-weight:700;
-               color:${_biColVida(v.vida)}">${fN1(v.vida)} a
+               color:${_biColVida(v.vida)}" title="${fN1(v.anios)} años de antigüedad media sobre una vida útil de referencia de ${fN1(v.anios/v.vida*100)} años">${fN1(v.vida)}%
                <span style="font-weight:400;font-size:.55rem;color:var(--mut)">(${Math.round(v.cob*100)}%)</span></td>`;})()}
         <td style="font-size:.58rem;color:var(--mut)">${g.conContrato} con contrato</td>
         <td style="text-align:right;color:var(--az1);font-weight:700">${g.fac?mm(g.fac):'—'}</td>
@@ -506,7 +549,7 @@ function _biRenderTabla(){
       <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--gn)">${_biVal(c,'mmq_reas')||'—'}</td>
       ${(()=>{const v=_biVida([c]);return v.vida==null
         ? '<td style="text-align:right;color:var(--mut)">—</td>'
-        : `<td style="text-align:right;font-family:'Roboto Mono',monospace;color:${_biColVida(v.vida)}">${fN1(v.vida)} a</td>`;})()}
+        : `<td style="text-align:right;font-family:'Roboto Mono',monospace;color:${_biColVida(v.vida)}" title="${fN1(v.anios)} años de antigüedad media">${fN1(v.vida)}%</td>`;})()}
       <td>${_biEstadoBadge(c.estado)}</td>
       <td style="text-align:right;color:var(--az1);font-weight:700">${fac2026}</td>
       <td style="text-align:right;color:var(--teal)">${facContr}</td>
@@ -579,7 +622,7 @@ function _biRenderTabla(){
       <td style="${st}">${inc}</td><td style="${st}">${endo}</td>
       <td style="${st}">${mob}</td><td style="${st}">${mmq}</td>
       ${(()=>{const v=_biVida(list);return v.vida==null?'<td></td>'
-        :`<td style="${st};font-weight:700;color:#fff">${fN1(v.vida)} a
+        :`<td style="${st};font-weight:700;color:#fff">${fN1(v.vida)}%
           <span style="font-weight:400;font-size:.55rem;opacity:.7">(${Math.round(v.cob*100)}%)</span></td>`;})()}
       <td></td>
       <td style="${st};font-weight:700;color:#FFC000">${mm(facTotal)}</td>
@@ -604,7 +647,7 @@ let _biMxChart = null, _biMxRegion = 'todas';
 window._biMxReg = function (v) { _biMxRegion = v; _biRenderMatriz(); };
 window._biMxReset = function () { if (_biMxChart && _biMxChart.resetZoom) _biMxChart.resetZoom(); };
 
-// Datos de la matriz: un punto por cliente con vida media conocida.
+// Datos de la matriz: un punto por cliente con desgaste conocido.
 function _biMxDatos() {
   const list = _biClientesFiltrados().filter(c =>
     _biMxRegion === 'todas' || (c.region || 'Sin región') === _biMxRegion);
@@ -615,11 +658,14 @@ function _biMxDatos() {
     const p = _biLookupPanel(c.nombre);
     const d = _biLookupContrato(c.nombre);
     const t = _biPot3(c, p, d);
-    if (!t.st) return;                 // sin potencial ST no hay nada que prospectar
+    // Sólo el potencial ST anual de mantenimiento de la base instalada: las
+    // garantías del pipeline son venta futura y no mantenimiento de lo que el
+    // cliente ya tiene. Quien tiene contrato vale cero y queda fuera.
+    if (!t.mant) return;               // sin potencial de mantenimiento no hay nada que prospectar
     if (v.vida == null) { sinVida++; return; }
     pts.push({
       nombre: c.nombre, region: c.region || 'Sin región',
-      x: +v.vida.toFixed(2), y: t.st, st: t.st, mant: t.mant, gar: t.gar,
+      x: +v.vida.toFixed(2), anios: v.anios, y: t.mant, st: t.mant, mant: t.mant, gar: t.gar,
       eq: t.eq, total: t.total, equipos: _biVal(c, 'total'), cob: v.cob,
       contrato: (d && d.n > 0) || (p && p.tiene_contrato),
       // La base instalada abierta por línea viaja con el punto: el gráfico no
@@ -680,10 +726,19 @@ function _biRenderMatriz() {
   const lbl = document.getElementById('bi-mx-lbl');
   if (lbl) {
     lbl.textContent = pts.length + ' clientes en la matriz' +
-      (sinVida ? ' · ' + sinVida + ' sin fecha de instalación quedan fuera' : '');
+      (sinVida ? ' · ' + sinVida + ' sin fecha de instalación o sin vida útil de referencia quedan fuera' : '');
+  }
+  const leg = document.getElementById('bi-mx-leg');
+  if (leg) {
+    const cuenta = _BI_TRAMOS.map(t => pts.filter(p => _biTramo(p.x) === t).length);
+    leg.innerHTML = _BI_TRAMOS.map((t, i) =>
+      '<span style="display:inline-flex;align-items:center;gap:.28rem;font-size:.57rem;margin-right:.9rem">' +
+      '<span style="width:10px;height:10px;border-radius:50%;background:' + _biRgba(t.hex, .6) +
+      ';border:2px solid #fff;box-shadow:0 0 0 1px ' + t.hex + '55"></span>' +
+      _biEsc(t.lbl) + ' <strong>' + cuenta[i] + '</strong></span>').join('');
   }
   if (_biMxChart) { _biMxChart.destroy(); _biMxChart = null; }
-  if (!pts.length) return;
+  if (!pts.length) { _biRenderCurva(); return; }
 
   const maxST = Math.max.apply(null, pts.map(p => p.st));
   // Radio por raíz del monto: el área del punto queda proporcional al valor, y
@@ -696,10 +751,13 @@ function _biRenderMatriz() {
       datasets: [{
         label: 'Clientes',
         data: pts,
-        backgroundColor: 'rgba(0,45,115,.55)',
+        // El color dice en qué tramo de vida útil está el cliente, con la misma
+        // escala de la tabla: el eje ya lo ubica, pero en un gráfico con
+        // seiscientos puntos el color es lo que se lee primero.
+        backgroundColor: pts.map(p => _biRgba(_biTramo(p.x).hex, .6)),
+        hoverBackgroundColor: pts.map(p => _biRgba(_biTramo(p.x).hex, .9)),
         borderColor: '#fff',          // anillo del color de la superficie
         borderWidth: 2,
-        hoverBackgroundColor: 'rgba(0,45,115,.8)',
       }],
     },
     options: {
@@ -737,11 +795,10 @@ function _biRenderMatriz() {
               const p = c.raw;
               return [
                 p.region + (p.contrato ? ' · con contrato' : ''),
-                'Vida media: ' + fN1(p.x) + ' años  (' + Math.round(p.cob * 100) + '% con fecha)',
+                'Vida útil consumida: ' + fN1(p.x) + '%  (' + Math.round(p.cob * 100) + '% del parque medible)',
+                '   ' + fN1(p.anios) + ' años de antigüedad media',
                 'Equipos: ' + p.equipos.toLocaleString('es-CL'),
-                'Potencial ST: ' + mm(p.st),
-                '   mantenimiento ' + mm(p.mant) + ' · garantías ' + mm(p.gar),
-                'Pipeline equipos: ' + mm(p.eq),
+                'Potencial ST anual (mantenimiento BI): ' + mm(p.mant),
               ];
             },
           },
@@ -749,13 +806,14 @@ function _biRenderMatriz() {
       },
       scales: {
         x: {
-          title: { display: true, text: 'Vida media de la base instalada (años)',
+          title: { display: true, text: '% de vida útil consumida por la base instalada',
                    font: { size: 9 }, color: '#6B7BA8' },
-          grid: { color: '#E2E6F0' }, ticks: { font: { size: 9 } },
+          grid: { color: '#E2E6F0' },
+          ticks: { font: { size: 9 }, callback: v => v + '%' },
           beginAtZero: true,
         },
         y: {
-          title: { display: true, text: 'Potencial ST (MM$)', font: { size: 9 }, color: '#6B7BA8' },
+          title: { display: true, text: 'Potencial ST anual · mantenimiento BI (MM$)', font: { size: 9 }, color: '#6B7BA8' },
           grid: { color: '#E2E6F0' },
           ticks: { font: { size: 9 }, callback: v => Math.round(v / 1e6) },
           beginAtZero: true,
@@ -769,7 +827,304 @@ function _biRenderMatriz() {
   });
   // La mano abierta desde el inicio: sin ella nadie descubre que se arrastra.
   box.style.cursor = 'grab';
+  // La curva de concentración mira los mismos clientes y la misma región.
+  _biRenderCurva();
 }
+
+// ── CURVA DE CONCENTRACIÓN DEL POTENCIAL ST ──────────────────────
+// Los clientes ordenados de mayor a menor potencial ST anual de mantenimiento BI
+// y acumulados: cada punto
+// es un cliente, el eje horizontal cuántos clientes van y el vertical el
+// potencial en pesos que se lleva sumando hasta él. Como el primero es el de mayor
+// potencial, la curva sube empinada y se va aplanando: la pendiente responde
+// cuántos clientes foco hacen falta, porque donde se aplana sumar uno más ya
+// casi no mueve el potencial.
+// No depende de la vida útil, así que entran también los clientes que la matriz
+// deja fuera por no tener fecha de instalación.
+let _biCvChart = null;
+let _biCvRegion = 'todas';     // región propia del gráfico, independiente de la matriz
+let _biCvSel = null;           // nombre del cliente elegido
+const _BI_CV_CORTES = [0.5, 0.8];
+
+window._biCvReg = function (v) { _biCvRegion = v; _biRenderCurva(); };
+window._biCvCli = function (v) { _biCvSel = v || null; _biRenderCurva(); };
+
+function _biCurvaDatos() {
+  const list = _biClientesFiltrados().filter(c =>
+    _biCvRegion === 'todas' || (c.region || 'Sin región') === _biCvRegion);
+  const arr = [];
+  list.forEach(c => {
+    const p = _biLookupPanel(c.nombre), d = _biLookupContrato(c.nombre);
+    const t = _biPot3(c, p, d);
+    // Entran TODOS los clientes de la tabla Detalle por Cliente, también los de
+    // potencial cero, para que el número de clientes calce con esa tabla y con
+    // el resumen por región. Los de cero quedan al final de la curva, donde se
+    // ve que ya no suman: los que tienen contrato vigente y los que sólo tienen
+    // equipos sin tarifa (Incardia, Mobiliario, MMQ/REAS, Otros).
+    const contrato = (d && d.n > 0) || !!(p && p.tiene_contrato);
+    arr.push({ nombre: c.nombre, region: c.region || 'Sin región',
+               st: t.mant, mant: t.mant, gar: t.gar, eq: t.eq, c: c, p: p, contrato: contrato });
+  });
+  // Primero el de mayor potencial: es el orden en que conviene sumarlos. Entre
+  // los de igual potencial —en la práctica, los de cero— manda el tamaño del parque.
+  arr.sort((a, b) => b.st - a.st || _biVal(b.c, 'total') - _biVal(a.c, 'total'));
+  const total = arr.reduce((a, p) => a + p.st, 0);
+  let acum = 0;
+  const pts = arr.map((p, i) => {
+    acum += p.st;
+    const pct = total ? acum / total * 100 : 0;
+    return Object.assign(p, { x: i + 1, y: acum, acum: acum, pct: pct });
+  });
+  // Cuántos clientes hacen falta para llegar a cada corte del potencial.
+  const cortes = _BI_CV_CORTES.map(q => {
+    const k = total > 0 ? pts.findIndex(p => p.acum >= total * q - 1e-6) : -1;
+    return { q: q, i: k, p: k >= 0 ? pts[k] : null };
+  });
+  const conPot = pts.filter(p => p.st > 0).length;
+  const sinPot = pts.filter(p => !(p.st > 0));
+  const nContr = sinPot.filter(p => p.contrato).length;
+  return { pts: pts, total: total, cortes: cortes, conPot: conPot,
+           nContr: nContr, nSinTar: sinPot.length - nContr };
+}
+
+// Guías de cada corte: una línea desde el eje vertical hasta el punto y otra
+// hasta el eje horizontal, con cuántos clientes y cuánta plata lo alcanzan.
+const _biCvGuias = {
+  id: 'biCvGuias',
+  afterDatasetsDraw(ch, args, opt) {
+    const cortes = (opt && opt.cortes) || [];
+    const { ctx, chartArea: a, scales } = ch;
+    ctx.save();
+    cortes.forEach((c, j) => {
+      if (!c.p) return;
+      const px = scales.x.getPixelForValue(c.p.x), py = scales.y.getPixelForValue(c.p.y);
+      if (px < a.left || px > a.right || py < a.top || py > a.bottom) return;
+      const col = j ? '#D46000' : '#002D73';
+      ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(a.left, py); ctx.lineTo(px, py); ctx.lineTo(px, a.bottom); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.font = '600 10px Roboto, sans-serif';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      const txt = c.p.x + ' clientes · ' + mm(c.p.acum) + ' (' + Math.round(c.q * 100) + '% del potencial)';
+      const tw = ctx.measureText(txt).width;
+      ctx.fillText(txt, Math.min(px + 7, a.right - tw - 2), py + 6);
+    });
+    ctx.restore();
+  },
+};
+
+// ── Ficha del cliente elegido ────────────────────────────────────
+// Lo que un ejecutivo necesita para decidir si lo visita y con qué argumento:
+// por qué está en el foco, de dónde sale su potencial, en qué estado está su
+// parque y cómo va la relación comercial.
+function _biCvFicha(pt, total, n, cortes) {
+  const box = document.getElementById('bi-cv-det');
+  if (!box) return;
+  if (!pt) {
+    box.innerHTML = '<div style="font-size:.6rem;color:var(--mut);padding:.6rem .2rem">' +
+      'Haz clic en un punto o elige un cliente arriba para ver su ficha.</div>';
+    return;
+  }
+  const c = pt.c, p = pt.p || {};
+  const v = _biVida([c]);
+  const foco = cortes[cortes.length - 1];
+  const esFoco = foco.i >= 0 && pt.x - 1 <= foco.i && pt.st > 0;
+  const UF = { esterilizacion: 50, endoscopia: 22, dental: 15 };
+  const LBL = { esterilizacion: 'Esterilización', endoscopia: 'Endoscopía', dental: 'Dental' };
+  const fila = (k, val, st) => '<div style="display:flex;justify-content:space-between;gap:.6rem;' +
+    'padding:.14rem 0;border-bottom:1px dashed var(--brd);font-size:.62rem">' +
+    '<span style="color:var(--mut)">' + k + '</span><span style="font-weight:600;text-align:right;' +
+    (st || '') + '">' + val + '</span></div>';
+  const bloque = (tit, cuerpo) => '<div style="background:var(--bg2);border:1px solid var(--brd);' +
+    'border-radius:5px;padding:.55rem .7rem"><div style="font-size:.55rem;font-weight:700;letter-spacing:.06em;' +
+    'text-transform:uppercase;color:var(--az1);margin-bottom:.35rem">' + tit + '</div>' + cuerpo + '</div>';
+
+  // De dónde sale el potencial: equipos cobrables por su tarifa.
+  const lineas = Object.keys(_BI_TARIFA).map(k => {
+    const ne = _biVal(c, k);
+    if (!ne) return '';
+    return fila(LBL[k] + ' · ' + ne.toLocaleString('es-CL') + ' eq × ' + UF[k] + ' UF',
+                mm(ne * _BI_TARIFA[k]));
+  }).join('') || fila('Sin equipos cobrables', '—');
+  const noCob = ['incardia', 'mobiliario', 'mmq_reas', 'otros']
+    .reduce((a, k) => a + _biVal(c, k), 0);
+
+  const estRel = p.estado_relacion || 'Sin historial';
+  const colRel = /perdido/i.test(estRel) ? 'color:var(--rd)'
+               : /nuevo|renovado/i.test(estRel) ? 'color:var(--gn)' : '';
+
+  box.innerHTML =
+    '<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem .9rem;margin:.2rem 0 .55rem">' +
+      '<span style="font-size:.8rem;font-weight:800;color:var(--az1)">#' + pt.x + ' · ' + _biEsc(pt.nombre) + '</span>' +
+      '<span style="font-size:.6rem;color:var(--mut)">' + _biEsc(pt.region) +
+        (p.coord && p.coord !== 'Sin contrato' ? ' · coordinador ' + _biEsc(p.coord) : '') + '</span>' +
+      '<span style="font-size:.57rem;font-weight:700;padding:.1rem .45rem;border-radius:3px;' +
+        (esFoco ? 'background:#002D73;color:#fff' : 'background:var(--gy);color:var(--mut)') + '">' +
+        (esFoco ? 'CLIENTE FOCO · dentro del 80%'
+         : !(pt.st > 0) ? (pt.contrato ? 'SIN POTENCIAL · contrato vigente' : 'SIN POTENCIAL · sin equipos con tarifa')
+         : 'Fuera del 80% del potencial') + '</span>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.6rem">' +
+      bloque('Por qué es foco',
+        fila('Potencial ST anual', mm(pt.mant), 'color:var(--az1);font-size:.72rem') +
+        fila('Aporte al total', fN1(pt.mant / total * 100) + '%') +
+        fila('Posición', '#' + pt.x + ' de ' + n.toLocaleString('es-CL')) +
+        fila('Acumulado hasta él', mm(pt.acum) + ' (' + fN1(pt.pct) + '%)')) +
+      bloque('De dónde sale el potencial',
+        lineas +
+        (noCob ? fila('Otros equipos (sin tarifa)', noCob.toLocaleString('es-CL') + ' eq', 'color:var(--mut)') : '')) +
+      bloque('Estado del parque',
+        fila('Base instalada', _biVal(c, 'total').toLocaleString('es-CL') + ' equipos') +
+        fila('% vida útil consumida', v.vida == null ? 'sin dato' : fN1(v.vida) + '%',
+             'color:' + _biColVida(v.vida)) +
+        fila('Antigüedad media', v.anios == null ? '—' : fN1(v.anios) + ' años') +
+        fila('Parque medible', Math.round(v.cob * 100) + '% de los equipos')) +
+      bloque('Relación comercial',
+        fila('Contrato', pt.contrato ? 'Contrato o garantía vigente' : 'Sin contrato vigente',
+             pt.contrato ? 'color:var(--gn)' : 'color:var(--or)') +
+        fila('Relación', _biEsc(estRel), colRel) +
+        fila('Facturación 2026 a la fecha', p.real_ytd_fac ? mm(p.real_ytd_fac) : '—') +
+        fila('Facturación 2025', p.real_anual_2025 ? mm(p.real_anual_2025) : '—') +
+        (p.fin_fmt ? fila('Último contrato terminó', _biEsc(p.fin_fmt)) : '') +
+        ((pt.eq || pt.gar) ? fila('Pipeline en curso', mm(pt.eq) + ' eq · ' + mm(pt.gar) + ' gar.') : '')) +
+    '</div>';
+}
+
+function _biRenderCurva() {
+  const cv = document.getElementById('cBiCurva');
+  if (!cv || typeof Chart === 'undefined') return;
+  if (_biCvChart) { _biCvChart.destroy(); _biCvChart = null; }
+
+  // Región: sólo las que tienen clientes con potencial, de mayor a menor.
+  const selR = document.getElementById('bi-cv-reg');
+  if (selR) {
+    const potR = {}, nR = {};
+    _biClientesFiltrados().forEach(c => {
+      const t = _biPot3(c, _biLookupPanel(c.nombre), _biLookupContrato(c.nombre));
+      const r = c.region || 'Sin región';
+      potR[r] = (potR[r] || 0) + t.mant;
+      nR[r] = (nR[r] || 0) + 1;
+    });
+    const regs = Object.keys(potR).sort((a, b) => potR[b] - potR[a] || nR[b] - nR[a]);
+    if (_biCvRegion !== 'todas' && regs.indexOf(_biCvRegion) < 0) _biCvRegion = 'todas';
+    selR.innerHTML = '<option value="todas">Todas las regiones</option>' + regs.map(r =>
+      '<option value="' + _biEsc(r) + '"' + (r === _biCvRegion ? ' selected' : '') + '>' +
+      _biEsc(r) + ' · ' + nR[r] + ' clientes · ' + mm(potR[r]) + '</option>').join('');
+  }
+
+  const { pts, total, cortes, conPot, nContr, nSinTar } = _biCurvaDatos();
+
+  // Cliente: la lista en el mismo orden del gráfico, para encontrar uno sin
+  // tener que atinarle al punto entre cientos.
+  if (_biCvSel && !pts.some(p => p.nombre === _biCvSel)) _biCvSel = null;
+  const selC = document.getElementById('bi-cv-cli');
+  if (selC) {
+    selC.innerHTML = '<option value="">Elegir cliente…</option>' + pts.map(p =>
+      '<option value="' + _biEsc(p.nombre) + '"' + (p.nombre === _biCvSel ? ' selected' : '') + '>#' +
+      p.x + ' · ' + _biEsc(p.nombre) + ' · ' + mm(p.mant) + '</option>').join('');
+  }
+
+  const res = document.getElementById('bi-cv-res');
+  if (res) {
+    const nf = v => v.toLocaleString('es-CL');
+    res.innerHTML = !pts.length ? 'Sin clientes para este filtro.' :
+      '<strong>' + nf(pts.length) + '</strong> clientes —los mismos de la tabla Detalle por Cliente— · ' +
+      '<strong>' + nf(conPot) + '</strong> con potencial ST anual por <strong>' + mm(total) + '</strong>' +
+      (pts.length - conPot ? ' · <span style="color:var(--mut)">' + nf(pts.length - conPot) +
+        ' sin potencial: ' + nf(nContr) + ' con contrato vigente y ' + nf(nSinTar) +
+        ' sin equipos de Esterilización, Endoscopía o Dental</span>' : '') +
+      (_biCvRegion === 'todas' ? '' : ' · ' + _biEsc(_biCvRegion)) +
+      cortes.map((c, j) => !c.p ? '' :
+        ' · <span style="color:' + (j ? '#D46000' : '#002D73') + '">los <strong>' + c.p.x +
+        '</strong> primeros concentran el <strong>' + Math.round(c.q * 100) + '%</strong> (' +
+        mm(c.p.acum) + ')</span>').join('');
+  }
+  if (!pts.length || !(total > 0)) { _biCvFicha(null); return; }
+
+  // Los clientes que suman hasta el 80% van en azul fuerte: son el foco. El
+  // resto, más claro, es la cola. El elegido se marca en naranja y más grande.
+  const foco = cortes[cortes.length - 1].i;
+  const rBase = pts.length > 400 ? 2.5 : 3.5;
+  const colPt = (p, i) => p.nombre === _biCvSel ? '#D46000'
+    : i <= foco ? '#002D73' : p.st > 0 ? 'rgba(107,123,168,.55)' : 'rgba(184,193,216,.45)';
+  _biCvChart = new Chart(cv.getContext('2d'), {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: 'Clientes',
+        data: pts,
+        showLine: true,
+        borderColor: 'rgba(0,45,115,.35)',
+        borderWidth: 1.5,
+        pointRadius: pts.map(p => p.nombre === _biCvSel ? 8 : rBase),
+        pointHoverRadius: 7,
+        pointBackgroundColor: pts.map(colPt),
+        pointBorderColor: pts.map((p, i) => p.nombre === _biCvSel ? '#fff' : colPt(p, i)),
+        pointBorderWidth: pts.map(p => p.nombre === _biCvSel ? 2 : 1),
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        biCvGuias: { cortes: cortes },
+        zoom: {
+          limits: { x: { min: 'original', max: 'original' }, y: { min: 'original', max: 'original' } },
+          pan: {
+            enabled: true, mode: 'xy', threshold: 4,
+            onPanStart:    ({ chart }) => { chart.canvas.style.cursor = 'grabbing'; },
+            onPanComplete: ({ chart }) => { chart.canvas.style.cursor = 'grab'; },
+          },
+          zoom: { wheel: { enabled: true, speed: 0.08 }, pinch: { enabled: true }, mode: 'xy' },
+        },
+        tooltip: {
+          callbacks: {
+            title: c => '#' + c[0].raw.x + ' · ' + c[0].raw.nombre,
+            label: c => {
+              const p = c.raw, v = _biVida([p.c]);
+              return [
+                p.region + ' · ' + _biVal(p.c, 'total').toLocaleString('es-CL') + ' equipos',
+                p.st > 0 ? 'Potencial ST anual: ' + mm(p.mant)
+                         : 'Sin potencial: ' + (p.contrato ? 'contrato vigente' : 'sin equipos con tarifa'),
+                'Acumulado: ' + mm(p.acum) + '  (' + fN1(p.pct) + '% del total)',
+                '% vida útil: ' + (v.vida == null ? 'sin dato' : fN1(v.vida) + '%'),
+                'Clic para ver la ficha',
+              ];
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'N° de clientes foco (de mayor a menor potencial)', font: { size: 9 }, color: '#6B7BA8' },
+          grid: { color: '#E2E6F0' }, beginAtZero: true, max: pts.length,
+          ticks: { font: { size: 9 }, precision: 0 },
+        },
+        y: {
+          title: { display: true, text: 'Potencial ST anual acumulado · mantenimiento BI (MM$)', font: { size: 9 }, color: '#6B7BA8' },
+          grid: { color: '#E2E6F0' }, beginAtZero: true, max: total,
+          ticks: { font: { size: 9 }, callback: v => Math.round(v / 1e6).toLocaleString('es-CL') },
+        },
+      },
+    },
+    plugins: [_biCvGuias],
+  });
+  cv.style.cursor = 'grab';
+
+  // Clic en un punto: se elige el cliente y se abre su ficha.
+  cv.onclick = ev => {
+    if (!_biCvChart) return;
+    const els = _biCvChart.getElementsAtEventForMode(ev, 'nearest', { intersect: true }, true);
+    if (!els.length) return;
+    _biCvSel = pts[els[0].index].nombre;
+    _biRenderCurva();
+  };
+
+  _biCvFicha(pts.find(p => p.nombre === _biCvSel) || null, total, pts.length, cortes);
+}
+window._biCvReset = function () { if (_biCvChart && _biCvChart.resetZoom) _biCvChart.resetZoom(); };
 
 // El exportable es un Excel con una hoja por región, cada una con sus diez
 // clientes a visitar y una columna en blanco para escribir el plan de acción:
@@ -808,7 +1163,7 @@ window._biMxExport = function () {
     // Los montos llevan separador de miles con un decimal; la vida, uno solo.
     // El formato se aplica a la celda, no al texto, para que Excel los siga
     // tratando como números y se puedan ordenar y sumar.
-    const FMT_MM = '#,##0.0', FMT_N = '#,##0', FMT_V = '0.0';
+    const FMT_MM = '#,##0.0', FMT_N = '#,##0', FMT_V = '0.0"%"';
     const BORDE = { style: 'thin', color: { rgb: 'D4D5E8' } };
     const bordes = { top: BORDE, bottom: BORDE, left: BORDE, right: BORDE };
     const cab = (bg, ink) => ({
@@ -843,15 +1198,15 @@ window._biMxExport = function () {
       // Cabecera en dos pisos: arriba la línea, abajo sus equipos y su vida.
       // Sin ese techo no se ve a qué línea pertenece cada par de columnas.
       const g = ['#', 'Cliente'], h = ['', ''];
-      lins.forEach(l => { g.push(l.label, ''); h.push('Equipos', 'Vida (años)'); });
-      g.push('Base Instalada Total', ''); h.push('Equipos', 'Vida Media (años)');
+      lins.forEach(l => { g.push(l.label, ''); h.push('Equipos', '% Vida Útil'); });
+      g.push('Base Instalada Total', ''); h.push('Equipos', '% Vida Útil');
       g.push('Pot. Mantenimiento MM$', 'Plan de Acción'); h.push('', '');
 
       const vid = d => (d && d.nf) ? Math.round(d.suma / d.nf * 10) / 10 : '';
       const filas = top.map((p, i) => {
         const f = [i + 1, p.nombre];
         lins.forEach(l => { f.push(p.lin[l.prop] || '', vid(p.vidaLin[l.prop])); });
-        f.push(p.equipos, Math.round(p.x * 10) / 10, M(p.mant), '');
+        f.push(p.equipos, Math.round(p.x * 10) / 10, M(p.mant), '');   // x = % de vida útil
         return f;                              // Plan de Acción: se llena a mano
       });
 
@@ -1015,12 +1370,23 @@ function _biRegColor(r){
 function _biRegData(){
   const pr = ((window.APP_DATA||{}).base_instalada||{}).por_region || {};
   const usaSi = _biFiltPotencial === 'si';
+  // Los clientes se cuentan sobre la misma lista y con la misma región que la
+  // tabla Detalle por Cliente —cada cliente en la región donde tiene la mayoría
+  // de sus equipos—. El conteo del extractor contaba un cliente en cada región
+  // donde tuviera algún equipo, así que el que tiene equipos repartidos sumaba
+  // dos veces y el total no calzaba con el detalle.
+  const nCli = {};
+  (_biAllClientes||[]).forEach(c=>{
+    if(_biFiltPotencial !== 'todos' && !(_biVal(c,'total') > 0)) return;
+    const r = c.region || 'Sin región';
+    nCli[r] = (nCli[r] || 0) + 1;
+  });
   const out = [];
   Object.entries(pr).forEach(([r,d])=>{
     const tot = usaSi ? (d.total_si||0) : (d.total||0);
     if(tot <= 0) return;
     const ln = usaSi ? (d.lineas_si||{}) : (d.lineas||{});
-    out.push({region:r, total:tot, n_clientes:d.n_clientes||0,
+    out.push({region:r, total:tot, n_clientes:nCli[r]||0,
               lineas:Object.entries(ln).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1])});
   });
   // "Sin región" siempre al final: no es una región, es la falta de dato.
@@ -1575,7 +1941,7 @@ function initBaseInstalada(){
         <th onclick="biSortCol(6,this)" class="num" style="color:#28D2C3">Endosc.</th>
         <th onclick="biSortCol(7,this)" class="num" style="color:#C0A0F0">Mobil.</th>
         <th onclick="biSortCol(8,this)" class="num" style="color:#80D080">MMQ/REAS</th>
-        <th class="num" title="Años promedio desde la fecha de instalación de los equipos.&#10;Sólo se puede calcular sobre los equipos que traen fecha en el Excel: en la fila de región se muestra entre paréntesis qué proporción de su base instalada tiene ese dato.">Vida Media BI</th>
+        <th class="num" title="Cuánto de su vida útil lleva consumido el parque: para cada equipo, los años desde su instalación divididos por la vida útil de referencia de su tipo, y el promedio de esos porcentajes.&#10;Sobre 100% el equipo ya agotó la vida útil esperada.&#10;Sólo entran los equipos que traen fecha de instalación y cuyo tipo tiene vida útil definida: entre paréntesis, qué proporción del parque de la región cumple ambas cosas.">% Vida Útil</th>
         <th onclick="biSortCol(9,this)">Estado BI</th>
         <th onclick="biSortCol(10,this)" class="num" style="color:#FFC000" title="Facturación del año del cliente, misma base que «Ingresos Totales» de la portada.&#10;Sólo cubre a los clientes de la base instalada: los que facturan sin tener equipos registrados aquí no aparecen.">Fac. 2026</th>
         <th class="num">F. Contr.</th>
@@ -1592,7 +1958,7 @@ function initBaseInstalada(){
 
   <div class="card" style="margin-top:.9rem" id="bi-mx-card">
     <div class="ch" style="flex-wrap:wrap;gap:.5rem">
-      <span class="ct">Matriz de Prospección · Vida de la Base vs Potencial ST</span>
+      <span class="ct">Matriz de Prospección · % Vida Útil vs Potencial ST Anual</span>
       <span style="font-size:.56rem;color:var(--mut)" id="bi-mx-lbl">&mdash;</span>
       <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
                    margin-left:.6rem">Región</span>
@@ -1602,27 +1968,68 @@ function initBaseInstalada(){
         style="font-size:.57rem;padding:.2rem .55rem;border-radius:3px;cursor:pointer;
                border:1px solid var(--brd);background:var(--bg2);color:var(--mut)">Restablecer zoom</button>
       <button id="bi-mx-pdf" onclick="window._biMxExport()"
-        title="Un Excel con una hoja por región: sus diez clientes a visitar, la base instalada y su vida media abiertas por línea, el potencial de mantenimiento y una columna para el plan de acción"
+        title="Un Excel con una hoja por región: sus diez clientes a visitar, la base instalada y su % de vida útil consumida abiertos por línea, el potencial de mantenimiento y una columna para el plan de acción"
         style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#0F7B3F;color:#fff;border:none;
                border-radius:4px;cursor:pointer;white-space:nowrap">Exportar Excel</button>
     </div>
     <div class="cb">
       <div id="bi-mx-box" style="position:relative;height:420px"><canvas id="cBiMatriz"></canvas></div>
+      <div id="bi-mx-leg" style="padding:.5rem 0 0;border-top:1px solid var(--brd);margin-top:.5rem"></div>
       <p style="font-size:.57rem;color:var(--mut);margin:.6rem 0 0;line-height:1.55">
-        Cada punto es un cliente. El eje horizontal son los años promedio de su base instalada y el vertical
-        el potencial de servicio técnico —mantenimiento de la base más las garantías del pipeline—; el tamaño
-        del punto repite ese potencial. Las líneas marcan la mediana de cada eje: el
-        <strong>cuadrante superior derecho</strong> reúne a los clientes con la base más antigua y más
+        Cada punto es un cliente. El eje horizontal es <strong>cuánto de su vida útil lleva consumido</strong>
+        el parque y el vertical el <strong>potencial ST anual de mantenimiento de la base instalada</strong>
+        —equipos de Esterilización, Endoscopía y Dental por su tarifa anual, sólo en clientes sin contrato—;
+        el tamaño del punto repite ese potencial. No incluye las garantías ni los equipos del pipeline, que son
+        venta futura. Las líneas marcan la mediana de cada eje: el
+        <strong>cuadrante superior derecho</strong> reúne a los clientes con el parque más desgastado y más
         potencial, que son los que conviene visitar primero.
+        El desgaste se mide en proporción y no en años: una turbina dental de 2 años de vida útil con 1,8 encima
+        está al 90% y toca renovarla, mientras que un autoclave de 15 años con esos mismos 1,8 va en el 12%.
+        Sobre 100% el equipo ya agotó la vida útil esperada.
         Usa la <strong>rueda del mouse para acercar</strong> y arrastra para moverte: cerca del origen los
         puntos se apiñan y el zoom es la forma de separarlos y elegir uno.
-        Sólo entran los clientes cuyos equipos traen
-        fecha de instalación; sin ella no hay eje horizontal donde ubicarlos.
+        Sólo entran los clientes con equipos que traigan fecha de instalación y cuyo tipo tenga vida útil
+        definida; sin las dos cosas no hay eje horizontal donde ubicarlos.
         El <strong>exportable</strong> es un Excel con una hoja por región: sus diez clientes de mayor
-        <strong>potencial de mantenimiento</strong>, con la base instalada y su vida media abiertas
-        línea por línea, y una columna en blanco para el plan de acción. Sólo mira la base instalada de
+        <strong>potencial de mantenimiento</strong>, con la base instalada y su % de vida útil consumida
+        abiertos línea por línea, y una columna en blanco para el plan de acción. Sólo mira la base instalada de
         hoy —el pipeline de equipos y las garantías que traería son venta futura, no base instalada—, y
         los clientes sin región no entran porque no hay a quién asignárselos.</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:.9rem" id="bi-cv-card">
+    <div class="ch" style="flex-wrap:wrap;gap:.5rem">
+      <span class="ct">Concentración del Potencial ST Anual · Clientes Foco</span>
+      <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
+                   margin-left:.4rem">Región</span>
+      <select id="bi-cv-reg" onchange="window._biCvReg(this.value)" style="font-size:.6rem;padding:.2rem .4rem;border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt)"></select>
+      <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
+                   margin-left:.4rem">Cliente</span>
+      <select id="bi-cv-cli" onchange="window._biCvCli(this.value)" style="font-size:.6rem;padding:.2rem .4rem;border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt);max-width:260px"></select>
+      <button onclick="window._biCvReset()" title="Volver a la vista completa"
+        style="font-size:.57rem;padding:.2rem .55rem;border-radius:3px;cursor:pointer;
+               border:1px solid var(--brd);background:var(--bg2);color:var(--mut)">Restablecer zoom</button>
+      <button id="bi-cv-pdf" onclick="exportarPanel({ids:['bi-cv-card'],titulo:'Base Instalada · Concentración del Potencial ST',archivo:'BI_concentracion_potencial',btn:'bi-cv-pdf'})"
+        style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;
+               border-radius:4px;cursor:pointer;white-space:nowrap">Exportar</button>
+    </div>
+    <div class="cb">
+      <div id="bi-cv-res" style="font-size:.62rem;color:var(--txt);margin-bottom:.5rem;line-height:1.6"></div>
+      <div style="position:relative;height:400px"><canvas id="cBiCurva"></canvas></div>
+      <div id="bi-cv-det" style="margin-top:.7rem;padding-top:.5rem;border-top:1px solid var(--brd)"></div>
+      <p style="font-size:.57rem;color:var(--mut);margin:.6rem 0 0;line-height:1.55">
+        Cada punto es un cliente. Se ordenan de <strong>mayor a menor potencial ST anual</strong> —mantenimiento
+        de la base instalada, el mismo de la matriz; sin garantías ni equipos del pipeline— y se van sumando: el eje horizontal es cuántos
+        clientes van y el vertical el potencial en MM$ que se lleva acumulado hasta ese cliente. Como el
+        primero es el de mayor potencial, la curva <strong>sube empinada</strong> —cada cliente foco agrega mucho— y
+        <strong>se va aplanando</strong>: donde se aplana, sumar un cliente más casi no mueve el potencial. Las guías marcan cuántos clientes hacen falta para
+        llegar al 50% y al 80% del potencial, y los puntos en azul fuerte son los que componen ese 80%.
+        La región se elige arriba y es independiente de la matriz. <strong>Haz clic en un punto</strong> o elige
+        un cliente en la lista para ver su ficha: por qué está en el foco, de dónde sale su potencial, el estado
+        de su parque y cómo va la relación comercial.
+        Como no depende de la vida útil, entran también los clientes que la matriz deja fuera por falta de fecha de
+        instalación. Rueda del mouse para acercar la cabeza de la curva.</p>
     </div>
   </div>
 

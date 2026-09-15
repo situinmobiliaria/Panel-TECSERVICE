@@ -82,6 +82,7 @@ JS_FILES = [
     "hoja_visitas.js", "hoja_mapa.js", "hoja_matriz.js", "hoja_casos.js", "hoja_alerta.js",
     "hoja_pdf.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js",
     "hoja_prosp_bi.js",
+    "hoja_plan_rm.js",
     "hoja_citas.js", "hoja_cli_rel.js", "hoja_pipeline.js", "hoja_brechas.js",
 ]
 
@@ -2529,6 +2530,653 @@ def _cit_equipo(tt):
     return e.capitalize() if len(e) > 3 else e
 
 
+def read_vida_util():
+    """Vida util de referencia de cada tipo de equipo, en anios.
+
+    Fuente: «Tipos_Equipo_por_Linea_BI.xlsx», columna «Vida Util» de la hoja
+    «Tipos x Linea». Es una tabla mantenida a mano —no sale del sistema— y por
+    eso vive en su propio archivo: se edita sin tocar el libro grande.
+
+    Sirve para medir el desgaste en proporcion y no en anios absolutos. Una
+    turbina dental de 2 anios de vida util con 1,8 anios encima esta al 90% y
+    hay que renovarla; un autoclave de 15 anios con los mismos 1,8 va recien
+    en el 12%. Promediar los anios de los dos no describe a ninguno.
+    """
+    import glob
+    rutas = [os.path.join(ROOT, "Tipos_Equipo_por_Linea_BI.xlsx"),
+             os.path.join(ROOT, "data", "Tipos_Equipo_por_Linea_BI.xlsx")]
+    rutas += sorted(glob.glob(os.path.join(ROOT, "*ipos*inea*.xlsx")))
+    ruta = next((r for r in rutas if os.path.exists(r)), None)
+    if ruta is None:
+        print("  ADVERTENCIA: no se encontro Tipos_Equipo_por_Linea_BI.xlsx;"
+              " el % de vida util no se podra calcular.")
+        return {}
+
+    wb = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
+    ws = next((wb[n] for n in wb.sheetnames
+               if "tipo" in n.lower() and "linea" in n.lower()), None)
+    if ws is None:
+        wb.close()
+        return {}
+
+    filas = list(ws.iter_rows(min_row=1, values_only=True))
+    wb.close()
+    if not filas:
+        return {}
+
+    # Las columnas se ubican por su encabezado: el archivo se edita a mano y
+    # una columna insertada al medio no puede descolocar la lectura.
+    cab = filas[0]
+    i_tipo = i_vida = None
+    for ci, v in enumerate(cab):
+        t = _norm_cli(v)
+        if i_tipo is None and "TIPO DE EQUIPO" in t:
+            i_tipo = ci
+        if i_vida is None and "VIDA UTIL" in t:
+            i_vida = ci
+    if i_tipo is None or i_vida is None:
+        print("  ADVERTENCIA: Tipos_Equipo_por_Linea_BI.xlsx sin columna"
+              " «TIPO DE EQUIPO» o «Vida Util».")
+        return {}
+
+    out = {}
+    for row in filas[1:]:
+        if len(row) <= max(i_tipo, i_vida):
+            continue
+        tipo = safe_str(row[i_tipo]).strip().upper()
+        if not tipo or tipo == "TOTAL GENERAL":
+            continue
+        v = row[i_vida]
+        if not isinstance(v, (int, float)):
+            continue
+        v = float(v)
+        # Una vida util de cero no es un dato: el tipo queda sin referencia y
+        # sus equipos se excluyen del porcentaje, igual que los que no traen
+        # fecha de instalacion.
+        if v > 0:
+            out[tipo] = round(v, 1)
+    print(f"       VIDA UTIL: {len(out)} tipos con referencia"
+          f" ({os.path.basename(ruta)})")
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PLAN RM Y REGIÓN DE VALPARAÍSO
+# ══════════════════════════════════════════════════════════════════════════════
+# Reparte a los clientes con Potencial de ST de las dos regiones en tres grupos:
+#   1. Top 10 de cada región por potencial ST anual (mantenimiento BI) →
+#      los visitan Cristian y Eglys.
+#   2. Del resto, top 15 de cada región por número de camas → nuevos KAM,
+#      con plan de entrada escrito.
+#   3. Todos los demás → nuevos KAM, sin plan escrito.
+# y arma la agenda de los dos KAM para los grupos 2 y 3 desde octubre.
+#
+# Las camas salen del registro de camas por establecimiento (data/Camas cx.xlsx)
+# y la ubicación de la hoja Direcciones, de BASE MAPA y del registro de
+# establecimientos del DEIS (data/establecimientos_DEIS.xlsx).
+
+_PLAN_REGIONES = ["Metropolitana", "Valparaíso"]
+_PLAN_TOP_POT = 10
+_PLAN_TOP_CAMAS = 15
+_PLAN_VISITAS_DIA = 3
+_PLAN_INICIO = date(2026, 10, 1)
+# Feriados hábiles de Chile en la ventana de la agenda. Los que caen en fin de
+# semana (31 oct, 1 nov) no restan días.
+_PLAN_FERIADOS = {date(2026, 10, 12), date(2026, 12, 8), date(2026, 12, 25)}
+_PLAN_HORAS = ["09:30", "12:00", "15:30"]
+_PLAN_TARIFA = {"esterilizacion": 2043239, "endoscopia": 898585, "dental": 612671}
+_PLAN_CENTRO = {"Metropolitana": (-33.4489, -70.6693), "Valparaíso": (-33.0246, -71.5518)}
+# Caja amplia de cada región: una coordenada fuera de ella es un error de dato.
+_PLAN_CAJA = {"Metropolitana": (-34.3, -32.9, -71.8, -69.7),
+              "Valparaíso": (-33.95, -32.0, -72.0, -70.0)}
+
+# Calces revisados a mano entre el nombre del cliente en BASE INSTALADA y el
+# «Nombre Oficial» del registro de camas. Resuelven lo que el calce automático
+# por palabras no puede: razones sociales que no nombran el hospital, nombres
+# antiguos y homónimos de otra comuna. None = el cliente no tiene internación
+# (atención ambulatoria, dental, móvil, administrativa) y va con 0 camas.
+# «estimar» = es un establecimiento con camas pero no figura en el registro 2023.
+_PLAN_CAMAS_ALIAS = {
+    "SOCIEDAD CONCESIONARIA METROPOLITANA DE SALUD S.A.": "Hospital Dr. Félix Bulnes Cerda",
+    "COMPLEJO ASISTENCIAL DR SOTERO DEL RIO": "Complejo Hospitalario Dr. Sótero del Río",
+    "POSTA CENTRAL": "Hospital de Urgencia Asistencia Pública Dr. Alejandro del Río",
+    "ACHS": "Hospital del Trabajador Santiago",
+    "HOSPITAL DE LA FLORIDA": "Hospital Clínico Metropolitano La Florida",
+    "HOSPITAL EL PINO": "Hospital El Pino",
+    "HOSPITAL DE MELIPILLA": "Hospital San José (Melipilla)",
+    "HOSPITAL CLINICO DE LA FUERZA AEREA FACH GRAL DR RAUL YAZIGI JAUREGUI": "Hospital FACH",
+    "INSTITUTO NACIONAL DEL CANCER": "Instituto Nacional del Cáncer Dr. Caupolicán Pardo Correa",
+    "SERVICIO DE SALUD ORIENTE HOSPITAL DEL SALVADOR": "Hospital Del Salvador de Santiago",
+    "FONDO PARA HOSPITALES DE CARABINEROS DE CHILE": "Hospital Carabineros",
+    "CLINICA ALEMANA DE SANTIAGO S A": "Clínica Alemana",
+    "INSTITUTO DE DIAGNOSTICO S.A. / CLINICA INDISA": "Clínica Indisa",
+    "SERVICIOS MEDICOS VESPUCIO LTDA.": "Clínica Vespucio",
+    "HOSPITAL CLINICO IST VINA DEL MAR": "Instituto de Seguridad del Trabajo",
+    "HOSPITAL DE QUINTEROS": "Hospital Adriana Cousiño (Quintero)",
+    "HOSPITAL DE LIMACHE": "Hospital Santo Tomás (Limache)",
+    "HOSPITAL SAN JOSE DE CASA BLANCA": "Hospital San José (Casablanca)",
+    "HOSPITAL SAN JOSE": "estimar",
+    "SERVICIO DE SALUD METROPOLITANO NORTE -HOSPITAL SA": "estimar",
+    "INSTITUTO NACIONAL DEL TORAX": "estimar",
+    "HOSPITAL DEL TORAX": "estimar",
+    "INSTITUTO NACIONAL DE GERIATRIA": "estimar",
+    "HOSPITAL PADRE A. HURTADO": "estimar",
+    "HOSPITAL METROPOLITANO DE SANTIAGO": "estimar",
+    "HOSPITAL PROVINCIAL MARGA MARGA": "estimar",
+    "MUTUAL DE SEGURIDAD SANTIAGO": "estimar",
+    "HOSPITAL DE MAIPU": "estimar",
+    "CLINICA BRADFORD HILL": "estimar",
+    "CLINICA ESTORIL": "estimar",
+    "CLINICA PINARES": "estimar",
+    "CLINICA BICENTENARIO SPA": "estimar",
+    "CLINICA VITALES": "estimar",
+    "CLINICA HOGAR BUENA SALUD S.P.A": "estimar",
+    "CAPREDENA": None,
+    "INSTITUTO DE SALUD PUBLICA": None,
+    "INSTITUTO DE SALUD PUBLICA DE CHILE": None,
+    "REDENTAL LAS CONDES SPA": None,
+    "NORDEN LAS CONDES": None,
+    "CECOSF JUAN PABLO LOS ANDES": None,
+    "CORPORACION DE AYUDA AL NINO QUEMADO": None,
+    "CLINICA MOVIL CENTINELA": None,
+    "CLINICA CENTINELA MOVIL II": None,
+    "UC CHRISTUS SERVICIOS AMBULATORIOS SPA": None,
+    "CLINICA UNIVERSIDAD DE LOS ANDES SAN BERNARDO": None,
+    "CLINICA UNIVERSIDAD DE DESARROLLO": None,
+    "HOSPITAL DE CAMPANA DEL EJERCITO": None,
+    "CLINICA IVI SANTIAGO": None,
+    "CLINICA GINESTETICA": None,
+    "PONTIFICIA UNIVERSIDAD CATOLICA DE CHILE": None,
+}
+
+# Palabras que delatan atención sin internación aunque el nombre diga «clínica».
+_PLAN_AMBUL = ("DENTAL", "ODONTO", "ORTODON", "OFTALMO", "MOVIL", "ESTETIC", "LASER",
+               "HAIR", "IMPLANT", "LABORATORIO", "RADIOLOG", "IMAGEN", "KINE", "VETERINAR",
+               "CESFAM", "CECOSF", "SAPU", "SAR ", "CONSULTORIO", "POLICLINIC", "POSTA DE",
+               "POSTA AULEN", "ESCUELA", "JUNAEB", "MUNICIPAL", "UNIVERSIDAD", "CENTRO MEDICO",
+               "NORDEN", "INTEGRAMEDICA", "MEGASALUD", "REDMEDICAL", "PREVISION", "DIRECCION",
+               "CRS ", "COSAM", "CENTRO DE REFERENCIA")
+
+# Barrios y calles que aparecen en nombres de sucursales y que no son comunas.
+_PLAN_BARRIOS = {"BELLAVISTA": "PROVIDENCIA", "MANUEL MONTT": "PROVIDENCIA", "COSTANERA": "PROVIDENCIA",
+                 "EL GOLF": "LAS CONDES", "LAS SALINAS": "VINA DEL MAR", "RODELILLO": "VALPARAISO",
+                 "RENACA": "VINA DEL MAR", "NEW YORK": "SANTIAGO", "AGUSTINAS": "SANTIAGO"}
+# Isla de Pascua pertenece a la Región de Valparaíso pero no se visita en auto.
+_PLAN_REMOTO = ("HANGA ROA", "ISLA DE PASCUA", "RAPA NUI")
+
+
+def _plan_norm(s):
+    return re.sub(r"[^A-Z0-9]+", " ", _norm_cli(s)).strip()
+
+
+_PLAN_STOP = set("DE DEL LA LAS LOS EL Y E S A SA SPA LTDA LIMITADA SOCIEDAD CIA EIRL".split())
+_PLAN_TIPO = set(("HOSPITAL HOSP HP CLINICA CLINICO CENTRO SALUD FAMILIAR CESFAM CECOSF COMPLEJO "
+                  "ASISTENCIAL INSTITUTO NACIONAL SERVICIO DR DRA DOCTOR MEDICO MEDICA MEDICOS "
+                  "CONSULTORIO").split())
+
+
+def _plan_calce(nombre, region, base, umbral):
+    """Mejor establecimiento de la misma región por palabras distintivas."""
+    tq = set(w for w in _plan_norm(nombre).split() if w not in _PLAN_STOP)
+    dq = tq - _PLAN_TIPO
+    mejor, ms = None, 0.0
+    if not dq:
+        return None, 0.0
+    for e in base:
+        if e["reg"] != region:
+            continue
+        de = e["toks"] - _PLAN_TIPO
+        inter = dq & de
+        if not inter or not de:
+            continue
+        sc = len(inter) / len(dq) * 0.7 + len(inter) / len(de) * 0.3
+        if "HOSPITAL" in tq and "HOSPITAL" in e["toks"]:
+            sc += 0.05
+        if "CLINICA" in tq and "CLINICA" in e["toks"]:
+            sc += 0.05
+        if sc > ms:
+            mejor, ms = e, sc
+    return (mejor, ms) if ms >= umbral else (None, ms)
+
+
+def _plan_region_std(txt):
+    t = _norm_cli(txt)
+    if "METROP" in t:
+        return "Metropolitana"
+    if "VALPAR" in t:
+        return "Valparaíso"
+    return None
+
+
+def _plan_leer_camas():
+    ruta = os.path.join(ROOT, "data", "Camas cx.xlsx")
+    if not os.path.exists(ruta):
+        print("  ADVERTENCIA: no se encontró data/Camas cx.xlsx; las camas se estimarán todas.")
+        return []
+    wb = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    filas = list(ws.iter_rows(min_row=1, max_row=8000, values_only=True))
+    wb.close()
+    # El encabezado no está en la primera fila: se busca por «Nombre Oficial».
+    hi = next((i for i, r in enumerate(filas) if r and any(_norm_cli(x) == "NOMBRE OFICIAL" for x in r)), None)
+    if hi is None:
+        return []
+    cab = [_norm_cli(x) for x in filas[hi]]
+    col = lambda nom: next((i for i, c in enumerate(cab) if c == nom), None)
+    # «Número» aparece dos veces: el correlativo de la fila y el de la dirección,
+    # que es el segundo.
+    nums = [i for i, c in enumerate(cab) if c == "NUMERO"]
+    iR, iT, iN, iC, iV, iNum, iD, iCam = (col("REGION"), col("TIPO ESTABLECIMIENTO"), col("NOMBRE OFICIAL"),
+                                         col("NOMBRE COMUNA"), col("VIA"), (nums[-1] if nums else None),
+                                         col("DIRECCION"), col("CAMAS TOTALES"))
+    out = []
+    for r in filas[hi + 1:]:
+        if not r or iN is None or not r[iN]:
+            continue
+        reg = _plan_region_std(r[iR])
+        if not reg:
+            continue
+        cam = r[iCam] if iCam is not None and isinstance(r[iCam], (int, float)) else 0
+        out.append({"nom": safe_str(r[iN]).strip(), "reg": reg, "tipo": safe_str(r[iT]).strip(),
+                    "comuna": safe_str(r[iC]).strip(),
+                    "dir": " ".join(safe_str(r[i]).strip() for i in (iV, iD, iNum) if i is not None and r[i]),
+                    "camas": int(cam), "toks": set(w for w in _plan_norm(r[iN]).split() if w not in _PLAN_STOP)})
+    return out
+
+
+def _plan_leer_deis():
+    ruta = os.path.join(ROOT, "data", "establecimientos_DEIS.xlsx")
+    if not os.path.exists(ruta):
+        return [], {}
+    wb = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    it = ws.iter_rows(values_only=True)
+    cab = [safe_str(x).strip() for x in next(it)]
+    ix = {c: i for i, c in enumerate(cab)}
+    out, comunas = [], defaultdict(list)
+    for r in it:
+        try:
+            reg = _plan_region_std(r[ix["RegionGlosa"]])
+            if not reg:
+                continue
+            lat = float(safe_str(r[ix["Latitud"]]).replace(",", "."))
+            lon = float(safe_str(r[ix["Longitud"]]).replace(",", "."))
+        except (KeyError, ValueError, TypeError):
+            continue
+        b = _PLAN_CAJA[reg]
+        if not (b[0] <= lat <= b[1] and b[2] <= lon <= b[3]):
+            continue
+        com = safe_str(r[ix["ComunaGlosa"]]).strip()
+        nom = safe_str(r[ix["EstablecimientoGlosa"]]).strip()
+        out.append({"nom": nom, "reg": reg, "comuna": com, "lat": lat, "lon": lon,
+                    "toks": set(w for w in _plan_norm(nom).split() if w not in _PLAN_STOP)})
+        comunas[(reg, _plan_norm(com))].append((lat, lon))
+    wb.close()
+    centros = {k: (sum(p[0] for p in v) / len(v), sum(p[1] for p in v) / len(v)) for k, v in comunas.items()}
+    return out, centros
+
+
+def read_direcciones(wb):
+    """Hoja «Direcciones»: comuna, dirección y coordenadas por cliente."""
+    ws = next((wb[n] for n in wb.sheetnames if n.strip().lower() == "direcciones"), None)
+    if ws is None:
+        return {}
+    out = {}
+    for r in ws.iter_rows(min_row=2, values_only=True):
+        if not r or not r[0] or len(r) < 6:
+            continue
+        lat, lon = r[4], r[5]
+        out[_norm_cli(r[0])] = {"comuna": safe_str(r[2]).strip(), "dir": safe_str(r[3]).strip(),
+                                "lat": float(lat) if isinstance(lat, (int, float)) else None,
+                                "lon": float(lon) if isinstance(lon, (int, float)) else None}
+    return out
+
+
+def _plan_dias_habiles(desde, n):
+    dias, d = [], desde
+    while len(dias) < n:
+        if d.weekday() < 5 and d not in _PLAN_FERIADOS:
+            dias.append(d)
+        d += timedelta(days=1)
+    return dias
+
+
+def _plan_dist(a, b):
+    # Distancia plana en km: a la escala de una región alcanza para ordenar.
+    dy = (a[0] - b[0]) * 111.0
+    dx = (a[1] - b[1]) * 111.0 * math.cos(math.radians((a[0] + b[0]) / 2))
+    return math.hypot(dx, dy)
+
+
+def _plan_rutear(pool, desde, arrastre=None):
+    """Arma días de 3 visitas cercanas entre sí.
+
+    Cada día parte del cliente más alejado del centro de los que quedan y le
+    suma sus dos vecinos más cercanos. Partir del más cercano, que es lo
+    intuitivo, deja para el final a los clientes dispersos y termina armando
+    días de más de 100 km (Los Andes, Casablanca y Algarrobo juntos). Después
+    los días se encadenan: cada uno sigue al más cercano de donde terminó el
+    anterior. `arrastre` son 1 o 2 clientes que sobraron del bloque anterior y
+    se suman a este. Devuelve los días completos y lo que sobra."""
+    resto = list(pool) + list(arrastre or [])
+    grupos = []
+    while len(resto) >= _PLAN_VISITAS_DIA:
+        cy = sum(c["lat"] for c in resto) / len(resto)
+        cx = sum(c["lon"] for c in resto) / len(resto)
+        semilla = max(resto, key=lambda c: _plan_dist((cy, cx), (c["lat"], c["lon"])))
+        resto.remove(semilla)
+        cerca = sorted(resto, key=lambda c: _plan_dist((semilla["lat"], semilla["lon"]), (c["lat"], c["lon"])))
+        dia = [semilla] + cerca[:_PLAN_VISITAS_DIA - 1]
+        for c in dia[1:]:
+            resto.remove(c)
+        grupos.append(dia)
+    # Encadenar los días y ordenar las visitas dentro de cada uno.
+    dias, pos = [], desde
+    while grupos:
+        g = min(grupos, key=lambda d: min(_plan_dist(pos, (c["lat"], c["lon"])) for c in d))
+        grupos.remove(g)
+        orden, p = [], pos
+        while g:
+            c = min(g, key=lambda x: _plan_dist(p, (x["lat"], x["lon"])))
+            g.remove(c)
+            orden.append(c)
+            p = (c["lat"], c["lon"])
+        dias.append(orden)
+        pos = p
+    return dias, (resto or None)
+
+
+def build_plan_rm(app_data, data, direcciones, mapa_data):
+    bi = app_data.get("base_instalada") or {}
+    clientes = bi.get("clientes") or []
+    if not clientes:
+        return {}
+
+    # ── Contrato y facturación, con la misma resolución que la hoja Base
+    # Instalada (_biResolverFac y _biLookupContrato), para que el potencial
+    # de cada cliente sea el mismo que muestra esa hoja con ST = Sí. ──
+    pf = app_data.get("panel_fact") or app_data.get("panel") or []
+    panel = {_norm_cli(p.get("cliente")): p for p in pf if p.get("cliente")}
+    res, tomadas, pend = {}, set(), []
+    for c in clientes:
+        k = _norm_cli(c["nombre"])
+        if not k:
+            continue
+        if k in panel:
+            res[k] = panel[k]; tomadas.add(k)
+        elif len(k) >= 8:
+            pend.append(k)
+    cand = defaultdict(list)
+    for k in pend:
+        hit = [pk for pk in panel if len(pk) >= 8 and pk not in tomadas and (k in pk or pk in k)]
+        if len(hit) == 1:
+            cand[hit[0]].append(k)
+    for pk, ks in cand.items():
+        if len(ks) == 1:
+            res[ks[0]] = panel[pk]
+    contr = defaultdict(int)
+    for d in data:
+        contr[_norm_cli(d.get("cliente"))] += 1
+
+    def tiene_contrato(nom):
+        k = _norm_cli(nom)
+        if contr.get(k):
+            return True
+        if len(k) >= 8 and any(ck in k or k in ck for ck in contr):
+            return True
+        p = res.get(k)
+        return bool(p and p.get("tiene_contrato"))
+
+    def vsi(c, k):
+        v = c.get(k + "_si")
+        return v if v is not None else (c.get(k) or 0)
+
+    # ── % de vida útil, igual que la hoja Base Instalada ──
+    pb = app_data.get("prosp_bi") or {}
+    vut = app_data.get("vida_util") or {}
+    vida = defaultdict(lambda: [0, 0.0])
+    tp, cl_pb, hoy_ym = pb.get("tipos") or [], pb.get("clientes") or [], pb.get("hoy_ym") or 0
+    for f in pb.get("filas") or []:
+        u = vut.get(safe_str(tp[f[2]]).strip().upper(), 0) if f[2] < len(tp) else 0
+        if f[6] >= 0 and u > 0:
+            v = vida[_norm_cli(cl_pb[f[3]])]
+            v[0] += 1; v[1] += (hoy_ym - f[6]) / 12 / u * 100
+
+    camas_base = _plan_leer_camas()
+    deis, centros_com = _plan_leer_deis()
+    comunas_reg = defaultdict(set)
+    for (rg, cm) in centros_com:
+        comunas_reg[rg].add(cm)
+    por_nombre_cam = {_plan_norm(e["nom"]): e for e in camas_base}
+    mapa_pos = {_norm_cli(m.get("n")): m for m in (mapa_data or []) if m.get("lat") and m.get("lon")}
+
+    # Medianas del registro para estimar a quien no figura: por región y tipo.
+    def mediana(v):
+        v = sorted(v)
+        return v[len(v) // 2] if v else 0
+    med = {}
+    for reg in _PLAN_REGIONES:
+        hosp = [e["camas"] for e in camas_base if e["reg"] == reg and e["camas"] > 0 and "HOSPITAL" in _norm_cli(e["tipo"])]
+        clin = [e["camas"] for e in camas_base if e["reg"] == reg and e["camas"] > 0 and "CLINICA" in _norm_cli(e["tipo"])]
+        inst = [e["camas"] for e in camas_base if e["reg"] == reg and e["camas"] > 0 and "INSTITUTO" in _norm_cli(e["nom"])]
+        med[reg] = {"hospital": mediana(hosp), "clinica": mediana(clin), "instituto": mediana(inst) or mediana(hosp)}
+
+    def clase(nom):
+        t = _norm_cli(nom)
+        if any(a in t for a in _PLAN_AMBUL):
+            return "ambulatorio"
+        if "INSTITUTO NACIONAL" in t or "TORAX" in t or "GERIATRIA" in t:
+            return "instituto"
+        if "HOSPITAL" in t or "COMPLEJO" in t or "POSTA CENTRAL" in t:
+            return "hospital"
+        if "CLINICA" in t or "SANATORIO" in t:
+            return "clinica"
+        return "otro"
+
+    universo = []
+    for c in clientes:
+        reg = c.get("region")
+        if reg not in _PLAN_REGIONES or not (vsi(c, "total") > 0):
+            continue
+        k = _norm_cli(c["nombre"])
+        cc = tiene_contrato(c["nombre"])
+        pot = 0 if cc else sum(vsi(c, lk) * t for lk, t in _PLAN_TARIFA.items())
+        p = res.get(k) or {}
+        cls = clase(c["nombre"])
+
+        # ── Camas ──
+        alias = _PLAN_CAMAS_ALIAS.get(k, "_")
+        est, camas, fuente, ref, nota = None, 0, "", "", ""
+        if alias is None:
+            fuente, nota = "Sin internación", "atención ambulatoria o sin camas"
+        elif alias == "estimar":
+            est = None
+        elif alias != "_":
+            nk = _plan_norm(alias)
+            est = por_nombre_cam.get(nk) or next((e for e in camas_base if _plan_norm(e["nom"]).startswith(nk)), None)
+        else:
+            est, _sc = _plan_calce(c["nombre"], reg, camas_base, 0.8)
+            # Un calce automático con un establecimiento ambulatorio no se usa
+            # para un hospital, ni al revés: sería otro establecimiento.
+            if est and cls in ("hospital", "instituto") and not any(
+                    x in _norm_cli(est["tipo"]) + " " + _norm_cli(est["nom"]) for x in ("HOSPITAL", "CLINICA", "INSTITUTO")):
+                est = None
+        if alias is not None and fuente == "":
+            con_camas = est and est["camas"] > 0
+            # Sólo un hospital con 0 camas en el registro se trata como dato
+            # faltante. Una clínica con 0 camas suele ser de verdad ambulatoria.
+            tipo_int = est and "HOSPITAL" in _norm_cli(est["tipo"])
+            if con_camas:
+                camas, fuente, ref = est["camas"], "Registro", est["nom"]
+            elif est and not tipo_int:
+                camas, fuente, ref, nota = 0, "Registro", est["nom"], "establecimiento sin camas"
+            elif cls in ("hospital", "instituto", "clinica") or alias == "estimar":
+                base_cls = cls if cls in med[reg] else "hospital"
+                camas, fuente = med[reg][base_cls], "Estimado"
+                ref = est["nom"] if est else ""
+                nota = ("mediana de %s con camas de la región en el registro" %
+                        {"hospital": "hospitales", "clinica": "clínicas", "instituto": "institutos"}[base_cls])
+            else:
+                fuente, nota = "Sin internación", "no figura como hospital ni clínica"
+
+        # ── Ubicación ──
+        loc, prec = None, ""
+        dr = direcciones.get(k) or {}
+        caja = _PLAN_CAJA[reg]
+        dentro = lambda la, lo: la is not None and lo is not None and caja[0] <= la <= caja[1] and caja[2] <= lo <= caja[3]
+        comuna = dr.get("comuna") or ""
+        # Una dirección en una comuna de otra región es de otra sede o un error:
+        # La Araucana Salud figura en la RM con su dirección de Viña del Mar.
+        if comuna and comunas_reg[reg] and _plan_norm(comuna) not in comunas_reg[reg]:
+            dr, comuna = {}, ""
+        direccion = dr.get("dir") or ""
+        remoto = any(x in _norm_cli(c["nombre"]) for x in _PLAN_REMOTO)
+        if remoto:
+            loc, prec, comuna = (-27.1500, -109.4300), "Isla de Pascua", "Isla de Pascua"
+        elif dentro(dr.get("lat"), dr.get("lon")):
+            loc, prec = (dr["lat"], dr["lon"]), "Dirección del cliente"
+        elif k in mapa_pos and dentro(mapa_pos[k]["lat"], mapa_pos[k]["lon"]):
+            m = mapa_pos[k]
+            loc, prec = (m["lat"], m["lon"]), "Base Mapa"
+            comuna = comuna or safe_str(m.get("comuna"))
+        else:
+            de, _s = _plan_calce(c["nombre"], reg, deis, 0.75)
+            if de:
+                loc, prec = (de["lat"], de["lon"]), "Establecimiento DEIS"
+                comuna = comuna or de["comuna"]
+        if not loc and est and est.get("comuna"):
+            ce = centros_com.get((reg, _plan_norm(est["comuna"])))
+            if ce:
+                loc, prec = ce, "Centro de la comuna"
+                comuna = comuna or est["comuna"]
+        if not loc and comuna:
+            ce = centros_com.get((reg, _plan_norm(comuna)))
+            if ce:
+                loc, prec = ce, "Centro de la comuna"
+        if not loc:
+            # La comuna escrita en el nombre de la sucursal: «Norden La Reina»,
+            # «CESFAM San Luis Peñalolén», «I. Municipalidad de Talagante».
+            nn = " " + _plan_norm(c["nombre"]) + " "
+            hits = [cm for cm in comunas_reg[reg] if " " + cm + " " in nn]
+            hits += [v for b, v in _PLAN_BARRIOS.items() if " " + b + " " in nn and v in comunas_reg[reg]]
+            if hits:
+                cm = max(hits, key=len)
+                ce = centros_com.get((reg, cm))
+                if ce:
+                    loc, prec = ce, "Centro de la comuna"
+                    comuna = comuna or cm.title()
+        if not loc:
+            loc, prec = _PLAN_CENTRO[reg], "Aproximada (centro de la región)"
+        if not direccion and est and est.get("dir"):
+            direccion = est["dir"]
+
+        vv = vida.get(k)
+        universo.append({
+            "n": c["nombre"], "r": reg, "com": comuna, "dir": direccion,
+            "lat": round(loc[0], 5), "lon": round(loc[1], 5), "prec": prec,
+            "cam": int(camas), "camF": fuente, "camR": ref, "camN": nota,
+            "pot": round(pot), "cc": cc,
+            "eq": {lk: vsi(c, lk) for lk in ("total", "dental", "esterilizacion", "endoscopia",
+                                              "incardia", "mobiliario", "mmq_reas", "otros")},
+            "vu": round(vv[1] / vv[0], 1) if vv and vv[0] else None,
+            "rem": remoto,
+            "f26": round(p.get("real_ytd_fac") if p.get("real_ytd_fac") is not None else (p.get("real_ytd") or 0)),
+            "f25": round(p.get("real_anual_2025") or 0),
+            "rel": p.get("estado_relacion") or ("Contrato vigente" if cc else "Sin historial"),
+        })
+
+    # Dos cuentas de la base instalada que calzan con el mismo establecimiento
+    # del registro son, en la práctica, la misma institución («Hospital de La
+    # Florida» y «Hospital Clínico Metropolitano La Florida»). No se funden
+    # —son cuentas distintas—, pero se marcan para que el plan sea uno solo.
+    por_ref = defaultdict(list)
+    for u in universo:
+        if u["camR"] and u["camF"] == "Registro":
+            por_ref[(u["r"], u["camR"])].append(u["n"])
+    for u in universo:
+        otros = [x for x in por_ref.get((u["r"], u["camR"]), []) if x != u["n"]]
+        u["dup"] = otros
+
+    # ── Grupos ──
+    for reg in _PLAN_REGIONES:
+        us = [u for u in universo if u["r"] == reg]
+        us.sort(key=lambda u: (-u["pot"], -u["eq"]["total"], u["n"]))
+        for i, u in enumerate(us[:_PLAN_TOP_POT]):
+            u["g"], u["rk"], u["resp"] = 1, i + 1, "Cristian / Eglys"
+        resto = us[_PLAN_TOP_POT:]
+        resto.sort(key=lambda u: (-u["cam"], -u["pot"], -u["eq"]["total"], u["n"]))
+        for i, u in enumerate(resto):
+            u["g"], u["rk"] = (2 if i < _PLAN_TOP_CAMAS else 3), i + 1
+
+    # ── Territorios de los KAM ──
+    # KAM 2 toma la Región de Valparaíso y el poniente de la RM, que es el lado
+    # que da hacia la costa; KAM 1 el resto de la RM. El corte se hace por
+    # longitud y en la cantidad que deja a los dos con el mismo número de visitas.
+    pool = [u for u in universo if u["g"] in (2, 3) and not u["rem"]]
+    val = [u for u in pool if u["r"] == "Valparaíso"]
+    rm = sorted([u for u in pool if u["r"] == "Metropolitana"], key=lambda u: u["lon"])
+    n2_rm = max(0, (len(pool) + 1) // 2 - len(val))
+    k2 = set(id(u) for u in val + rm[:n2_rm])
+    for u in pool:
+        u["resp"] = "KAM 2" if id(u) in k2 else "KAM 1"
+    # Isla de Pascua queda a cargo del KAM de Valparaíso, fuera de la agenda en
+    # auto: requiere un viaje aparte.
+    for u in universo:
+        if u["g"] in (2, 3) and u["rem"]:
+            u["resp"] = "KAM 2"
+
+    # ── Agenda ──
+    # Cada KAM visita primero a sus clientes con plan de entrada (grupo 2) y
+    # después al resto (grupo 3). KAM 2 hace todo Valparaíso en un solo bloque
+    # seguido —su grupo 2 y luego su grupo 3—, para no ir y volver desde
+    # Santiago en la misma semana: RM grupo 2 → Valparaíso grupo 2 →
+    # Valparaíso grupo 3 → RM grupo 3.
+    agenda = []
+    lunes0 = _PLAN_INICIO - timedelta(days=_PLAN_INICIO.weekday())
+    orden_bloques = [(2, "Metropolitana"), (2, "Valparaíso"), (3, "Valparaíso"), (3, "Metropolitana")]
+    for kam in ("KAM 1", "KAM 2"):
+        dias, arrastre = [], None
+        for g, reg in orden_bloques:
+            sub = [u for u in pool if u["resp"] == kam and u["g"] == g and u["r"] == reg]
+            if sub:
+                nuevos, arrastre = _plan_rutear(sub, _PLAN_CENTRO[reg], arrastre)
+                dias += nuevos
+        if arrastre:
+            dias.append(arrastre)
+        fechas = _plan_dias_habiles(_PLAN_INICIO, len(dias))
+        for dia, fecha in zip(dias, fechas):
+            for o, u in enumerate(dia):
+                u["v1"] = fecha.isoformat()
+                agenda.append({"f": fecha.isoformat(), "k": kam, "o": o + 1, "h": _PLAN_HORAS[o],
+                               "s": (fecha - lunes0).days // 7 + 1, "c": universo.index(u)})
+
+    agenda.sort(key=lambda a: (a["f"], a["k"], a["o"]))
+    semanas = {}
+    for a in agenda:
+        semanas.setdefault(a["s"], []).append(a["f"])
+    semanas = [{"s": s, "desde": min(fs), "hasta": max(fs)} for s, fs in sorted(semanas.items())]
+
+    resumen = {}
+    for reg in _PLAN_REGIONES:
+        us = [u for u in universo if u["r"] == reg]
+        resumen[reg] = {"n": len(us), "g1": sum(1 for u in us if u["g"] == 1),
+                        "g2": sum(1 for u in us if u["g"] == 2), "g3": sum(1 for u in us if u["g"] == 3)}
+    from collections import Counter
+    cam_f = Counter(u["camF"] for u in universo)
+    print(f"       PLAN RM/VALPARAÍSO: " + " | ".join(
+        f"{r} {v['n']} (G1 {v['g1']} · G2 {v['g2']} · G3 {v['g3']})" for r, v in resumen.items()) +
+        f" | camas: {cam_f.get('Registro', 0)} registro, {cam_f.get('Estimado', 0)} estimadas, "
+        f"{cam_f.get('Sin internación', 0)} sin internación | agenda {len(agenda)} visitas "
+        f"{agenda[0]['f'] if agenda else ''} a {agenda[-1]['f'] if agenda else ''}")
+    return {
+        "regiones": _PLAN_REGIONES, "clientes": universo, "agenda": agenda, "semanas": semanas,
+        "resumen": resumen, "inicio": _PLAN_INICIO.isoformat(),
+        "feriados": sorted(d.isoformat() for d in _PLAN_FERIADOS),
+        "top_pot": _PLAN_TOP_POT, "top_camas": _PLAN_TOP_CAMAS, "visitas_dia": _PLAN_VISITAS_DIA,
+        "medianas": med,
+    }
+
+
 def read_citas_servicios(wb):
     """Citas de servicio en terreno, una fila por visita completada.
 
@@ -4666,6 +5314,8 @@ def main():
     rep_vend = read_repuestos_vendidos(wb2)
     eq_fallas = read_equipos_fallas(wb2)
     citas     = read_citas_servicios(wb2)
+    direcciones = read_direcciones(wb2)
+    vida_util = read_vida_util()
     prosp_bi  = read_prospectos_bi(wb2)
     fact_desg = read_fact_desglose(wb2)
     br_oport = read_brecha_oport(wb2)
@@ -4697,6 +5347,7 @@ def main():
     app_data["rep_vend"] = rep_vend
     app_data["eq_fallas"] = eq_fallas
     app_data["citas"] = citas
+    app_data["vida_util"] = vida_util
     app_data["prosp_bi"] = prosp_bi
     app_data["fact_desglose"] = fact_desg
     app_data["br_oport"] = br_oport
@@ -4713,6 +5364,7 @@ def main():
         ("rep_vend",      rep_vend,  "data",     "Repuestos Vendidas"),
         ("eq_fallas",     eq_fallas, "filas",    "Repuestos Vendidas"),
         ("citas",         citas,     "filas",    "Citas Servicios Trimestrales"),
+        ("vida_util",     vida_util, None,       "Tipos_Equipo_por_Linea_BI.xlsx"),
         ("cli_rel",       cli_rel,   "clientes", "Repuestos Vendidas"),
         ("inv_ts",        inv_ts,    "data",     "Inventario Bodega"),
         ("prosp_bi",      prosp_bi,  "filas",    "BASE INSTALADA"),
@@ -4798,6 +5450,9 @@ def main():
     completar_mapa(mapa_data, app_data.get("fact_clientes") or [])
     cc_count = sum(1 for c in mapa_data if c["cc"])
     print(f"       MAPA_DATA: {len(mapa_data)} clientes | {cc_count} con contrato")
+    # Va al final: necesita los contratos activos (data), la facturación, la base
+    # instalada, la vida útil y el mapa ya armados.
+    app_data["plan_rm"] = build_plan_rm(app_data, data, direcciones, mapa_data)
     print(f"       CASOS: {len(casos_data['casos'])} casos relevantes | {len(casos_data['equipos'])} equipos detenidos")
 
     # ── Parchear template.html (fuente de build.ps1) ─────────────────────────

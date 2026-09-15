@@ -14,6 +14,7 @@ $jsFiles = @(
   'hoja_facturacion.js','hoja_panelfact.js','hoja_base_instalada.js','hoja_satisfaccion.js',
   'hoja_visitas.js','hoja_mapa.js','hoja_matriz.js','hoja_casos.js','hoja_alerta.js','hoja_pdf.js','hoja_eerr.js',
   'hoja_desglose.js','hoja_inv_ts.js','hoja_rep_vend.js','hoja_prosp_bi.js',
+  'hoja_plan_rm.js',
   'hoja_citas.js','hoja_cli_rel.js','hoja_pipeline.js','hoja_brechas.js'
 )
 
