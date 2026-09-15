@@ -284,6 +284,7 @@ def read_contratos(wb):
             "es_nuevo":     tpo_activo <= 90,
             "n_mant_actual":  n_mant_actual,
             "estado":         estado,
+            "estado_excel":   estado,   # sin la corrección de «superados» de más abajo
             "programa":       programa,
             "linea_negocio":  linea_negocio_contrato(num_str),
             "bajo_contrato":  bajo_contrato,
@@ -1312,7 +1313,32 @@ def cruzar_pipeline_bi(base_instalada, pipeline):
 
 
 
-def read_base_instalada(wb):
+def clientes_con_contrato_activado(contratos):
+    """{cliente: [contratos]} con Estado «Activado» en CONTRATOS TODOS, tal como
+    lo dice la hoja y sin mirar la fecha de término: un contrato vencido que
+    sigue «Activado» (Hospital Militar) cuenta como contrato. Se lee en cada
+    corrida, así que un cliente o contrato nuevo en la hoja entra solo."""
+    out = defaultdict(list)
+    for ct in contratos or []:
+        if ct.get("estado_excel", ct["estado"]) == "Activado":
+            out[ct["cliente"]].append(ct)
+    return out
+
+
+def read_base_instalada(wb, contratos=None):
+    # Clientes con contrato «Activado» en CONTRATOS TODOS (sin mirar la fecha de
+    # término). Se marcan con «cv» y quedan fuera del
+    # resumen por región, que junto al detalle, la matriz y la curva se centra en
+    # el potencial ST: quien ya tiene contrato no tiene potencial que capturar.
+    # Los totales generales de la hoja (total, por_linea, por_tipo) sí los cuentan.
+    _vig = sorted(clientes_con_contrato_activado(contratos))
+    _cv_cache = {}
+
+    def con_contrato_vigente(nom):
+        if nom not in _cv_cache:
+            _cv_cache[nom] = any(_plan_mismo_cliente(nom, v) for v in _vig)
+        return _cv_cache[nom]
+
     ws = None
     for name in wb.sheetnames:
         if "base instalada" in name.lower():
@@ -1372,7 +1398,7 @@ def read_base_instalada(wb):
 
         # col[29] = Región (col AD)
         region = _norm_region(row[29] if len(row) > 29 else None)
-        if "GEMCO" not in nombre_analisis:
+        if "GEMCO" not in nombre_analisis and not con_contrato_vigente(nombre_analisis):
             rd = reg_map.setdefault(region, {
                 "total": 0, "total_si": 0,
                 "lineas": defaultdict(int), "lineas_si": defaultdict(int),
@@ -1484,6 +1510,7 @@ def read_base_instalada(wb):
             "region":            region_cli,
             "estado":            estado_cli,
             "con_contrato":      estado_cli in ("Contrato", "Garantia"),
+            "cv":                con_contrato_vigente(nombre),
             "potencial_st":      d.get("_potencial_st", False),
         })
 
@@ -1500,7 +1527,8 @@ def read_base_instalada(wb):
 
     print(f"       Base Instalada: {total_sin_gemco} activos (sin GEMCO) | {len(clientes)} clientes | {len(por_tipo)} tipos")
     _sr = reg_map.get("Sin región", {}).get("total", 0)
-    print(f"       BI por region: {len(reg_map)} regiones | {_sr} equipos sin region")
+    print(f"       BI por region: {len(reg_map)} regiones | {_sr} equipos sin region | "
+          f"{sum(1 for c in clientes if c['cv'])} clientes con contrato Activado fuera del resumen")
     por_tipo_linea_out = {
         linea: sorted([{"tipo": t, "n": n} for t, n in ctr.items()], key=lambda x: -x["n"])[:6]
         for linea, ctr in tipo_por_linea.items()
@@ -2709,6 +2737,61 @@ def _plan_norm(s):
     return re.sub(r"[^A-Z0-9]+", " ", _norm_cli(s)).strip()
 
 
+# Calces revisados a mano entre el nombre del cliente en CONTRATOS TODOS y el
+# de BASE INSTALADA, cuando las dos hojas lo escriben distinto (15-09-2026).
+# Clave y valor van normalizados con _plan_norm.
+_CONTRATO_ALIAS = {
+    "CLINICA VESPUCIO SPA": "SERVICIOS MEDICOS VESPUCIO LTDA",
+    "HOSPITAL DE URGENCIA ASISTENCIA PUBLICA DR ALEJANDRO DEL RIO": "POSTA CENTRAL",
+    "HOSPITAL PUERTO OCTAY": "HOSPITAL DE PUERTO OCTAY",
+    "HOSPITAL REGIONAL DE ARICA DR JUAN NOE CREVANI": "SERVICIO DE SALUD ARICA HOSP DR JUAN NOE CREVANI",
+    "HOSPITAL REGIONAL DE COPIAPO": "HOSPITAL DE COPIAPO",
+    "SERVICIO DE SALUD CHILOE HOSPITAL CASTRO": "HOSPITAL DE CASTRO",
+    "JOHNSON Y JOHNSON DE CHILE S A": "JOHNSON JOHNSON DE CHILE S A",
+    "UC CHRISTUS SERVICIOS AMBULATORIOS S P A": "UC CHRISTUS SERVICIOS AMBULATORIOS SPA",
+    "HOSPITAL VICTOR RIOS RUIZ": ("HOSPITAL DE LOS ANGELES DR VICTOR RIOS RUIZ",),
+    "DIPRECA FONDO HOSPITAL": "HOSPITAL DIPRECA",
+    "I MUNICIPALIDAD DE CONSTITUCION": "CESFAM CONSTITUCION",
+    "CLINICA DE IMPLANTOLOGIA Y PERIODONCIA SANZ SPA": "ODONTOLOGIA SANZ LTDA",
+}
+
+
+def _contrato_alias(a, b):
+    """Si el alias de uno de los dos nombres es el otro. El valor puede ser un
+    nombre o una tupla, cuando la base instalada tiene la cuenta repartida."""
+    for x, y in ((a, b), (b, a)):
+        v = _CONTRATO_ALIAS.get(x)
+        if v and (y == v if isinstance(v, str) else y in v):
+            return True
+    return False
+
+# Sufijos de razón social que no cambian de quién se trata.
+_PLAN_SUFIJOS = {"S", "A", "SA", "SPA", "P", "LTDA", "LIMITADA", "EIRL", "CIA", "Y"}
+
+
+def _plan_mismo_cliente(a, b):
+    """Si dos nombres de cliente son la misma cuenta. Además del calce exacto
+    acepta que uno sea el final del otro («Servicio de Salud Oriente Hospital
+    del Salvador» / «Hospital del Salvador») o que sólo los separe la razón
+    social. No acepta que uno sea el comienzo del otro con más palabras:
+    «Hospital San José de Maipo» no es «Hospital San José»."""
+    a, b = _plan_norm(a), _plan_norm(b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if _contrato_alias(a, b):
+        return True
+    corto, largo = (a, b) if len(a) <= len(b) else (b, a)
+    if len(corto) < 8:
+        return False
+    if largo.endswith(" " + corto):
+        return True
+    if largo.startswith(corto + " "):
+        return set(largo[len(corto):].split()) <= _PLAN_SUFIJOS
+    return False
+
+
 _PLAN_STOP = set("DE DEL LA LAS LOS EL Y E S A SA SPA LTDA LIMITADA SOCIEDAD CIA EIRL".split())
 _PLAN_TIPO = set(("HOSPITAL HOSP HP CLINICA CLINICO CENTRO SALUD FAMILIAR CESFAM CECOSF COMPLEJO "
                   "ASISTENCIAL INSTITUTO NACIONAL SERVICIO DR DRA DOCTOR MEDICO MEDICA MEDICOS "
@@ -2886,7 +2969,7 @@ def _plan_rutear(pool, desde, arrastre=None):
     return dias, (resto or None)
 
 
-def build_plan_rm(app_data, data, direcciones, mapa_data):
+def build_plan_rm(app_data, contratos, direcciones, mapa_data):
     bi = app_data.get("base_instalada") or {}
     clientes = bi.get("clientes") or []
     if not clientes:
@@ -2914,18 +2997,13 @@ def build_plan_rm(app_data, data, direcciones, mapa_data):
     for pk, ks in cand.items():
         if len(ks) == 1:
             res[ks[0]] = panel[pk]
-    contr = defaultdict(int)
-    for d in data:
-        contr[_norm_cli(d.get("cliente"))] += 1
+    # Contratos con Estado «Activado» en CONTRATOS TODOS, sin mirar la fecha (el
+    # mismo criterio que la hoja Base Instalada). Un cliente con uno de ellos ya
+    # es cliente de ST y no entra al plan.
+    vigentes = clientes_con_contrato_activado(contratos)
 
-    def tiene_contrato(nom):
-        k = _norm_cli(nom)
-        if contr.get(k):
-            return True
-        if len(k) >= 8 and any(ck in k or k in ck for ck in contr):
-            return True
-        p = res.get(k)
-        return bool(p and p.get("tiene_contrato"))
+    def contratos_vigentes(nom):
+        return [ct for cli, cs in vigentes.items() if _plan_mismo_cliente(nom, cli) for ct in cs]
 
     def vsi(c, k):
         v = c.get(k + "_si")
@@ -2973,14 +3051,22 @@ def build_plan_rm(app_data, data, direcciones, mapa_data):
             return "clinica"
         return "otro"
 
-    universo = []
+    universo, excluidos = [], []
     for c in clientes:
         reg = c.get("region")
         if reg not in _PLAN_REGIONES or not (vsi(c, "total") > 0):
             continue
         k = _norm_cli(c["nombre"])
-        cc = tiene_contrato(c["nombre"])
-        pot = 0 if cc else sum(vsi(c, lk) * t for lk, t in _PLAN_TARIFA.items())
+        cv = contratos_vigentes(c["nombre"])
+        if cv:
+            cv.sort(key=lambda ct: ct["fin"])
+            excluidos.append({"n": c["nombre"], "r": reg, "eq": vsi(c, "total"),
+                              "ct": [{"cli": ct["cliente"], "num": ct["n"], "lin": ct["linea_negocio"],
+                                      "tipo": ct["tipo"], "fin": ct["fin"],
+                                      "venc": ct["dias_vence"] < 0} for ct in cv]})
+            continue
+        cc = False
+        pot = sum(vsi(c, lk) * t for lk, t in _PLAN_TARIFA.items())
         p = res.get(k) or {}
         cls = clase(c["nombre"])
 
@@ -3163,13 +3249,14 @@ def build_plan_rm(app_data, data, direcciones, mapa_data):
                         "g2": sum(1 for u in us if u["g"] == 2), "g3": sum(1 for u in us if u["g"] == 3)}
     from collections import Counter
     cam_f = Counter(u["camF"] for u in universo)
-    print(f"       PLAN RM/VALPARAÍSO: " + " | ".join(
+    print(f"       PLAN RM/VALPARAÍSO: {len(excluidos)} clientes fuera por contrato Activado | " + " | ".join(
         f"{r} {v['n']} (G1 {v['g1']} · G2 {v['g2']} · G3 {v['g3']})" for r, v in resumen.items()) +
         f" | camas: {cam_f.get('Registro', 0)} registro, {cam_f.get('Estimado', 0)} estimadas, "
         f"{cam_f.get('Sin internación', 0)} sin internación | agenda {len(agenda)} visitas "
         f"{agenda[0]['f'] if agenda else ''} a {agenda[-1]['f'] if agenda else ''}")
     return {
-        "regiones": _PLAN_REGIONES, "clientes": universo, "agenda": agenda, "semanas": semanas,
+        "regiones": _PLAN_REGIONES, "clientes": universo, "excluidos": excluidos,
+        "agenda": agenda, "semanas": semanas,
         "resumen": resumen, "inicio": _PLAN_INICIO.isoformat(),
         "feriados": sorted(d.isoformat() for d in _PLAN_FERIADOS),
         "top_pot": _PLAN_TOP_POT, "top_camas": _PLAN_TOP_CAMAS, "visitas_dia": _PLAN_VISITAS_DIA,
@@ -5305,7 +5392,7 @@ def main():
     wb2 = openpyxl.load_workbook(xlsx_to_use, read_only=True, data_only=True)
     visitas = read_visitas(wb2, mes_corte)
     analisis_fac = read_analisis_fac(wb2)
-    base_instalada = read_base_instalada(wb2)
+    base_instalada = read_base_instalada(wb2, contratos)
     mapa_data  = read_mapa(wb2)
     casos_data = read_casos(wb2)
     ratios2 = read_ratios2(wb2)
@@ -5452,7 +5539,7 @@ def main():
     print(f"       MAPA_DATA: {len(mapa_data)} clientes | {cc_count} con contrato")
     # Va al final: necesita los contratos activos (data), la facturación, la base
     # instalada, la vida útil y el mapa ya armados.
-    app_data["plan_rm"] = build_plan_rm(app_data, data, direcciones, mapa_data)
+    app_data["plan_rm"] = build_plan_rm(app_data, contratos, direcciones, mapa_data)
     print(f"       CASOS: {len(casos_data['casos'])} casos relevantes | {len(casos_data['equipos'])} equipos detenidos")
 
     # ── Parchear template.html (fuente de build.ps1) ─────────────────────────

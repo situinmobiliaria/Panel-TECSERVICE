@@ -10,7 +10,7 @@
   const P = A.plan_rm || {};
   if (!P.clientes || !P.clientes.length) return;
 
-  const C = P.clientes, AG = P.agenda || [], SEM = P.semanas || [];
+  const C = P.clientes, AG = P.agenda || [], SEM = P.semanas || [], EX = P.excluidos || [];
   const REGS = P.regiones || ['Metropolitana', 'Valparaíso'];
   const LBL_REG = { 'Metropolitana': 'Región Metropolitana', 'Valparaíso': 'Región de Valparaíso' };
 
@@ -191,6 +191,31 @@
         diasK + ' días hábiles por KAM · ' + (AG.length ? fCorta(AG[0].f) + ' a ' + fCorta(fin) : '—'));
   }
 
+  // Clientes que quedan fuera por tener contrato vigente, plegados.
+  function excluidosHtml() {
+    if (!EX.length) return '';
+    const fila = e => '<tr><td style="padding:.2rem .45rem;font-weight:700">' + esc(e.n) + '</td>' +
+      '<td style="padding:.2rem .45rem">' + (e.r === 'Metropolitana' ? 'RM' : 'Valparaíso') + '</td>' +
+      '<td style="padding:.2rem .45rem;text-align:right">' + n0(e.eq) + '</td>' +
+      '<td style="padding:.2rem .45rem">' + e.ct.map(ct => esc(ct.lin) + (ct.tipo === 'Garantia' ? ' (garantía)' : '') +
+        ' · N° ' + esc(ct.num) + ' · hasta ' + String(ct.fin).split('-').reverse().join('/') +
+        (ct.venc ? ' <span style="color:var(--rd);font-weight:700">(fecha vencida)</span>' : '') +
+        (_prmNorm(ct.cli) !== _prmNorm(e.n) ? ' <span style="color:var(--mut)">(' + esc(ct.cli) + ')</span>' : '')).join('<br>') + '</td></tr>';
+    const lst = EX.slice().sort((a, b) => a.r.localeCompare(b.r) || a.n.localeCompare(b.n));
+    return '<details style="margin:-.35rem 0 .8rem;font-size:.6rem">' +
+      '<summary style="cursor:pointer;color:var(--az1);font-weight:700">Ver los ' + EX.length +
+      ' clientes fuera del plan por contrato Activado (' + EX.filter(e => e.r === 'Metropolitana').length + ' RM · ' +
+      EX.filter(e => e.r !== 'Metropolitana').length + ' Valparaíso)</summary>' +
+      '<div style="overflow-x:auto;margin-top:.4rem"><table style="border-collapse:collapse;width:100%;font-size:.58rem">' +
+      '<thead><tr style="background:var(--bg2);text-align:left"><th style="padding:.25rem .45rem">Cliente</th>' +
+      '<th style="padding:.25rem .45rem">Región</th><th style="padding:.25rem .45rem;text-align:right">Equipos ST</th>' +
+      '<th style="padding:.25rem .45rem">Contrato Activado</th></tr></thead><tbody>' + lst.map(fila).join('') +
+      '</tbody></table></div></details>';
+  }
+  function _prmNorm(s) {
+    return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+  }
+
   // ── Cómo se arma ─────────────────────────────────────────────
   function flujo() {
     const box = document.getElementById('prm-flujo');
@@ -228,9 +253,11 @@
     box.innerHTML =
       '<p style="font-size:.63rem;line-height:1.65;margin:0 0 .8rem;color:var(--txt)">El universo son los clientes de la ' +
       '<strong>Región Metropolitana</strong> y de la <strong>Región de Valparaíso</strong> que tienen equipos con ' +
-      '<strong>Potencial de ST</strong> —los mismos que muestra la hoja Base Instalada con el filtro ST = Sí—. Cada región ' +
+      '<strong>Potencial de ST</strong> —los mismos que muestra la hoja Base Instalada con el filtro ST = Sí—, ' +
+      '<strong>sin los ' + EX.length + ' que tienen contrato</strong> en la hoja CONTRATOS TODOS (Estado ' +
+      '«Activado», aunque la fecha de término ya haya pasado), porque ya son clientes de ST. Cada región ' +
       'se ordena por separado y cada cliente queda en un solo grupo: se elige primero el grupo 1, y los grupos 2 y 3 salen ' +
-      'de los clientes que quedaron.</p>' +
+      'de los clientes que quedaron.</p>' + excluidosHtml() +
       '<div style="display:flex;gap:.5rem;align-items:stretch;flex-wrap:wrap">' +
         paso(1, 'Top ' + P.top_pot + ' por potencial ST anual',
           'mayor potencial ST anual de mantenimiento de la base instalada con Potencial de ST (equipos de ' +
