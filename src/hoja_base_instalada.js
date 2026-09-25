@@ -9,6 +9,11 @@ let _biFiltPotencial='todos';
 let _biLineasFiltroTipos='todos';
 let _biSortCol=2, _biSortAsc=false;
 let _biAllClientes=[]; // lista completa para re-filtrar con potencial
+// La tabla y el resumen por región abren con toda la base instalada, clientes
+// con contrato vigente incluidos. Al desmarcar la casilla quedan fuera de las
+// dos tablas, de la matriz y de la curva, que es la vista centrada en el
+// potencial por capturar.
+let _biIncCV=true;
 
 // Lookup maps cruzados con panel (facturación) y DATA (contratos activos)
 let _biPanelMap={}, _biContratoMap={}, _biFacRes={};
@@ -48,14 +53,36 @@ function _biLookupPanel(nombre){ return _biFacRes[_biNorm(nombre)]||null; }
 // Providencia aparece dos veces), y sumar por fila inflaba el total.
 function _biFacUnicos(list){
   const usados = new Set();
-  let monto = 0;
+  let monto = 0, contr = 0;
   (list||[]).forEach(c=>{
     const p = _biLookupPanel(c.nombre);
     if(!p || usados.has(p.cliente)) return;
     usados.add(p.cliente);
     monto += _biFac(p);
+    contr += p.presup_contr_ytd || 0;
   });
-  return { monto: monto, usados: usados };
+  return { monto: monto, contr: contr, usados: usados };
+}
+
+// Facturación de los clientes con contrato vigente, que no se listan en la
+// tabla: es la mayor parte de la facturación del año y sin ella el pie no
+// cerraría en el total del panel. Se calcula como diferencia entre toda la
+// base instalada y los clientes listados, para no contar dos veces al cliente
+// que aparece con más de un nombre.
+function _biFacCV(){
+  const todo = _biFacUnicos(_biAllClientes);
+  const sinCV = _biFacUnicos((_biAllClientes||[]).filter(c=>!_biCV(c)));
+  return { n: (_biAllClientes||[]).filter(c=>_biCV(c)).length,
+           monto: todo.monto - sinCV.monto, contr: todo.contr - sinCV.contr };
+}
+
+// Facturación de contratos del panel completo (misma suma que la hoja
+// Facturación y los KPI de portada), para calcular el residuo de la columna
+// F. Contr. igual que se hace con Fac. 2026.
+function _biContrPanel(){
+  const src = (APP_DATA.panel_fact && APP_DATA.panel_fact.length)
+    ? APP_DATA.panel_fact : (APP_DATA.panel || []);
+  return src.reduce((s,p)=>s+(p.presup_contr_ytd||0),0);
 }
 
 // Clientes que facturan y no tienen ninguna fila en la base instalada. Van
@@ -69,6 +96,7 @@ function _biOtrosFac(){
   const { monto: cruz, usados } = _biFacUnicos(_biAllClientes);
   const fuera = facCli.filter(c=>!usados.has(c.cliente) && (c.real||0)>0);
   return { n: fuera.length, monto: totPanel - cruz, clientes: fuera,
+           contr: _biContrPanel() - _biFacUnicos(_biAllClientes).contr,
            cruz: cruz, tot: totPanel, usados: usados };
 }
 
@@ -202,8 +230,9 @@ function _biVal(c, prop){
 
 function _biClientesFiltrados(){
   // Sin los clientes con contrato vigente: la tabla, la matriz y la curva se
-  // centran en el potencial, y quien ya tiene contrato no tiene nada que capturar.
-  let list = _biBaseList().filter(c => !_biCV(c));
+  // centran en el potencial, y quien ya tiene contrato no tiene nada que
+  // capturar. El botón «Con contrato vigente» los vuelve a incluir.
+  let list = _biIncCV ? _biBaseList() : _biBaseList().filter(c => !_biCV(c));
 
   // Para filtros de potencial, ocultar clientes con 0 equipos en la vista activa
   if(_biFiltPotencial !== 'todos'){
@@ -567,7 +596,30 @@ function _biRenderTabla(){
       }).join('');
     }).join('');
 
-    // Fila de cierre: lo que facturan los clientes sin base instalada
+    // Filas de cierre, bajo las regiones, para que la facturación cuadre con el
+    // resto del panel. Con la casilla marcada los clientes con contrato ya
+    // aparecen en su región con su propia facturación y esta fila sobra; con la
+    // casilla sin marcar, su facturación se muestra junta acá.
+    const cvF = (_biSinFiltros() && !_biIncCV) ? _biFacCV() : null;
+    if(cvF && cvF.n){
+      tb.innerHTML += `<tr style="background:var(--gy);border-top:2px solid var(--brd)">
+        <td style="font-family:'Roboto Mono',monospace;color:var(--mut);font-size:.62rem">—</td>
+        <td><strong style="font-size:.7rem;color:var(--mut)">Clientes con contrato</strong>
+          <span style="font-size:.58rem;color:var(--mut)"> · ${cvF.n} no listados · marca «Sumar clientes con
+          contrato vigente» para verlos en su región</span></td>
+        <td style="text-align:right;font-family:'Roboto Mono',monospace;color:var(--mut)">—</td>
+        <td colspan="8" style="text-align:center;font-size:.58rem;color:var(--mut);font-style:italic">
+          quedan fuera porque esta hoja mira el potencial por capturar; su facturación sí suma al total</td>
+        <td style="text-align:right;color:var(--az1);font-weight:700">${mm(cvF.monto)}</td>
+        <td style="text-align:right;color:var(--teal);font-weight:700">${mm(cvF.contr)}</td>
+        <td style="text-align:right;color:var(--mut)">—</td>
+        <td style="text-align:right;color:var(--mut)">—</td>
+        <td style="text-align:right;color:var(--mut)">—</td>
+        <td style="text-align:right;color:var(--mut)">—</td>
+        <td style="text-align:right;color:var(--mut)">—</td>
+        <td style="text-align:right;color:var(--mut)">—</td>
+      </tr>`;
+    }
     const otros = _biSinFiltros() ? _biOtrosFac() : null;
     if(otros && otros.n){
       const nom = otros.clientes.slice(0,25).map(c=>c.cliente).join('\n');
@@ -580,7 +632,7 @@ function _biRenderTabla(){
         <td colspan="8" style="text-align:center;font-size:.58rem;color:var(--mut);font-style:italic">
           facturan o tienen pipeline sin equipos registrados en esta hoja</td>
         <td style="text-align:right;color:var(--az1);font-weight:700">${mm(otros.monto)}</td>
-        <td style="text-align:right;color:var(--mut)">—</td>
+        <td style="text-align:right;color:var(--teal);font-weight:700">${otros.contr?mm(otros.contr):'—'}</td>
         <td style="text-align:right;color:var(--mut)">—</td>
         ${_biCelPot(_biPipeResid().monto,'var(--az2)')}
         ${_biCelPot(_biPipeResid().st,'var(--teal)')}
@@ -606,8 +658,16 @@ function _biRenderTabla(){
     const mmq  = list.reduce((s,c)=>s+_biVal(c,'mmq_reas'),0);
     // Sin filtros, el pie incluye la fila «Otros clientes» para que Fac. 2026
     // cierre en el mismo total que la portada.
-    const otrosF = _biSinFiltros() ? _biOtrosFac() : { n:0, monto:0 };
-    const facTotal = _biFacUnicos(list).monto + otrosF.monto;
+    const otrosF = _biSinFiltros() ? _biOtrosFac() : { n:0, monto:0, contr:0 };
+    const cvT     = _biIncCV ? { n:0 } : { n: (_biAllClientes||[]).filter(c=>_biCV(c)).length };
+    // Las dos columnas de facturación no se filtran: son la facturación del
+    // año de la empresa, y el segmentador de esta hoja elige qué equipos mirar,
+    // no qué se facturó. Al filtrar, el pie seguiría mostrando sólo lo de los
+    // clientes listados —con ST = Sí bajaba a MM$211 de MM$1.924— y eso se lee
+    // como un descuadre contra el resto del panel. Por eso quedan fijas en el
+    // total del panel, tenga o no la tabla a los clientes con contrato.
+    const facTotal   = _biOtrosFac().tot;
+    const contrTotal = _biContrPanel();
     // Sólo suma el potencial de quienes NO tienen contrato: en los que ya lo
     // tienen no hay nada que capturar.
     const potTotal = list.reduce((s2,c)=>{
@@ -620,7 +680,7 @@ function _biRenderTabla(){
     const pipeEq = list.reduce((a,c)=>a+(+c.pipe_eq||0),0) + rp.monto;
     const pipeSt = list.reduce((a,c)=>a+(+c.pipe_st||0),0) + rp.st;
     const st='text-align:right;font-family:\'Roboto Mono\',monospace;color:rgba(255,255,255,.75)';
-    foot.innerHTML = `<td colspan="2" style="font-weight:700;font-size:.62rem;color:rgba(255,255,255,.85)">${list.length} clientes sin contrato${otrosF.n?' · +'+otrosF.n+' sin base instalada':''}</td>
+    foot.innerHTML = `<td colspan="2" style="font-weight:700;font-size:.62rem;color:rgba(255,255,255,.85)">${list.length} clientes${_biIncCV?'':' sin contrato'}${cvT.n?' · '+cvT.n+' con contrato ocultos':''}${otrosF.n?' · +'+otrosF.n+' sin base instalada':''}</td>
       <td style="${st};font-weight:700;color:#fff">${tot.toLocaleString('es-CL')}</td>
       <td style="${st}">${dent}</td><td style="${st}">${este}</td>
       <td style="${st}">${inc}</td><td style="${st}">${endo}</td>
@@ -629,8 +689,8 @@ function _biRenderTabla(){
         :`<td style="${st};font-weight:700;color:#fff">${fN1(v.vida)}%
           <span style="font-weight:400;font-size:.55rem;opacity:.7">(${Math.round(v.cob*100)}%)</span></td>`;})()}
       <td></td>
-      <td style="${st};font-weight:700;color:#FFC000">${mm(facTotal)}</td>
-      <td></td>
+      <td style="${st};font-weight:700;color:#FFC000" title="Facturación del año de todos los clientes: los de la tabla, los que tienen contrato vigente y los que facturan sin base instalada. Es el mismo total de la portada y de la hoja Facturación, y no cambia con los filtros de la hoja.">${mm(facTotal)}</td>
+      <td style="${st};font-weight:700;color:#28D2C3" title="Facturación de contratos del año, con el mismo alcance y el mismo total que la hoja Facturación. Tampoco cambia con los filtros.">${mm(contrTotal)}</td>
       <td style="${st};font-weight:700;color:#FFC000" title="Potencial de los clientes sin contrato">${mm(potTotal)}</td>
       <td style="${st};color:#fff">${mm(pipeEq)}</td>
       <td style="${st};color:#fff">${mm(pipeSt)}</td>
@@ -1373,7 +1433,8 @@ function _biRegColor(r){
 
 // Datos por región respetando el filtro Potencial ST del inicio de la hoja
 function _biRegData(){
-  const pr = ((window.APP_DATA||{}).base_instalada||{}).por_region || {};
+  const _bi = (window.APP_DATA||{}).base_instalada||{};
+  const pr = (_biIncCV ? (_bi.por_region_todos || _bi.por_region) : _bi.por_region) || {};
   const usaSi = _biFiltPotencial === 'si';
   // Los clientes se cuentan sobre la misma lista y con la misma región que la
   // tabla Detalle por Cliente —cada cliente en la región donde tiene la mayoría
@@ -1382,7 +1443,7 @@ function _biRegData(){
   // dos veces y el total no calzaba con el detalle.
   const nCli = {};
   (_biAllClientes||[]).forEach(c=>{
-    if(_biCV(c)) return;
+    if(_biCV(c) && !_biIncCV) return;
     if(_biFiltPotencial !== 'todos' && !(_biVal(c,'total') > 0)) return;
     const r = c.region || 'Sin región';
     nCli[r] = (nCli[r] || 0) + 1;
@@ -1523,7 +1584,8 @@ function _biRenderRegTabla(){
       <strong>No incluye a los clientes con contrato</strong> en la hoja CONTRATOS TODOS (Estado
       «Activado», aunque la fecha de término ya haya pasado): ni sus equipos, ni sus clientes, ni su potencial, porque
       esta tabla, el Detalle por Cliente, la Matriz de Prospección y la curva de concentración se centran en el
-      potencial por capturar.<br>
+      potencial por capturar. El botón <strong>«Con contrato vigente»</strong> sobre el Detalle por Cliente los
+      vuelve a incluir en las cuatro vistas, para ver la base instalada completa.<br>
       <strong>Potencial ST</strong> suma el potencial de los mismos clientes de la tabla Detalle por Cliente,
       por lo que su total coincide con el de esa tabla. Tarifas anuales de mantención por equipo:
       Esterilización <strong>50 UF</strong> (${mm(_BI_TARIFA.esterilizacion)}),
@@ -1682,18 +1744,37 @@ function _biNotaFac(){
   const el = document.getElementById('bi-fac-nota');
   if(!el) return;
   const otros = _biOtrosFac();
-  const totPanel = otros.tot, cruz = otros.cruz;
-  const nCruz = otros.usados ? otros.usados.size : 0;
+  const cvF = _biFacCV();
+  const totPanel = otros.tot;
   if(!totPanel){ el.textContent=''; return; }
   el.innerHTML =
-    `<strong>Fac. 2026</strong> es la facturación del año de cada cliente, con la misma base que «Ingresos Totales» `+
-    `de la portada. Los clientes con equipos registrados suman <strong>${mm(cruz)}</strong> en ${nCruz} filas y la `+
-    `fila <strong>Otros clientes</strong> recoge los ${otros.n} que facturan sin base instalada cargada `+
-    `(<strong>${mm(otros.monto)}</strong>), de modo que el total cierra en los ${mm(totPanel)} del panel. `+
-    `Cada cliente se cuenta una sola vez: el cruce por nombre exige coincidencia exacta o una única coincidencia `+
-    `parcial sin ambigüedad. Al aplicar cualquier filtro la fila «Otros clientes» se oculta y el pie pasa a mostrar `+
-    `sólo el subconjunto seleccionado.`;
+    `<strong>Fac. 2026</strong> es la facturación del año de cada cliente y <strong>F. Contr.</strong> la parte `+
+    `que viene de contratos, ambas con la misma base que «Ingresos Totales» de la portada y la hoja Facturación. `+
+    `El pie siempre cierra en los <strong>${mm(totPanel)}</strong> del panel y <strong>${mm(_biContrPanel())}</strong> `+
+    `de contratos. Con la casilla <strong>«Sumar clientes con contrato vigente»</strong> marcada, los ${cvF.n} `+
+    `clientes con contrato aparecen en su región con su propia facturación; sin marcar, su facturación va junta en `+
+    `la fila <strong>Clientes con contrato</strong> (<strong>${mm(cvF.monto)}</strong>), bajo las regiones. La fila `+
+    `<strong>Otros clientes</strong> recoge a los ${otros.n} que facturan sin base instalada cargada `+
+    `(<strong>${mm(otros.monto)}</strong>). Cada cliente se cuenta una sola vez: el cruce por nombre exige `+
+    `coincidencia exacta o una única coincidencia parcial sin ambigüedad. Al aplicar un filtro las filas de cierre `+
+    `se ocultan, pero los dos totales de facturación se mantienen: el segmentador elige qué equipos mirar, no qué `+
+    `se facturó.`;
 }
+// Muestra o esconde a los clientes con contrato vigente en toda la hoja:
+// tabla, resumen por región, mapa, matriz y curva se leen de la misma lista.
+function biTogCV(btn){
+  _biIncCV = !_biIncCV;
+  if(btn){
+    btn.classList.toggle('on', _biIncCV);
+    btn.textContent = (_biIncCV ? '☑' : '☐') + ' Sumar clientes con contrato vigente';
+  }
+  _biRegPotMap = null;
+  _biRenderTabla();
+  _biRenderRegTabla();
+  _biRenderMapa();
+  _biNotaFac();
+}
+
 function biSearch(val){
   _biQuery = val;
   _biRenderTabla();
@@ -1930,8 +2011,11 @@ function initBaseInstalada(){
       <button class="btn" data-bfl="mobiliario" onclick="biFiltrarLinea(this)" style="border-left:2px solid #7B2FBE">Mobil.</button>
       <button class="btn" data-bfl="mmq_reas" onclick="biFiltrarLinea(this)" style="border-left:2px solid #00832F">MMQ/REAS</button>
     </div>
-    <span style="font-size:.58rem;color:var(--mut);border-left:1px solid var(--brd);padding-left:.5rem">
-      Sin clientes con contrato «Activado»</span>
+    <div style="border-left:1px solid var(--brd);padding-left:.5rem">
+      <button class="btn on" id="bi-btn-cv" onclick="biTogCV(this)"
+        title="Marcada, la tabla y el resumen por región muestran toda la base instalada. Al desmarcarla quedan fuera los clientes con contrato «Activado» en CONTRATOS TODOS —también en la matriz y en la curva—, que es la vista centrada en el potencial por capturar.">
+        ☑ Sumar clientes con contrato vigente</button>
+    </div>
     <input type="search" placeholder="🔍 Buscar cliente…" oninput="biSearch(this.value)"
       style="margin-left:auto;border:1px solid var(--brd);border-radius:20px;padding:.28rem .8rem;font-size:.65rem;outline:none;width:190px;font-family:'Roboto',sans-serif">
   </div>
@@ -1985,7 +2069,7 @@ function initBaseInstalada(){
         Cada punto es un cliente. El eje horizontal es <strong>cuánto de su vida útil lleva consumido</strong>
         el parque y el vertical el <strong>potencial ST anual de mantenimiento de la base instalada</strong>
         —equipos de Esterilización, Endoscopía y Dental por su tarifa anual—. Los clientes con contrato
-        «Activado» en CONTRATOS TODOS no aparecen;
+        «Activado» en CONTRATOS TODOS no aparecen, salvo que se enciendan con el botón sobre la tabla;
         el tamaño del punto repite ese potencial. No incluye las garantías ni los equipos del pipeline, que son
         venta futura. Las líneas marcan la mediana de cada eje: el
         <strong>cuadrante superior derecho</strong> reúne a los clientes con el parque más desgastado y más

@@ -35,6 +35,63 @@
 
   const totalBrecha = () => (OP.total || 0) + (CT.total || 0) + (ST.total || 0);
 
+  // ── FACTURACIÓN DEL CLIENTE ──────────────────────────────────
+  // Lo que el cliente lleva facturado en el año, separando la parte que viene
+  // de contratos de la que no. Las dos cifras salen del panel de facturación,
+  // la misma base que «Ingresos Totales» de la portada y que la hoja
+  // Facturación, para que una brecha se lea contra lo que ese cliente factura.
+  // El nombre se cruza igual que en la hoja Base Instalada: primero exacto y,
+  // si no, una única coincidencia parcial; con dos candidatos no se asigna
+  // ninguno, porque «Hospital San José» calza con cuatro hospitales distintos.
+  const _fNorm = s => s ? String(s).trim().toUpperCase().replace(/\s+/g, ' ')
+                          .normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
+  const _facMap = {};
+  ((A.panel_fact && A.panel_fact.length) ? A.panel_fact : (A.panel || [])).forEach(p => {
+    const k = _fNorm(p.cliente);
+    if (k) _facMap[k] = p;
+  });
+  const _facCache = {};
+  function _brFacCli(cliente) {
+    const k = _fNorm(cliente);
+    if (_facCache[k] !== undefined) return _facCache[k];
+    let p = _facMap[k];
+    if (!p && k.length >= 8) {
+      const hit = Object.keys(_facMap).filter(pk => pk.length >= 8 && (pk.includes(k) || k.includes(pk)));
+      if (hit.length === 1) p = _facMap[hit[0]];
+    }
+    const tot = p ? (p.real_ytd_fac !== undefined ? (p.real_ytd_fac || 0) : (p.real_ytd || 0)) : 0;
+    const contr = p ? (p.presup_contr_ytd || 0) : 0;
+    // La facturación de contratos no puede superar al total del cliente: si el
+    // Excel deja el presupuesto por sobre lo facturado, el resto sería negativo.
+    const c = Math.min(contr, tot);
+    const r = p ? { p: p, tot: tot, contr: c, noContr: tot - c } : { p: null, tot: 0, contr: 0, noContr: 0 };
+    _facCache[k] = r;
+    return r;
+  }
+
+  // Suma la facturación de un grupo de clientes contando cada uno una sola vez:
+  // dos nombres de la hoja de brechas pueden apuntar al mismo cliente del panel.
+  function _brFacTotal(clientes) {
+    const vistos = new Set();
+    let tot = 0, contr = 0, noContr = 0;
+    (clientes || []).forEach(nombre => {
+      const f = _brFacCli(nombre);
+      if (!f.p || vistos.has(f.p.cliente)) return;
+      vistos.add(f.p.cliente);
+      tot += f.tot; contr += f.contr; noContr += f.noContr;
+    });
+    return { tot: tot, contr: contr, noContr: noContr, n: vistos.size };
+  }
+
+  // Tres celdas de facturación, iguales en las dos tablas.
+  function _brFacCeldas(cliente, tam) {
+    const f = typeof cliente === 'string' ? _brFacCli(cliente) : cliente;
+    const td = (v, col) => '<td style="padding:.3rem .55rem;text-align:right;font-size:' + (tam || '.62rem') +
+      ';font-variant-numeric:tabular-nums;color:' + col + ';' + SEP + '">' +
+      (v ? nMM(v) : '<span style="color:var(--mut)">—</span>') + '</td>';
+    return td(f.tot, 'var(--az1);font-weight:700') + td(f.contr, 'var(--teal)') + td(f.noContr, 'var(--or)');
+  }
+
   // ── KPIs principales ─────────────────────────────────────────
   function kpis() {
     const box = document.getElementById('br-kpi');
@@ -650,6 +707,7 @@
         <td style="padding:.3rem .6rem;text-align:right;font-size:.65rem;font-weight:700;
                    font-variant-numeric:tabular-nums;${SEP}">${nCLP(d.monto)}</td>
         <td style="padding:.3rem .6rem;text-align:right;font-size:.6rem;color:var(--mut);${SEP}">${pc(d.monto, ST.total)}</td>
+        ${_brFacCeldas(d.cliente)}
         <td style="padding:.3rem .6rem;${SEP}">
           <div style="display:flex;align-items:center;gap:5px">
             <div style="flex:1;height:6px;background:var(--gy);border-radius:3px;overflow:hidden;min-width:40px">
@@ -659,7 +717,7 @@
       </tr>`;
 
       if (open) {
-        rows += `<tr style="background:var(--bg)"><td colspan="6" style="padding:0">
+        rows += `<tr style="background:var(--bg)"><td colspan="9" style="padding:0">
           <table style="width:100%;border-collapse:collapse;background:var(--bg)">
             <thead><tr>
               ${['SKU','PRODUCTO','LÍNEA','CANT','MONTO','ROTACIÓN','ESPERA'].map((t, k) =>
@@ -709,9 +767,12 @@
       </div>
       <div style="padding:.3rem 0 .5rem;border-bottom:1px solid var(--brd);margin-bottom:.4rem">${leyenda}</div>
       <div style="overflow-x:auto;max-height:420px;overflow-y:auto">
-        <table style="width:100%;border-collapse:collapse;min-width:620px">
+        <table style="width:100%;border-collapse:collapse;min-width:960px">
           <thead><tr>
             ${th('CLIENTE', 'left')}${th('SKU', 'right')}${th('MONTO', 'right')}${th('%', 'right')}
+            ${th('FACT. 2026', 'right', 'background:#0E2D55')}
+            ${th('F. CONTRATOS', 'right', 'background:#0E2D55')}
+            ${th('F. NO CONTRATOS', 'right', 'background:#0E2D55')}
             ${th('', 'left')}${th('MEZCLA DE ROTACIÓN (% DEL VALORIZADO)', 'left')}
           </tr></thead>
           <tbody>${rows}</tbody>
@@ -720,6 +781,14 @@
             <td style="padding:.35rem .6rem;text-align:right;font-size:.6rem;${SEP}">${dat.reduce((s2, d) => s2 + d.n, 0)}</td>
             <td style="padding:.35rem .6rem;text-align:right;font-size:.63rem;font-variant-numeric:tabular-nums;${SEP}">${nCLP(ST.total)}</td>
             <td style="padding:.35rem .6rem;text-align:right;font-size:.6rem;${SEP}">100%</td>
+            ${(()=>{
+              // En el pie, sobre fondo azul, los montos van en blanco: con el
+              // azul de las filas no se leían.
+              const f = _brFacTotal(dat.map(x => x.cliente));
+              const td = (v, col) => `<td style="padding:.35rem .6rem;text-align:right;font-size:.62rem;
+                font-variant-numeric:tabular-nums;color:${col};${SEP}">${nMM(v)}</td>`;
+              return td(f.tot, '#fff') + td(f.contr, '#7FE8DF') + td(f.noContr, '#FFC08A');
+            })()}
             <td style="${SEP}"></td>
             <td style="padding:.3rem .6rem">${barraRot(rotTotal, 17)}</td>
           </tr></tfoot>
@@ -887,14 +956,18 @@
             '<span style="color:var(--mut)">· ' + v.n + ' SKU</span></span>').join('') +
       '</div>' +
       '<div style="overflow-x:auto;max-height:520px;overflow-y:auto">' +
-      '<table style="width:100%;border-collapse:collapse;min-width:1120px;table-layout:fixed"><colgroup>' +
-      '<col style="width:22%"><col style="width:5%"><col style="width:7%"><col style="width:9%">' +
-      '<col style="width:7%"><col style="width:8%"><col style="width:8%"><col style="width:10%">' +
-      '<col style="width:6%"><col style="width:18%">' +
+      '<table style="width:100%;border-collapse:collapse;min-width:1420px;table-layout:fixed"><colgroup>' +
+      '<col style="width:18%"><col style="width:4%"><col style="width:6%"><col style="width:7%">' +
+      '<col style="width:6%"><col style="width:7%"><col style="width:6%"><col style="width:8%">' +
+      '<col style="width:5%"><col style="width:7%"><col style="width:7%"><col style="width:7%">' +
+      '<col style="width:12%">' +
       '</colgroup><thead><tr>' +
       th('CLIENTE / SKU') + th('SKU', 'right') + th('UN. SOLIC.', 'right') + th('BRECHA', 'right') +
       th('DE STOCK', 'right') + th('DE BACK ORDER', 'right') + th('POR COMPRAR', 'right') +
       th('VALOR A COMPRAR', 'right') + th('% CUBIERTO', 'right') +
+      th('FACT. 2026', 'right', 'background:#0E2D55') +
+      th('F. CONTRATOS', 'right', 'background:#0E2D55') +
+      th('F. NO CONTRATOS', 'right', 'background:#0E2D55') +
       th('ROTACIÓN (% DE LO POR COMPRAR)', 'left') +
       '</tr></thead><tbody>';
 
@@ -915,6 +988,7 @@
             c.comprar ? 'font-weight:700;color:#C00000;' : 'font-weight:700;color:var(--gn);') +
         num(c.val ? nMM(c.val) : '—', c.val ? 'font-weight:700;color:#C00000;' : 'color:var(--gn);') +
         num(cub.toFixed(0) + '%', 'color:' + (cub >= 99 ? 'var(--gn)' : cub >= 50 ? 'var(--or)' : 'var(--rd)') + ';') +
+        _brFacCeldas(c.cliente) +
         '<td style="padding:.3rem .55rem">' + (c.val
           ? barraRot(c.rot, 14, 'de lo por comprar')
           : '<span style="font-size:.55rem;color:var(--gn);font-weight:700">cubierto</span>') + '</td>' +
@@ -936,6 +1010,7 @@
             num(d.comprar ? nUn(d.comprar) : '0', d.comprar ? 'color:#C00000;font-weight:700;' : 'color:var(--gn);') +
             num(d.valComprar ? nMM(d.valComprar) : '—', d.valComprar ? 'color:#C00000;' : 'color:var(--gn);') +
             num(cb.toFixed(0) + '%', 'color:var(--mut);') +
+            '<td style="' + SEP + '"></td><td style="' + SEP + '"></td><td style="' + SEP + '"></td>' +
             '<td style="padding:.22rem .55rem">' +
               (d.valComprar ? '' : '<span style="font-size:.53rem;color:var(--gn);margin-right:.3rem" ' +
                 'title="El stock y el back order alcanzan: no entra en la mezcla">✓</span>') +
@@ -962,6 +1037,12 @@
       '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + nUn(T.comprar) + '</td>' +
       '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + nMM(T.val) + '</td>' +
       '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' + SEP + '">' + cubT.toFixed(0) + '%</td>' +
+      (function () {
+        const f = _brFacTotal(D.map(c => c.cliente));
+        const td = v => '<td style="padding:.35rem .55rem;text-align:right;font-size:.62rem;' +
+          'font-variant-numeric:tabular-nums;' + SEP + '">' + nMM(v) + '</td>';
+        return td(f.tot) + td(f.contr) + td(f.noContr);
+      })() +
       '<td style="padding:.35rem .55rem">' + barraRot(rotT, 14, 'de lo por comprar') + '</td>' +
       '</tr></tfoot></table></div>' +
       '<p style="font-size:.56rem;color:var(--mut);margin:.5rem 0 0;line-height:1.55">' +
@@ -978,7 +1059,10 @@
       'Un SKU que el stock o el back order ya cubren queda fuera de la mezcla —va marcado con ✓— porque no ' +
       'obliga a comprar nada; por eso esta barra no coincide con la de «Brecha por cliente», que pesa la ' +
       'brecha valorizada completa. Así, una barra mayoritariamente verde señala que la compra pendiente es ' +
-      'de repuestos que se mueven, y una roja o naranja, que se compraría inventario de baja rotación.</p>';
+      'de repuestos que se mueven, y una roja o naranja, que se compraría inventario de baja rotación. ' +
+      '<strong>Fact. 2026</strong> es lo que ese cliente lleva facturado en el año —la misma base que «Ingresos ' +
+      'Totales» de la portada—, abierta en <strong>F. Contratos</strong> y <strong>F. No Contratos</strong>, para ' +
+      'leer la compra pendiente contra el tamaño del cliente. Un cliente sin facturación cruzada aparece con «—».</p>';
 
     box.innerHTML = html;
     const cEl = document.getElementById('br-cmp-count');

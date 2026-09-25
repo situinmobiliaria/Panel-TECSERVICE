@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
 // hoja_plan_rm.js — Plan RM y Región de Valparaíso
 // Los clientes con Potencial de ST de las dos regiones repartidos en
-// tres grupos de visita, y la agenda de los nuevos KAM desde octubre.
+// tres grupos de visita, y la agenda de Eglys y Cristián desde octubre.
 // Depende de: APP_DATA.plan_rm (extractor.build_plan_rm), utils.js,
 //             Leaflet, xlsx-js-style
 // ═══════════════════════════════════════════════════════════════
@@ -17,14 +17,20 @@
   // Un color por grupo, el mismo en tablas, agenda y mapa. El tono de fondo es
   // translúcido para que funcione sobre el fondo claro y el oscuro del panel.
   const GRUPO = {
-    1: { nom: 'Grupo 1 · Top ' + P.top_pot + ' por potencial ST', quien: 'Cristian / Eglys',
+    1: { nom: 'Grupo 1 · Top ' + P.top_pot + ' por potencial ST', quien: 'Visita primero en la agenda',
          col: '#002D73', fondo: 'rgba(0,45,115,.11)', xl: 'DCE6F4' },
-    2: { nom: 'Grupo 2 · Top ' + P.top_camas + ' por camas', quien: 'Nuevos KAM · con plan de entrada',
+    2: { nom: 'Grupo 2 · Top ' + P.top_camas + ' por camas', quien: 'Con plan de entrada escrito',
          col: '#B86E00', fondo: 'rgba(255,170,20,.17)', xl: 'FFEFC9' },
-    3: { nom: 'Grupo 3 · Resto de la cartera', quien: 'Nuevos KAM · sin plan escrito',
+    3: { nom: 'Grupo 3 · Resto de la cartera', quien: 'De mayor a menor potencial ST',
          col: '#2E7D4F', fondo: 'rgba(46,125,79,.08)', xl: 'E8F3EC' },
   };
-  const KAMCOL = { 'KAM 1': '#0A5C8C', 'KAM 2': '#D46000' };
+  // Quién visita a cada cliente ya no depende del grupo sino de su comuna: los
+  // tres grupos los atienden los mismos dos ejecutivos. Los colores son los
+  // mismos que usa la hoja Visitas Ejecutivos.
+  const EJES = P.ejecutivos || ['Eglys Ramírez', 'Cristián Pérez'];
+  const EJECOL = { 'Eglys Ramírez': '#7A1FAA', 'Cristián Pérez': '#003F7F' };
+  EJES.forEach((e, i) => { if (!EJECOL[e]) EJECOL[e] = ['#7A1FAA', '#003F7F', '#0A7D74'][i % 3]; });
+  const ejeCorto = e => String(e || '').split(' ')[0];
 
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -98,7 +104,7 @@
 
     return `
     <div class="sh"><h2>Plan RM y Región de Valparaíso</h2><div class="sh-line"></div>
-      <span class="sh-tag">Clientes con Potencial de ST · visitas de Cristian, Eglys y los nuevos KAM</span></div>
+      <span class="sh-tag">Clientes con Potencial de ST · cartera de Eglys Ramírez y Cristián Pérez por comuna</span></div>
 
     <div class="g5" id="prm-kpi" style="grid-template-columns:repeat(5,1fr);margin-bottom:.9rem"></div>
 
@@ -117,7 +123,7 @@
       </div>
       <div class="cb" style="padding:.55rem .9rem;font-size:.6rem;color:var(--mut);line-height:1.6">
         En las tablas de abajo, los clientes del <strong style="color:${GRUPO[2].col}">grupo 2</strong> tienen una
-        columna <strong>Plan de entrada</strong> para que el KAM escriba cómo pretende entrar. Lo escrito se guarda en
+        columna <strong>Plan de entrada</strong> para escribir cómo se pretende entrar. Lo escrito se guarda en
         <strong>este navegador</strong>: para compartirlo con el equipo usa <strong>Exportar Excel del plan</strong>, que
         lleva ambas regiones con los planes escritos.
       </div>
@@ -126,7 +132,7 @@
     ${tablaReg('Metropolitana')}
     ${tablaReg('Valparaíso')}
 
-    <div class="sh" style="margin-top:1.5rem"><h2>Agenda de los nuevos KAM</h2><div class="sh-line"></div>
+    <div class="sh" style="margin-top:1.5rem"><h2>Agenda de visitas</h2><div class="sh-line"></div>
       <span class="sh-tag" id="prm-ag-tag">—</span></div>
 
     <div class="card" id="prm-ag-card">
@@ -139,7 +145,7 @@
           border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt);cursor:pointer">‹</button>
         <button onclick="window._prmSemPaso(1)" title="Semana siguiente" style="font-size:.6rem;padding:.14rem .45rem;
           border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt);cursor:pointer">›</button>
-        <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-left:.5rem">KAM</span>
+        <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-left:.5rem">Ejecutivo</span>
         <div id="prm-kam" style="display:flex;gap:.25rem"></div>
         ${btnExp('prm-ag-xls', 'window._prmExcelAgenda()', 'Exportar Excel de la agenda', true)}
       </div>
@@ -153,6 +159,37 @@
           <div id="prm-ag-tab" style="max-height:600px;overflow-y:auto"></div>
         </div>
       </div>
+    </div>
+
+    <div class="card" style="margin-top:.9rem" id="prm-cal-card">
+      <div class="ch" style="flex-wrap:wrap;gap:.5rem">
+        <span class="ct">Calendario de visitas · seguimiento</span>
+        <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-left:.3rem">Ejecutivo</span>
+        <div id="prm-cal-eje" style="display:flex;gap:.25rem"></div>
+        <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-left:.4rem">Mes</span>
+        <select id="prm-cal-mes" onchange="window._prmCalMes(this.value)" style="font-size:.6rem;padding:.2rem .4rem;
+          border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt)"></select>
+        <span style="font-size:.57rem;color:var(--mut)" id="prm-cal-tag">—</span>
+        ${btnExp('prm-cal-xls', 'window._prmExcelCal()', 'Exportar Excel del calendario', true)}
+      </div>
+      <div class="cb" style="padding:.7rem .9rem">
+        <div id="prm-cal" style="max-height:460px;overflow:auto"></div>
+        <p style="font-size:.56rem;color:var(--mut);margin:.5rem 0 0;line-height:1.55">
+          Una fila por semana y ejecutivo, con los días trabajados, las visitas, cómo se reparten entre los tres
+          grupos y las dos regiones, las comunas que toca y el potencial ST que suma esa semana. Los selectores de
+          <strong>ejecutivo</strong> y <strong>mes</strong> son propios de esta tabla y no mueven la agenda de
+          arriba; el Excel sale con lo que se esté viendo, con una hoja de resumen semanal y otra con el detalle
+          día por día, ambas con columnas en blanco para marcar el avance.</p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:.9rem" id="prm-gantt-card">
+      <div class="ch" style="flex-wrap:wrap;gap:.5rem">
+        <span class="ct">Carta Gantt del plan</span>
+        <span style="font-size:.57rem;color:var(--mut)" id="prm-gantt-tag">—</span>
+        ${btnExp('prm-gantt-pdf', "exportarPanel({ids:['prm-gantt-card'],titulo:'Plan RM y Valparaíso · Carta Gantt',archivo:'Plan_RM_carta_gantt',btn:'prm-gantt-pdf',ancho:1600})", 'Exportar')}
+      </div>
+      <div class="cb" style="padding:.75rem .9rem"><div id="prm-gantt"></div></div>
     </div>`;
   }
 
@@ -180,15 +217,15 @@
       '<div class="kpi-lbl">' + lbl + '</div><div class="kpi-val">' + val + '</div>' +
       '<div class="kpi-sub">' + sub + '</div></div>';
     const fin = AG.length ? AG[AG.length - 1].f : '';
-    const diasK = new Set(AG.filter(a => a.k === 'KAM 1').map(a => a.f)).size;
+    const diasK = Math.max.apply(null, EJES.map(e => new Set(AG.filter(a => a.k === e).map(a => a.f)).size).concat([0]));
     box.innerHTML =
       k('var(--az3)', n0(C.length), 'Clientes del plan', REGS.map(r => n0(C.filter(u => u.r === r).length) +
         (r === 'Metropolitana' ? ' RM' : ' Valparaíso')).join(' · ')) +
-      k(GRUPO[1].col, n0(cnt(1)), 'Cristian / Eglys', porReg(1) + ' · top por potencial ST') +
-      k(GRUPO[2].col, n0(cnt(2)), 'KAM con plan de entrada', porReg(2) + ' · top por camas') +
-      k(GRUPO[3].col, n0(cnt(3)), 'KAM sin plan escrito', porReg(3) + ' · resto de la cartera') +
+      k(GRUPO[1].col, n0(cnt(1)), 'Top por potencial ST', porReg(1) + ' · primeros en la agenda') +
+      k(GRUPO[2].col, n0(cnt(2)), 'Con plan de entrada', porReg(2) + ' · top por camas') +
+      k(GRUPO[3].col, n0(cnt(3)), 'Resto de la cartera', porReg(3) + ' · por potencial ST') +
       k('var(--or)', n0(AG.length), 'Visitas agendadas',
-        diasK + ' días hábiles por KAM · ' + (AG.length ? fCorta(AG[0].f) + ' a ' + fCorta(fin) : '—'));
+        diasK + ' días hábiles por ejecutivo · ' + (AG.length ? fCorta(AG[0].f) + ' a ' + fCorta(fin) : '—'));
   }
 
   // Clientes que quedan fuera por tener contrato vigente, plegados.
@@ -240,7 +277,8 @@
 
     const camF = f => C.filter(u => u.camF === f).length;
     const precC = f => C.filter(u => f(u.prec)).length;
-    const k1 = C.filter(u => u.resp === 'KAM 1'), k2 = C.filter(u => u.resp === 'KAM 2');
+    const porEje = {};
+    EJES.forEach(e => { porEje[e] = C.filter(u => u.resp === e); });
     const topCom = lst => {
       const m = {};
       lst.forEach(u => { if (u.com && !aprox(u)) m[u.com] = (m[u.com] || 0) + 1; });
@@ -266,15 +304,15 @@
         paso(2, 'Top ' + P.top_camas + ' del resto por camas',
           'de los clientes que no quedaron en el grupo 1, los de mayor número de camas. Las camas miden el tamaño de la ' +
           'institución y, con él, la puerta de entrada a futuros negocios.',
-          'Para cada uno el KAM escribe un <strong>plan de entrada</strong> en la columna de la tabla.') + flecha +
+          'Para cada uno se escribe un <strong>plan de entrada</strong> en la columna de la tabla.') + flecha +
         paso(3, 'Resto de la cartera',
           'todos los demás clientes con Potencial de ST de la región.',
-          'Los visitan los mismos KAM dentro de su agenda, sin plan escrito.') +
+          'Se visitan de mayor a menor potencial ST anual: primero las cuentas grandes de la cola.') +
       '</div>' +
 
       '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.7rem;margin-top:.9rem">' +
         '<div style="border:1px solid var(--brd);border-radius:6px;padding:.6rem .75rem;background:var(--bg2)">' +
-          '<div style="font-size:.6rem;font-weight:800;color:var(--az1);margin-bottom:.3rem">Agenda de los nuevos KAM</div>' +
+          '<div style="font-size:.6rem;font-weight:800;color:var(--az1);margin-bottom:.3rem">Agenda de visitas</div>' +
           '<div style="font-size:.59rem;line-height:1.6">Visitan a los grupos 2 y 3: <strong>' + n0(AG.length) + '</strong> visitas, ' +
           '<strong>' + P.visitas_dia + ' por día</strong> cada uno y en paralelo, en días hábiles desde el <strong>' +
           (AG.length ? fLarga(AG[0].f) : '—') + '</strong> hasta el <strong>' + (AG.length ? fLarga(AG[AG.length - 1].f) : '—') +
@@ -284,12 +322,14 @@
         '<div style="border:1px solid var(--brd);border-radius:6px;padding:.6rem .75rem;background:var(--bg2)">' +
           '<div style="font-size:.6rem;font-weight:800;color:var(--az1);margin-bottom:.3rem">Territorios</div>' +
           '<div style="font-size:.59rem;line-height:1.6">' +
-          '<span style="color:' + KAMCOL['KAM 1'] + ';font-weight:800">KAM 1</span> · ' + k1.length + ' clientes de la RM ' +
-          '(oriente, centro y sur): ' + esc(topCom(k1)) + '.<br>' +
-          '<span style="color:' + KAMCOL['KAM 2'] + ';font-weight:800">KAM 2</span> · ' + k2.length + ' clientes: toda la ' +
-          'Región de Valparaíso y el poniente de la RM, que es el lado que da hacia la costa: ' + esc(topCom(k2)) + '. ' +
-          'Hace Valparaíso en un bloque seguido para no ir y volver desde Santiago en la misma semana.<br>' +
-          'Cada día junta ' + P.visitas_dia + ' clientes cercanos entre sí.</div>' +
+          EJES.map(e => '<span style="color:' + EJECOL[e] + ';font-weight:800">' + esc(e) + '</span> · ' +
+            porEje[e].length + ' clientes' +
+            (e === P.eje_valpo ? ', incluida toda la Región de Valparaíso' : '') + ': ' +
+            esc(((P.comunas_eje || {})[e] || []).join(', ')) + '.<br>').join('') +
+          (P.eje_valpo ? '<strong>' + esc(P.eje_valpo) + '</strong> hace Valparaíso en un bloque seguido para no ir y ' +
+            'volver desde Santiago en la misma semana.<br>' : '') +
+          'Cada día junta ' + P.visitas_dia + ' clientes cercanos entre sí. Los clientes cuya comuna no está en ninguna ' +
+          'de las dos listas quedan con el ejecutivo más cercano, marcados «comuna por confirmar».</div>' +
         '</div>' +
         '<div style="border:1px solid var(--brd);border-radius:6px;padding:.6rem .75rem;background:var(--bg2)">' +
           '<div style="font-size:.6rem;font-weight:800;color:var(--az1);margin-bottom:.3rem">De dónde salen los datos</div>' +
@@ -309,9 +349,9 @@
         (dups.length ? '<strong>Misma institución con dos cuentas:</strong> ' + dups.map(u => esc(u.n) + ' ↔ ' +
           esc(u.dup.join(', '))).filter((x, i, a) => a.indexOf(x) === i).join(' · ') +
           '. Calzan con el mismo establecimiento del registro y ocupan dos lugares del top ' + P.top_camas +
-          '; conviene que el KAM haga un solo plan para ambas.<br>' : '') +
+          '; conviene hacer un solo plan para ambas.<br>' : '') +
         (rem.length ? '<strong>' + rem.map(u => esc(u.n)).join(', ') + '</strong> está en Isla de Pascua: queda a cargo del ' +
-          'KAM 2 pero fuera de la agenda, porque requiere un viaje aparte.' : '') + '</div>' : '');
+          esc(P.eje_valpo || EJES[0]) + ' pero fuera de la agenda, porque requiere un viaje aparte.' : '') + '</div>' : '');
   }
 
   // ── Tablas por región ────────────────────────────────────────
@@ -351,7 +391,7 @@
       th('MOBIL.', 'right') + th('OTROS', 'right') +
       th('% V. ÚTIL', 'right', 'Promedio del % de vida útil consumida de sus equipos') +
       th('FACT. 2026', 'right') + th('FACT. 2025', 'right') + th('RELACIÓN') +
-      th('PLAN DE ENTRADA (KAM)', 'left', 'Sólo grupo 2: cómo pretende entrar el KAM a este cliente') +
+      th('PLAN DE ENTRADA', 'left', 'Sólo grupo 2: cómo se pretende entrar a este cliente') +
       '</tr></thead><tbody>';
 
     let gAnt = null;
@@ -388,7 +428,9 @@
            (aprox(u) ? ' · <span style="color:var(--or)">ubicación por confirmar</span>' : '') + '</div>' +
            (u.dup && u.dup.length ? '<div style="font-size:.53rem;color:var(--or);font-weight:700">⚑ misma institución que ' +
              esc(u.dup.join(', ')) + '</div>' : '')) +
-        td('<span style="font-weight:700;color:' + (KAMCOL[u.resp] || G.col) + ';white-space:nowrap">' + esc(u.resp) + '</span>') +
+        td('<span style="font-weight:700;color:' + (EJECOL[u.resp] || G.col) + ';white-space:nowrap" title="' +
+          esc(u.resp_src === 'Comuna' ? 'Por su comuna: ' + (u.com || '') : u.resp_src || '') + '">' + esc(ejeCorto(u.resp)) +
+          (u.resp_src && u.resp_src.indexOf('Cercanía') === 0 ? ' <span style="color:var(--or)">•</span>' : '') + '</span>') +
         td(vis) +
         '<td style="padding:.3rem .45rem;font-size:.6rem;text-align:right;border-right:1px solid var(--brd);vertical-align:top;' +
           'font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:' + (u.g === 2 ? 800 : 600) + '"' + camTip + '>' + cam + '</td>' +
@@ -409,7 +451,8 @@
       'Las <strong>camas</strong> vienen del registro de camas por establecimiento; al pasar el mouse se ve con qué establecimiento ' +
       'se cruzó. <strong>est.</strong> marca a los hospitales y clínicas que no figuran en el registro, estimados con la mediana de ' +
       'su tipo en la región. Los equipos, el potencial y el % de vida útil son de la base instalada con Potencial de ST. ' +
-      'La <strong>1ª visita</strong> es el día que le toca en la agenda de los KAM.</p>';
+      'La <strong>1ª visita</strong> es el día que le toca en la agenda. El punto naranjo junto al ejecutivo marca a ' +
+      'los clientes cuya comuna no está confirmada: quedaron con el ejecutivo más cercano.</p>';
     box.innerHTML = html;
   }
 
@@ -434,12 +477,12 @@
       selS.innerHTML = '<option value="todas"' + (_sem === 'todas' ? ' selected' : '') + '>Todas las semanas</option>' +
         SEM.map(s => '<option value="' + s.s + '"' + (s.s === _sem ? ' selected' : '') + '>' + esc(semLbl(s.s)) + '</option>').join('');
     }
-    botones('prm-kam', [['ambos', 'Ambos'], ['KAM 1', 'KAM 1', KAMCOL['KAM 1']], ['KAM 2', 'KAM 2', KAMCOL['KAM 2']]],
+    botones('prm-kam', [['ambos', 'Ambos']].concat(EJES.map(e => [e, ejeCorto(e), EJECOL[e]])),
             _kam, 'window._prmKam');
 
     const vis = AG.filter(a => (_sem === 'todas' || a.s === _sem) && (_kam === 'ambos' || a.k === _kam));
     const tag = document.getElementById('prm-ag-tag');
-    if (tag) tag.textContent = n0(AG.length) + ' visitas · ' + P.visitas_dia + ' por día por KAM · ' +
+    if (tag) tag.textContent = n0(AG.length) + ' visitas · ' + P.visitas_dia + ' por día por ejecutivo · ' +
       (AG.length ? fCorta(AG[0].f) + ' a ' + fCorta(AG[AG.length - 1].f) : '');
 
     const res = document.getElementById('prm-ag-res');
@@ -450,8 +493,8 @@
       const dias = new Set(vis.map(a => a.f)).size;
       res.innerHTML = '<strong>' + (_sem === 'todas' ? 'Todas las semanas' : esc(semLbl(_sem))) + '</strong> · ' +
         '<strong>' + vis.length + '</strong> visitas en ' + dias + ' días' +
-        (_kam === 'ambos' ? ' (<span style="color:' + KAMCOL['KAM 1'] + ';font-weight:700">KAM 1: ' + porK('KAM 1') + '</span> · ' +
-          '<span style="color:' + KAMCOL['KAM 2'] + ';font-weight:700">KAM 2: ' + porK('KAM 2') + '</span>)' : '') +
+        (_kam === 'ambos' ? ' (' + EJES.map(e => '<span style="color:' + EJECOL[e] + ';font-weight:700">' +
+          esc(ejeCorto(e)) + ': ' + porK(e) + '</span>').join(' · ') + ')' : '') +
         ' · <span style="color:' + GRUPO[2].col + ';font-weight:700">' + g2 + ' con plan de entrada</span>' +
         (ap ? ' · <span style="color:var(--or)">' + ap + ' con ubicación por confirmar</span>' : '');
     }
@@ -464,7 +507,7 @@
       } else {
         const TH = 'position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;padding:.34rem .45rem;font-size:.53rem;letter-spacing:.03em;text-align:left;white-space:nowrap';
         let h = '<table style="width:100%;border-collapse:collapse"><thead><tr>' +
-          ['HORA', 'KAM', 'CLIENTE', 'GRUPO', 'CAMAS', 'POT. ST'].map((t, i) =>
+          ['HORA', 'EJECUTIVO', 'CLIENTE', 'GRUPO', 'CAMAS', 'POT. ST'].map((t, i) =>
             '<th style="' + TH + (i >= 4 ? ';text-align:right' : '') + '">' + t + '</th>').join('') + '</tr></thead><tbody>';
         let dAnt = null;
         vis.slice().sort((a, b) => a.f.localeCompare(b.f) || a.k.localeCompare(b.k) || a.o - b.o).forEach(a => {
@@ -476,7 +519,7 @@
           }
           h += '<tr onclick="window._prmFoco(' + a.c + ')" style="cursor:pointer;border-bottom:1px solid var(--brd);border-left:3px solid ' + G.col + '">' +
             '<td style="padding:.28rem .45rem;font-size:.58rem;font-variant-numeric:tabular-nums;white-space:nowrap">' + a.h + '</td>' +
-            '<td style="padding:.28rem .45rem;font-size:.58rem;font-weight:800;color:' + KAMCOL[a.k] + ';white-space:nowrap">' + a.k + '</td>' +
+            '<td style="padding:.28rem .45rem;font-size:.58rem;font-weight:800;color:' + EJECOL[a.k] + ';white-space:nowrap">' + esc(ejeCorto(a.k)) + '</td>' +
             '<td style="padding:.28rem .45rem;font-size:.6rem"><div style="font-weight:700">' + esc(u.n) + '</div>' +
               '<div style="font-size:.53rem;color:var(--mut)">' + esc(u.com || 'comuna sin dato') + ' · ' + esc(u.r === 'Metropolitana' ? 'RM' : 'Valparaíso') +
               (aprox(u) ? ' · <span style="color:var(--or)">ubicación por confirmar</span>' : '') +
@@ -493,7 +536,227 @@
       }
     }
     mapa(vis);
+    calendario();
   }
+
+  // ── Calendario de visitas ─────────────────────────────────────
+  // Una fila por semana y ejecutivo. Es la vista de seguimiento: cuántos días
+  // sale cada uno, cuántas visitas hace, de qué grupos y regiones son y cuánto
+  // potencial ST cubre esa semana.
+  //
+  // Tiene sus propios filtros de ejecutivo y mes: la agenda de arriba se mira
+  // semana por semana para salir a terreno, y este calendario se mira de
+  // corrido para hacer seguimiento, así que forzarlos a compartir el mismo
+  // filtro obligaba a cambiarlo de ida y de vuelta.
+  let _calEje = 'ambos', _calMes = 'todos';
+  const mesClave = f => f.slice(0, 7);
+  const mesLbl = mk => {
+    const p = mk.split('-');
+    const n2 = MESESL[+p[1] - 1];
+    return n2.charAt(0).toUpperCase() + n2.slice(1) + ' ' + p[0];
+  };
+  window._prmCalEje = function (v) { _calEje = v; calendario(); };
+  window._prmCalMes = function (v) { _calMes = v; calendario(); };
+
+  function calSemanas() {
+    const filas = [];
+    (SEM || []).forEach(w => {
+      EJES.forEach(e => {
+        const vs = AG.filter(a => a.s === w.s && a.k === e &&
+          (_calEje === 'ambos' || a.k === _calEje) && (_calMes === 'todos' || mesClave(a.f) === _calMes));
+        if (!vs.length) return;
+        const cs = vs.map(a => C[a.c]);
+        const comunas = [...new Set(cs.map(u => u.com).filter(Boolean))];
+        const fs = vs.map(a => a.f).sort();
+        filas.push({
+          sem: w.s, desde: fs[0], hasta: fs[fs.length - 1], eje: e,
+          dias: new Set(vs.map(a => a.f)).size, n: vs.length,
+          g1: cs.filter(u => u.g === 1).length, g2: cs.filter(u => u.g === 2).length,
+          g3: cs.filter(u => u.g === 3).length,
+          rm: cs.filter(u => u.r === 'Metropolitana').length,
+          vp: cs.filter(u => u.r === 'Valparaíso').length,
+          pot: cs.reduce((a, u) => a + (u.pot || 0), 0),
+          comunas: comunas,
+          aprox: cs.filter(u => aprox(u)).length,
+        });
+      });
+    });
+    return filas;
+  }
+
+  function calendario() {
+    const box = document.getElementById('prm-cal');
+    if (!box) return;
+    botones('prm-cal-eje', [['ambos', 'Ambos']].concat(EJES.map(e => [e, ejeCorto(e), EJECOL[e]])),
+            _calEje, 'window._prmCalEje');
+    const meses = [...new Set(AG.map(a => mesClave(a.f)))].sort();
+    const selM = document.getElementById('prm-cal-mes');
+    if (selM) {
+      selM.innerHTML = '<option value="todos"' + (_calMes === 'todos' ? ' selected' : '') + '>Todos los meses</option>' +
+        meses.map(mk => '<option value="' + mk + '"' + (mk === _calMes ? ' selected' : '') + '>' +
+          esc(mesLbl(mk)) + '</option>').join('');
+    }
+    const filas = calSemanas();
+    const TH = 'position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;padding:.32rem .45rem;' +
+      'font-size:.53rem;letter-spacing:.03em;white-space:nowrap;text-align:left';
+    const th = (t, al) => '<th style="' + TH + (al ? ';text-align:' + al : '') + '">' + t + '</th>';
+    const td = (v, extra) => '<td style="padding:.26rem .45rem;font-size:.59rem;' +
+      'font-variant-numeric:tabular-nums;' + (extra || '') + '">' + v + '</td>';
+    let h = '<table style="width:100%;border-collapse:collapse;min-width:820px"><thead><tr>' +
+      th('SEMANA') + th('FECHAS') + th('EJECUTIVO') + th('DÍAS', 'right') + th('VISITAS', 'right') +
+      th('G1', 'right') + th('G2', 'right') + th('G3', 'right') + th('RM', 'right') + th('VALPO', 'right') +
+      th('POTENCIAL ST', 'right') + th('COMUNAS') + '</tr></thead><tbody>';
+    let semAnt = null;
+    filas.forEach(f => {
+      const col = EJECOL[f.eje];
+      if (f.sem !== semAnt) { semAnt = f.sem; }
+      h += '<tr style="border-bottom:1px solid var(--brd);border-left:3px solid ' + col + ';cursor:pointer" ' +
+        'onclick="window._prmSem(\'' + f.sem + '\')">' +
+        td('<strong>S' + f.sem + '</strong>') +
+        td(fCorta(f.desde) + ' – ' + fCorta(f.hasta), 'color:var(--mut);font-size:.56rem;white-space:nowrap') +
+        td('<span style="font-weight:700;color:' + col + '">' + esc(ejeCorto(f.eje)) + '</span>') +
+        td(f.dias, 'text-align:right') + td('<strong>' + f.n + '</strong>', 'text-align:right') +
+        td(f.g1 || '—', 'text-align:right;color:' + GRUPO[1].col) +
+        td(f.g2 || '—', 'text-align:right;color:' + GRUPO[2].col) +
+        td(f.g3 || '—', 'text-align:right;color:' + GRUPO[3].col) +
+        td(f.rm || '—', 'text-align:right;color:var(--mut)') +
+        td(f.vp || '—', 'text-align:right;color:var(--mut)') +
+        td(f.pot ? mm(f.pot) : '—', 'text-align:right;color:var(--am);font-weight:700') +
+        td(esc(f.comunas.slice(0, 4).join(', ') + (f.comunas.length > 4 ? ' +' + (f.comunas.length - 4) : '')),
+           'font-size:.55rem;color:var(--mut);max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap') +
+        '</tr>';
+    });
+    const tot = filas.reduce((a, f) => ({ n: a.n + f.n, pot: a.pot + f.pot, dias: a.dias + f.dias }), { n: 0, pot: 0, dias: 0 });
+    h += '</tbody><tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">' +
+      '<td colspan="3" style="padding:.3rem .45rem;font-size:.58rem">TOTAL · ' + filas.length + ' semanas-ejecutivo</td>' +
+      '<td style="padding:.3rem .45rem;text-align:right;font-size:.59rem">' + tot.dias + '</td>' +
+      '<td style="padding:.3rem .45rem;text-align:right;font-size:.59rem">' + tot.n + '</td>' +
+      '<td colspan="5"></td>' +
+      '<td style="padding:.3rem .45rem;text-align:right;font-size:.59rem;color:#FFC000">' + mm(tot.pot) + '</td>' +
+      '<td></td></tr></tfoot></table>';
+    box.innerHTML = h;
+    const tag = document.getElementById('prm-cal-tag');
+    if (tag) tag.textContent = new Set(filas.map(f => f.sem)).size + ' semanas · ' + tot.n + ' visitas' +
+      (_calEje === 'ambos' ? '' : ' · ' + ejeCorto(_calEje)) +
+      (_calMes === 'todos' ? '' : ' · ' + mesLbl(_calMes));
+  }
+
+  // ── Carta Gantt ───────────────────────────────────────────────
+  // Una barra por ejecutivo y bloque del plan —grupo dentro de cada región—,
+  // desde su primera hasta su última visita. Muestra el desarrollo completo:
+  // en qué semana entra cada grupo y cuándo se cruzan los dos ejecutivos.
+  function gantt() {
+    const box = document.getElementById('prm-gantt');
+    if (!box || !AG.length) return;
+    const dia0 = fecha(AG[0].f), diaN = fecha(AG[AG.length - 1].f);
+    const span = Math.max(1, (diaN - dia0) / 86400000 + 1);
+    const pct = f => (fecha(f) - dia0) / 86400000 / span * 100;
+
+    const barras = [];
+    EJES.forEach(e => {
+      [1, 2, 3].forEach(g => {
+        REGS.forEach(r => {
+          const vs = AG.filter(a => a.k === e && C[a.c].g === g && C[a.c].r === r);
+          if (!vs.length) return;
+          const fs = vs.map(a => a.f).sort();
+          barras.push({ eje: e, g: g, r: r, ini: fs[0], fin: fs[fs.length - 1], n: vs.length,
+            dias: new Set(fs).size, pot: vs.reduce((a, x) => a + (C[x.c].pot || 0), 0) });
+        });
+      });
+    });
+    barras.sort((a, b) => EJES.indexOf(a.eje) - EJES.indexOf(b.eje) || a.ini.localeCompare(b.ini));
+
+    // Cabecera: un tramo por mes del período.
+    const meses = [];
+    let cur = new Date(dia0.getFullYear(), dia0.getMonth(), 1);
+    while (cur <= diaN) {
+      const fin = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
+      const a = Math.max(cur, dia0), b = Math.min(fin, diaN);
+      meses.push({ lbl: MESESL[cur.getMonth()] + (cur.getFullYear() !== dia0.getFullYear() ? ' ' + cur.getFullYear() : ''),
+        izq: (a - dia0) / 86400000 / span * 100, an: ((b - a) / 86400000 + 1) / span * 100 });
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+
+    const fila = (izq, ancho, col, txt, tip) =>
+      '<div title="' + esc(tip) + '" style="position:absolute;left:' + izq + '%;width:' + Math.max(ancho, 1.2) + '%;' +
+      'top:4px;bottom:4px;background:' + col + ';border-radius:4px;color:#fff;font-size:.52rem;font-weight:700;' +
+      'display:flex;align-items:center;padding:0 .3rem;overflow:hidden;white-space:nowrap">' + esc(txt) + '</div>';
+
+    let h = '<div style="display:grid;grid-template-columns:200px minmax(0,1fr);gap:.3rem;align-items:center">' +
+      '<div></div><div style="position:relative;height:18px;border-bottom:1px solid var(--brd)">' +
+      meses.map(m => '<div style="position:absolute;left:' + m.izq + '%;width:' + m.an + '%;font-size:.55rem;' +
+        'color:var(--mut);border-left:1px solid var(--brd);padding-left:.25rem;text-transform:capitalize">' +
+        esc(m.lbl) + '</div>').join('') + '</div>';
+    let ejeAnt = null;
+    barras.forEach(b => {
+      if (b.eje !== ejeAnt) {
+        ejeAnt = b.eje;
+        h += '<div style="font-size:.63rem;font-weight:800;color:' + EJECOL[b.eje] + ';padding-top:.35rem">' +
+          esc(b.eje) + '</div><div style="height:6px"></div>';
+      }
+      const ini = pct(b.ini), an = pct(b.fin) - pct(b.ini) + (1 / span * 100);
+      h += '<div style="font-size:.57rem;color:var(--txt);padding-left:.6rem;white-space:nowrap">' +
+        '<span style="color:' + GRUPO[b.g].col + ';font-weight:700">G' + b.g + '</span> · ' +
+        esc(b.r === 'Metropolitana' ? 'RM' : 'Valparaíso') +
+        ' <span style="color:var(--mut)">(' + b.n + ')</span></div>' +
+        '<div style="position:relative;height:22px;background:var(--bg2);border-radius:4px">' +
+        fila(ini, an, GRUPO[b.g].col, b.n + ' visitas · ' + b.dias + ' días',
+             b.eje + ' · Grupo ' + b.g + ' ' + b.r + ': ' + b.n + ' visitas en ' + b.dias + ' días, del ' +
+             fCorta(b.ini) + ' al ' + fCorta(b.fin) + ' · ' + mm(b.pot) + ' de potencial ST') + '</div>';
+    });
+    h += '</div>';
+    box.innerHTML = h +
+      '<p style="font-size:.56rem;color:var(--mut);margin:.6rem 0 0;line-height:1.55">Cada barra es un bloque del plan: ' +
+      'el grupo dentro de una región, desde la primera hasta la última visita de ese bloque. Los dos ejecutivos ' +
+      'trabajan en paralelo, así que sus barras se solapan. El orden dentro de cada ejecutivo es el de la agenda: ' +
+      'primero el grupo 1, después el 2 y al final el 3, y ' + esc(P.eje_valpo || '') + ' hace Valparaíso en un ' +
+      'bloque seguido.</p>';
+    const tag = document.getElementById('prm-gantt-tag');
+    if (tag) tag.textContent = barras.length + ' bloques · ' + fCorta(AG[0].f) + ' a ' + fCorta(AG[AG.length - 1].f);
+  }
+
+  // Excel del calendario: el resumen por semana y el detalle día por día.
+  window._prmExcelCal = function () {
+    if (typeof XLSX === 'undefined') { alert('Librería Excel no cargada.'); return; }
+    const AZ = '002D73';
+    const cab = (t, an) => ({ v: t, t: 's', s: { font: { bold: true, sz: 9, color: { rgb: 'FFFFFF' } },
+      fill: { patternType: 'solid', fgColor: { rgb: AZ } }, alignment: { horizontal: 'center', wrapText: true } } });
+    const filas = calSemanas();
+    const filtro = (_calEje === 'ambos' ? '' : ' · ' + _calEje) + (_calMes === 'todos' ? '' : ' · ' + mesLbl(_calMes));
+    const aoa1 = [['Calendario de visitas · Plan RM y Región de Valparaíso' + filtro], [],
+      ['Semana', 'Desde', 'Hasta', 'Ejecutivo', 'Días', 'Visitas', 'Grupo 1', 'Grupo 2', 'Grupo 3',
+       'RM', 'Valparaíso', 'Potencial ST ($)', 'Comunas', 'Ubicación por confirmar', 'Estado', 'Comentario'].map(t => cab(t))];
+    filas.forEach(f => aoa1.push(['S' + f.sem, f.desde, f.hasta, f.eje, f.dias, f.n, f.g1, f.g2, f.g3, f.rm, f.vp,
+      Math.round(f.pot), f.comunas.join(', '), f.aprox, '', '']));
+    const ws1 = XLSX.utils.aoa_to_sheet(aoa1);
+    ws1['!cols'] = [{ wch: 9 }, { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 7 }, { wch: 8 }, { wch: 8 }, { wch: 8 },
+      { wch: 8 }, { wch: 7 }, { wch: 10 }, { wch: 16 }, { wch: 46 }, { wch: 12 }, { wch: 14 }, { wch: 30 }];
+    ws1['!freeze'] = { xSplit: 0, ySplit: 3 };
+    filas.forEach((f, i) => {
+      const ref = XLSX.utils.encode_cell({ r: 3 + i, c: 11 });
+      if (ws1[ref]) ws1[ref].z = '#,##0';
+    });
+
+    const aoa2 = [['Detalle día por día' + filtro], [],
+      ['Fecha', 'Semana', 'Ejecutivo', 'Hora', 'Cliente', 'Grupo', 'Región', 'Comuna', 'Dirección',
+       'Camas', 'Potencial ST ($)', 'Facturación 2026 ($)', 'Ubicación', 'Estado', 'Comentario'].map(t => cab(t))];
+    AG.filter(a => (_calEje === 'ambos' || a.k === _calEje) && (_calMes === 'todos' || mesClave(a.f) === _calMes))
+      .sort((a, b) => a.f.localeCompare(b.f) || a.k.localeCompare(b.k) || a.o - b.o).forEach(a => {
+      const u = C[a.c];
+      aoa2.push([a.f, 'S' + a.s, a.k, a.h, u.n, 'G' + u.g, u.r, u.com || '', u.dir || '',
+        u.camF === 'Sin internación' ? '' : u.cam, Math.round(u.pot || 0), Math.round(u.f26 || 0),
+        aprox(u) ? 'Por confirmar' : u.prec, '', '']);
+    });
+    const ws2 = XLSX.utils.aoa_to_sheet(aoa2);
+    ws2['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 8 }, { wch: 44 }, { wch: 8 }, { wch: 15 }, { wch: 18 },
+      { wch: 34 }, { wch: 8 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 30 }];
+    ws2['!freeze'] = { xSplit: 0, ySplit: 3 };
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws1, 'Por semana');
+    XLSX.utils.book_append_sheet(wb, ws2, 'Detalle por día');
+    XLSX.writeFile(wb, 'Calendario_visitas_' + (A.hoy || '').replace(/[\s/]+/g, '-') + '.xlsx');
+  };
 
   function mapa(vis) {
     const el = document.getElementById('prm-map');
@@ -514,11 +777,11 @@
       Object.values(dias).forEach(lst => {
         lst.sort((a, b) => a.o - b.o);
         const ll = lst.map(a => [C[a.c].lat, C[a.c].lon]);
-        if (ll.length > 1) L.polyline(ll, { color: KAMCOL[lst[0].k], weight: 2.5, opacity: .75, dashArray: '6 5' }).addTo(_capa);
+        if (ll.length > 1) L.polyline(ll, { color: EJECOL[lst[0].k], weight: 2.5, opacity: .75, dashArray: '6 5' }).addTo(_capa);
       });
     }
     vis.forEach(a => {
-      const u = C[a.c], G = GRUPO[u.g], col = KAMCOL[a.k];
+      const u = C[a.c], G = GRUPO[u.g], col = EJECOL[a.k];
       const ap = aprox(u);
       const icono = L.divIcon({
         className: '',
@@ -551,7 +814,7 @@
     if (leg) {
       const bola = (bg, fg, borde, txt) => '<span style="display:inline-flex;align-items:center;gap:.25rem;margin-right:.8rem">' +
         '<span style="width:14px;height:14px;border-radius:50%;background:' + bg + ';border:2px ' + borde + ';display:inline-block"></span>' + txt + '</span>';
-      leg.innerHTML = bola(KAMCOL['KAM 1'], '#fff', 'solid #fff', 'KAM 1') + bola(KAMCOL['KAM 2'], '#fff', 'solid #fff', 'KAM 2') +
+      leg.innerHTML = EJES.map(e => bola(EJECOL[e], '#fff', 'solid #fff', ejeCorto(e))).join('') +
         bola('#888', '#fff', 'solid #FFB020', 'borde amarillo: grupo 2, con plan de entrada') +
         bola('#fff', '#888', 'dashed #888', 'ubicación por confirmar') +
         '<br>El número es el orden de la visita en el día' + (_sem !== 'todas' ? ' y la línea punteada, el recorrido de cada día.' : '. Elige una semana para ver los recorridos.') +
@@ -630,7 +893,7 @@
                  'Camas', 'Pot. ST anual MM$', 'Equipos ST', 'Plan de entrada'];
     const fmt = [null, null, null, null, null, null, null, null, null, null, '#,##0', '#,##0.0', '#,##0', null];
     const wb = XLSX.utils.book_new();
-    ['KAM 1', 'KAM 2'].forEach(k => {
+    EJES.forEach(k => {
       const filas = AG.filter(a => a.k === k).map(a => {
         const u = C[a.c];
         return { g: u.g, fmt: fmt, v: [semLbl(a.s), fLarga(a.f), a.h, a.o, u.n, u.r === 'Metropolitana' ? 'RM' : 'Valparaíso',
@@ -640,7 +903,7 @@
       const ws = hojaDesdeFilas(cab, filas, [24, 24, 7, 6, 44, 11, 18, 34, 22, 9, 8, 13, 10, 50]);
       XLSX.utils.book_append_sheet(wb, ws, k);
     });
-    XLSX.writeFile(wb, 'Agenda_KAM_' + (A.hoy || '').replace(/[\s/]+/g, '-') + '.xlsx');
+    XLSX.writeFile(wb, 'Agenda_ejecutivos_' + (A.hoy || '').replace(/[\s/]+/g, '-') + '.xlsx');
   };
 
   // ── Render ───────────────────────────────────────────────────
@@ -650,7 +913,8 @@
     const cnt = document.getElementById('prm-planes-cnt');
     if (cnt) cnt.textContent = contarPlanes();
     REGS.forEach(tabla);
-    agenda();
+    agenda();   // pinta también el calendario, que sigue sus filtros
+    gantt();    // la Gantt es del plan completo: no depende de los filtros
   }
 
   window.initPlanRM = function () {

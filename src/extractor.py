@@ -83,6 +83,7 @@ JS_FILES = [
     "hoja_pdf.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js",
     "hoja_prosp_bi.js",
     "hoja_plan_rm.js",
+    "hoja_cartera_st.js",
     "hoja_citas.js", "hoja_cli_rel.js", "hoja_pipeline.js", "hoja_brechas.js",
 ]
 
@@ -624,6 +625,8 @@ def read_visitas(wb, mes_corte):
     # Visitas mensuales por ejecutivo + cliente (para gráfico de búsqueda)
     cli_mensual    = {e: defaultdict(lambda: {str(ANO-1): [0]*12, str(ANO): [0]*12})
                       for e in EJECUTIVOS_VISITAS}
+    # Detalle para la hoja: (ejecutivo, cliente, tipo, año, mes) → visitas
+    det            = defaultdict(int)
 
     for row in ws.iter_rows(min_row=2, values_only=True):
         asignado = safe_str(row[0])
@@ -646,6 +649,7 @@ def read_visitas(wb, mes_corte):
 
         tipo_acts[asignado][tipo_act] += conteo
         cli_count_all[asignado][cliente] += conteo
+        det[(asignado, cliente, tipo_act or "Sin tipo", ano, mes)] += conteo
 
         if ano == ANO and mes <= mes_corte:
             cli_count_ytd[asignado][cliente] += conteo
@@ -681,12 +685,31 @@ def read_visitas(wb, mes_corte):
     for e in EJECUTIVOS_VISITAS:
         cli_mensual_out[e] = {cli: dict(meses) for cli, meses in cli_mensual[e].items()}
 
+    # Detalle agregado: una fila por (ejecutivo, cliente, tipo, año, mes). Es lo
+    # que permite que los filtros de la hoja —ejecutivo, tipo de actividad,
+    # región, período, cliente— se crucen entre sí en el navegador; con los
+    # totales ya agregados sólo se podía filtrar por uno a la vez. Los textos
+    # van una sola vez en sus listas y las filas guardan el índice.
+    ejes_l, clis_l, tipos_l = list(EJECUTIVOS_VISITAS), [], []
+    i_cli, i_tipo = {}, {}
+
+    def _ref(lista, indice, valor):
+        if valor not in indice:
+            indice[valor] = len(lista)
+            lista.append(valor)
+        return indice[valor]
+
+    filas_det = [[ejes_l.index(e), _ref(clis_l, i_cli, c), _ref(tipos_l, i_tipo, t), a, m, n]
+                 for (e, c, t, a, m), n in sorted(det.items())]
+    print(f"       VISITAS: {len(filas_det)} filas de detalle | {len(clis_l)} clientes | {len(tipos_l)} tipos")
+
     return {
         "mensual":     {e: dict(mensual[e]) for e in EJECUTIVOS_VISITAS},
         "tipo":        {e: dict(tipo_acts[e]) for e in EJECUTIVOS_VISITAS},
         "resumen":     resumen,
         "top":         top,
         "cli_mensual": cli_mensual_out,
+        "det":         {"ejecutivos": ejes_l, "clientes": clis_l, "tipos": tipos_l, "filas": filas_det},
     }
 
 
@@ -1370,6 +1393,7 @@ def read_base_instalada(wb, contratos=None):
     # filas activas. No se cruza contra BASE MAPA porque ésa sólo cubre los
     # clientes con facturación (182 de 1.501).
     reg_map        = {}
+    reg_map_todos  = {}   # el mismo resumen, incluyendo a los clientes con contrato
 
     total = 0
     for row in ws.iter_rows(min_row=2, values_only=True):
@@ -1398,18 +1422,26 @@ def read_base_instalada(wb, contratos=None):
 
         # col[29] = Región (col AD)
         region = _norm_region(row[29] if len(row) > 29 else None)
-        if "GEMCO" not in nombre_analisis and not con_contrato_vigente(nombre_analisis):
-            rd = reg_map.setdefault(region, {
-                "total": 0, "total_si": 0,
-                "lineas": defaultdict(int), "lineas_si": defaultdict(int),
-                "_clientes": set(),
-            })
-            rd["total"] += 1
-            rd["lineas"][linea] += 1
-            rd["_clientes"].add(nombre_analisis)
-            if es_potencial:
-                rd["total_si"] += 1
-                rd["lineas_si"][linea] += 1
+        if "GEMCO" not in nombre_analisis:
+            # Dos acumuladores: el de la hoja (sin los clientes con contrato
+            # vigente) y el de la vista completa, que el botón de la tabla
+            # enciende. Así las dos versiones del resumen por región calzan
+            # siempre con el detalle, sin recalcular nada en el navegador.
+            mapas = [reg_map_todos]
+            if not con_contrato_vigente(nombre_analisis):
+                mapas.append(reg_map)
+            for mp in mapas:
+                rd = mp.setdefault(region, {
+                    "total": 0, "total_si": 0,
+                    "lineas": defaultdict(int), "lineas_si": defaultdict(int),
+                    "_clientes": set(),
+                })
+                rd["total"] += 1
+                rd["lineas"][linea] += 1
+                rd["_clientes"].add(nombre_analisis)
+                if es_potencial:
+                    rd["total_si"] += 1
+                    rd["lineas_si"][linea] += 1
 
         total += 1
         por_linea[linea] += 1
@@ -1550,6 +1582,12 @@ def read_base_instalada(wb, contratos=None):
                 "n_clientes": len(d["_clientes"]),
                 "lineas": dict(d["lineas"]), "lineas_si": dict(d["lineas_si"])}
             for r, d in sorted(reg_map.items(), key=lambda x: -x[1]["total"])
+        },
+        "por_region_todos": {
+            r: {"total": d["total"], "total_si": d["total_si"],
+                "n_clientes": len(d["_clientes"]),
+                "lineas": dict(d["lineas"]), "lineas_si": dict(d["lineas_si"])}
+            for r, d in sorted(reg_map_todos.items(), key=lambda x: -x[1]["total"])
         },
     }
 
@@ -2732,9 +2770,224 @@ _PLAN_BARRIOS = {"BELLAVISTA": "PROVIDENCIA", "MANUEL MONTT": "PROVIDENCIA", "CO
 # Isla de Pascua pertenece a la Región de Valparaíso pero no se visita en auto.
 _PLAN_REMOTO = ("HANGA ROA", "ISLA DE PASCUA", "RAPA NUI")
 
+# ── CARTERA POR EJECUTIVO ──────────────────────────────────────────────────
+# La Región de Valparaíso completa es de Cristián Pérez. La Metropolitana se
+# reparte por comuna (acordado el 24-09-2026): en términos gruesos, Eglys toma
+# el oriente y el poniente, y Cristián el centro, el norte y el sur.
+_PLAN_EJECUTIVOS = ["Eglys Ramírez", "Cristián Pérez"]
+_PLAN_EJE_VALPO = "Cristián Pérez"
+_PLAN_COMUNAS_EJE = {
+    "Eglys Ramírez": ["Vitacura", "Lo Barnechea", "Las Condes", "Providencia", "La Reina", "Ñuñoa",
+                      "Macul", "Renca", "Cerro Navia", "Quinta Normal", "Pudahuel", "Lo Prado",
+                      "Estación Central", "Cerrillos", "Maipú", "Padre Hurtado",
+                      # Periferia poniente y sur poniente, que continúa Maipú y
+                      # Padre Hurtado (acordado el 25-09-2026).
+                      "Melipilla", "Talagante", "Peñaflor", "El Monte", "Isla de Maipo", "Curacaví",
+                      "María Pinto", "Alhué", "San Pedro"],
+    "Cristián Pérez": ["Quilicura", "Huechuraba", "Conchalí", "Recoleta", "Independencia", "Santiago",
+                       "Pedro Aguirre Cerda", "San Miguel", "San Joaquín", "Lo Espejo", "La Cisterna",
+                       "San Ramón", "La Granja", "El Bosque", "La Pintana", "San Bernardo", "Puente Alto",
+                       "La Florida", "Peñalolén",
+                       # Periferia norte y sur oriente, que continúa Quilicura,
+                       # Huechuraba, San Bernardo y Puente Alto.
+                       "Colina", "Lampa", "Til Til", "Buin", "Paine", "Pirque", "San José de Maipo",
+                       "Calera de Tango"],
+}
+# El índice comuna → ejecutivo se arma más abajo, cuando ya existe _plan_norm.
+_PLAN_EJE_POR_COMUNA = {}
+
+# Planilla con la comuna revisada a mano de cada cliente. Es opcional: si no
+# está, se usa la comuna que resuelve la cascada de ubicación. La columna que
+# manda es «COMUNA CORREGIDA» y, si viene vacía, «Comuna detectada».
+_PLAN_ARCHIVO_COMUNAS = "Plan_RM_comunas_por_completar.xlsx"
+
+# Cartera de clientes de ST fuera de la Región Metropolitana: cada región
+# completa es de un ejecutivo (reparto vigente al 25-09-2026). La RM no está
+# acá porque se reparte por comuna, con _PLAN_COMUNAS_EJE.
+_ST_REGION_EJE = {
+    "Cristián Pérez": ["Arica y Parinacota", "Tarapacá", "Antofagasta", "Atacama", "Coquimbo",
+                       "Valparaíso", "Maule"],
+    "Eglys Ramírez": ["O'Higgins", "Ñuble", "Bío Bío", "Araucanía", "Los Ríos", "Los Lagos",
+                      "Aysén", "Magallanes"],
+}
+_ST_EJE_POR_REGION = {r: e for e, rs in _ST_REGION_EJE.items() for r in rs}
+
+# Ciudades y comunas que aparecen dentro del nombre del cliente y dicen en qué
+# región está. Es el último recurso para los clientes que BASE INSTALADA trae
+# sin región: sin ella no hay a qué cartera asignarlos.
+_ST_CIUDAD_REGION = [
+    ("ARICA", "Arica y Parinacota"), ("IQUIQUE", "Tarapacá"), ("ALTO HOSPICIO", "Tarapacá"),
+    ("POZO ALMONTE", "Tarapacá"), ("ANTOFAGASTA", "Antofagasta"), ("CALAMA", "Antofagasta"),
+    ("TOCOPILLA", "Antofagasta"), ("MEJILLONES", "Antofagasta"), ("COPIAPO", "Atacama"),
+    ("VALLENAR", "Atacama"), ("CHANARAL", "Atacama"), ("HUASCO", "Atacama"), ("LA SERENA", "Coquimbo"),
+    ("COQUIMBO", "Coquimbo"), ("OVALLE", "Coquimbo"), ("ILLAPEL", "Coquimbo"), ("VICUNA", "Coquimbo"),
+    ("SALAMANCA", "Coquimbo"), ("ANDACOLLO", "Coquimbo"), ("VALPARAISO", "Valparaíso"),
+    ("VINA DEL MAR", "Valparaíso"), ("QUILLOTA", "Valparaíso"), ("SAN ANTONIO", "Valparaíso"),
+    ("QUILPUE", "Valparaíso"), ("VILLA ALEMANA", "Valparaíso"), ("LOS ANDES", "Valparaíso"),
+    ("SAN FELIPE", "Valparaíso"), ("LIMACHE", "Valparaíso"), ("CASABLANCA", "Valparaíso"),
+    ("RANCAGUA", "O'Higgins"), ("SAN FERNANDO", "O'Higgins"), ("SANTA CRUZ", "O'Higgins"),
+    ("RENGO", "O'Higgins"), ("MACHALI", "O'Higgins"), ("TALCA", "Maule"), ("CURICO", "Maule"),
+    ("LINARES", "Maule"), ("PARRAL", "Maule"), ("CAUQUENES", "Maule"), ("CONSTITUCION", "Maule"),
+    ("CHILLAN", "Ñuble"), ("SAN CARLOS", "Ñuble"), ("CONCEPCION", "Bío Bío"), ("TALCAHUANO", "Bío Bío"),
+    ("LOS ANGELES", "Bío Bío"), ("CORONEL", "Bío Bío"), ("LOTA", "Bío Bío"), ("CANETE", "Bío Bío"),
+    ("CHIGUAYANTE", "Bío Bío"), ("PENCO", "Bío Bío"), ("TEMUCO", "Araucanía"), ("VILLARRICA", "Araucanía"),
+    ("ANGOL", "Araucanía"), ("LONCOCHE", "Araucanía"), ("PUCON", "Araucanía"), ("PITRUFQUEN", "Araucanía"),
+    ("VALDIVIA", "Los Ríos"), ("LA UNION", "Los Ríos"), ("OSORNO", "Los Lagos"),
+    ("PUERTO MONTT", "Los Lagos"), ("CASTRO", "Los Lagos"), ("ANCUD", "Los Lagos"),
+    ("QUELLON", "Los Lagos"), ("CHILOE", "Los Lagos"), ("PUERTO VARAS", "Los Lagos"),
+    ("COYHAIQUE", "Aysén"), ("AYSEN", "Aysén"), ("PUNTA ARENAS", "Magallanes"),
+    ("MAGALLANES", "Magallanes"), ("PUERTO NATALES", "Magallanes"),
+]
+
+
+# Palabras que no distinguen a un cliente de otro: la razón social y los
+# conectores. El tipo de institución sí distingue —«Municipalidad de Puerto
+# Montt» no es «Hospital de Puerto Montt»— y los números también: CESFAM N°1 y
+# CESFAM N°2 de Rancagua son dos establecimientos distintos.
+_ST_RAZON = {"SPA", "LTDA", "LIMITADA", "EIRL", "CIA", "COMPANIA", "SA", "SAC",
+             "DR", "DRA", "DOCTOR", "DOCTORA", "ILUSTRE", "ILUSTRA"}
+_ST_CONECT = {"DE", "DEL", "LA", "LAS", "LOS", "EL", "Y", "E", "AL", "EN"}
+
+
+def _st_clave(nombre):
+    """Firma de un nombre de cliente: sus palabras distintivas, ordenadas."""
+    ts = [w for w in re.sub(r"[^A-Z0-9Ñ ]+", " ", _norm_cli(nombre)).split()
+          if (len(w) > 1 or w.isdigit()) and w not in _ST_CONECT and w not in _ST_RAZON]
+    return " ".join(sorted(set(ts))) if ts else _norm_cli(nombre)
+
+
+def _st_unificar(regs):
+    """Junta los registros que son el mismo cliente escrito de otra forma.
+
+    BASE INSTALADA carga al mismo cliente con más de un nombre —«Hospital de Los
+    Ángeles Dr. Víctor Ríos Ruiz» y «Hospital Víctor Ríos Ruiz», «Clínica
+    Alemana de Santiago» con y sin S.A.— y contarlos por separado infla el
+    número de clientes y el de contratos vigentes. Dos registros se juntan si
+    comparten la firma de palabras o si el calce de nombres del panel los da por
+    iguales; el registro que manda es el de más equipos.
+    """
+    grupos, por_clave = [], {}
+    for r in sorted(regs, key=lambda x: (-x["tot"], x["n"])):
+        idx = por_clave.get(_st_clave(r["n"]))
+        if idx is None:
+            idx = next((i for i, g in enumerate(grupos)
+                        if any(_plan_mismo_cliente(r["n"], o["n"]) for o in g)), None)
+        if idx is None:
+            por_clave[_st_clave(r["n"])] = len(grupos)
+            grupos.append([r])
+        else:
+            grupos[idx].append(r)
+
+    out = []
+    for g in grupos:
+        base = g[0]
+        if len(g) == 1:
+            base["alias"] = []
+            out.append(base)
+            continue
+        base["alias"] = [o["n"] for o in g[1:]]
+        for o in g[1:]:
+            for l in base["eq"]:
+                base["eq"][l] += o["eq"][l]
+            base["tot"] += o["tot"]
+            base["tot_bi"] += o["tot_bi"]
+            base["pipe_eq"] += o["pipe_eq"]
+            base["pipe_st"] += o["pipe_st"]
+            base["cc"] = base["cc"] or o["cc"]
+            # La facturación se cuenta una sola vez por cuenta del panel: dos
+            # nombres de la base pueden apuntar a la misma.
+            if o.get("_fac_key") and o["_fac_key"] != base.get("_fac_key"):
+                base["f26"] += o["f26"]
+                base["fcontr"] += o["fcontr"]
+            # % de vida útil: promedio ponderado por los equipos de cada parte.
+            if o["vu"] is not None:
+                if base["vu"] is None:
+                    base["vu"] = o["vu"]
+                else:
+                    t1, t2 = base["tot"] - o["tot"], o["tot"]
+                    if t1 + t2:
+                        base["vu"] = round((base["vu"] * t1 + o["vu"] * t2) / (t1 + t2), 1)
+            # Ubicación y comuna: la del registro que sí las tenga.
+            for campo in ("com", "prec"):
+                base[campo] = base[campo] or o[campo]
+            if base["lat"] is None and o["lat"] is not None:
+                base["lat"], base["lon"] = o["lat"], o["lon"]
+            if base["resp"] == "Por asignar" and o["resp"] != "Por asignar":
+                base["resp"], base["resp_src"] = o["resp"], o["resp_src"]
+            if base["r"] == "Sin región" and o["r"] != "Sin región":
+                base["r"], base["r_src"] = o["r"], o["r_src"]
+        # El potencial se suma por partes y no se recalcula sobre el total: el
+        # contrato cubre los equipos de esa cuenta, no los de la otra. Así, un
+        # cliente con una cuenta bajo contrato y otra sin él conserva el
+        # potencial de la segunda, y la cartera cierra en el mismo total que la
+        # hoja Base Instalada.
+        base["pot"] = round(sum(o["pot"] for o in g))
+        base["pot_bruto"] = round(sum(o["pot_bruto"] for o in g))
+        base["cc_parcial"] = base["cc"] and base["pot"] > 0
+        out.append(base)
+    return out
+
+
+def _st_region_nombre(nombre):
+    k = " " + _plan_norm(nombre) + " "
+    for ciudad, reg in _ST_CIUDAD_REGION:
+        if " " + ciudad + " " in k:
+            return reg
+    return ""
+
+
+def _plan_leer_comunas():
+    ruta = os.path.join(ROOT, _PLAN_ARCHIVO_COMUNAS)
+    if not os.path.exists(ruta):
+        return {}
+    try:
+        wb = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
+    except Exception as exc:
+        print(f"       ADVERTENCIA: no se pudo leer {_PLAN_ARCHIVO_COMUNAS}: {exc}")
+        return {}
+    ws = wb[wb.sheetnames[0]]
+    filas = list(ws.iter_rows(values_only=True))
+    wb.close()
+    cab_i = next((i for i, r in enumerate(filas)
+                  if r and any(safe_str(v).strip().upper() == "CLIENTE" for v in r if v)), None)
+    if cab_i is None:
+        return {}
+    cab = [safe_str(v).strip().upper() for v in filas[cab_i]]
+    def col(*nombres):
+        for n in nombres:
+            for i, c in enumerate(cab):
+                if c.startswith(n):
+                    return i
+        return None
+    i_cli, i_cor, i_det = col("CLIENTE"), col("COMUNA CORREGIDA"), col("COMUNA DETECTADA")
+    out = {}
+    for r in filas[cab_i + 1:]:
+        if not r or i_cli is None or not r[i_cli]:
+            continue
+        com = ""
+        if i_cor is not None and i_cor < len(r):
+            com = safe_str(r[i_cor]).strip()
+        if not com and i_det is not None and i_det < len(r):
+            com = safe_str(r[i_det]).strip()
+        if com:
+            out[_norm_cli(r[i_cli])] = com
+    print(f"       Comunas revisadas a mano: {len(out)} clientes (desde {_PLAN_ARCHIVO_COMUNAS})")
+    return out
+
+
+def _plan_comuna_nombre(nombre, region, comunas_reg):
+    """La comuna escrita dentro del nombre del cliente: «Norden La Reina»."""
+    nn = " " + _plan_norm(nombre) + " "
+    hits = [cm for cm in comunas_reg if " " + cm + " " in nn]
+    hits += [v for b, v in _PLAN_BARRIOS.items() if " " + b + " " in nn and v in comunas_reg]
+    return max(hits, key=len).title() if hits else ""
+
 
 def _plan_norm(s):
     return re.sub(r"[^A-Z0-9]+", " ", _norm_cli(s)).strip()
+
+
+_PLAN_EJE_POR_COMUNA.update({_plan_norm(c): e for e, cs in _PLAN_COMUNAS_EJE.items() for c in cs})
 
 
 # Calces revisados a mano entre el nombre del cliente en CONTRATOS TODOS y el
@@ -2969,6 +3222,38 @@ def _plan_rutear(pool, desde, arrastre=None):
     return dias, (resto or None)
 
 
+def _plan_rutear_pot(pool, desde, arrastre=None):
+    """Igual que _plan_rutear, pero manda el potencial y no la geografía.
+
+    El grupo 3 es la cola larga de la cartera y se visita en orden de tamaño:
+    cada día lo abre el cliente de mayor potencial ST que queda y lo acompañan
+    sus dos vecinos más cercanos. Así los primeros días del bloque son los de
+    las cuentas grandes, sin que el KAM cruce la ciudad para llegar a ellas."""
+    resto = list(arrastre or []) + list(pool)
+    grupos = []
+    while len(resto) >= _PLAN_VISITAS_DIA:
+        semilla = max(resto, key=lambda c: (c["pot"], c["eq"]["total"]))
+        resto.remove(semilla)
+        cerca = sorted(resto, key=lambda c: _plan_dist((semilla["lat"], semilla["lon"]), (c["lat"], c["lon"])))
+        dia = [semilla] + cerca[:_PLAN_VISITAS_DIA - 1]
+        for c in dia[1:]:
+            resto.remove(c)
+        grupos.append(dia)
+    # Los días quedan en el orden en que se formaron —de mayor a menor
+    # potencial—; dentro de cada día, la visita más cercana primero.
+    dias, pos = [], desde
+    for g in grupos:
+        orden, p = [], pos
+        while g:
+            c = min(g, key=lambda x: _plan_dist(p, (x["lat"], x["lon"])))
+            g.remove(c)
+            orden.append(c)
+            p = (c["lat"], c["lon"])
+        dias.append(orden)
+        pos = p
+    return dias, (resto or None)
+
+
 def build_plan_rm(app_data, contratos, direcciones, mapa_data):
     bi = app_data.get("base_instalada") or {}
     clientes = bi.get("clientes") or []
@@ -3021,6 +3306,7 @@ def build_plan_rm(app_data, contratos, direcciones, mapa_data):
             v[0] += 1; v[1] += (hoy_ym - f[6]) / 12 / u * 100
 
     camas_base = _plan_leer_camas()
+    comunas_manual = _plan_leer_comunas()
     deis, centros_com = _plan_leer_deis()
     comunas_reg = defaultdict(set)
     for (rg, cm) in centros_com:
@@ -3156,6 +3442,28 @@ def build_plan_rm(app_data, contratos, direcciones, mapa_data):
         if not direccion and est and est.get("dir"):
             direccion = est["dir"]
 
+        # ── Comuna definitiva y ejecutivo a cargo ──
+        # Manda la comuna revisada a mano en la planilla; si no está, la que
+        # resolvió la ubicación y, en último término, la que trae el nombre.
+        comuna_src = "Ubicación" if comuna else ""
+        if comunas_manual.get(k):
+            comuna, comuna_src = comunas_manual[k], "Planilla revisada"
+        if not comuna:
+            cn = _plan_comuna_nombre(c["nombre"], reg, comunas_reg[reg])
+            if cn:
+                comuna, comuna_src = cn, "Nombre del cliente"
+        if reg == "Valparaíso":
+            resp, resp_src = _PLAN_EJE_VALPO, "Región completa"
+        else:
+            # Una celda puede traer dos comunas («Pudahuel, Santiago»): se toma
+            # la primera que esté en alguna de las dos carteras.
+            resp = ""
+            for parte in re.split(r"[,/]| Y ", comuna.upper()):
+                resp = _PLAN_EJE_POR_COMUNA.get(_plan_norm(parte), "")
+                if resp:
+                    break
+            resp_src = "Comuna" if resp else ""
+
         vv = vida.get(k)
         universo.append({
             "n": c["nombre"], "r": reg, "com": comuna, "dir": direccion,
@@ -3164,6 +3472,7 @@ def build_plan_rm(app_data, contratos, direcciones, mapa_data):
             "pot": round(pot), "cc": cc,
             "eq": {lk: vsi(c, lk) for lk in ("total", "dental", "esterilizacion", "endoscopia",
                                               "incardia", "mobiliario", "mmq_reas", "otros")},
+            "com_src": comuna_src, "resp": resp, "resp_src": resp_src,
             "vu": round(vv[1] / vv[0], 1) if vv and vv[0] else None,
             "rem": remoto,
             "f26": round(p.get("real_ytd_fac") if p.get("real_ytd_fac") is not None else (p.get("real_ytd") or 0)),
@@ -3187,53 +3496,76 @@ def build_plan_rm(app_data, contratos, direcciones, mapa_data):
     for reg in _PLAN_REGIONES:
         us = [u for u in universo if u["r"] == reg]
         us.sort(key=lambda u: (-u["pot"], -u["eq"]["total"], u["n"]))
+        # El grupo ya no cambia quién visita: los tres grupos los atienden los
+        # mismos dos ejecutivos, cada uno en las comunas de su cartera.
         for i, u in enumerate(us[:_PLAN_TOP_POT]):
-            u["g"], u["rk"], u["resp"] = 1, i + 1, "Cristian / Eglys"
+            u["g"], u["rk"] = 1, i + 1
         resto = us[_PLAN_TOP_POT:]
         resto.sort(key=lambda u: (-u["cam"], -u["pot"], -u["eq"]["total"], u["n"]))
         for i, u in enumerate(resto):
             u["g"], u["rk"] = (2 if i < _PLAN_TOP_CAMAS else 3), i + 1
 
-    # ── Territorios de los KAM ──
-    # KAM 2 toma la Región de Valparaíso y el poniente de la RM, que es el lado
-    # que da hacia la costa; KAM 1 el resto de la RM. El corte se hace por
-    # longitud y en la cantidad que deja a los dos con el mismo número de visitas.
-    pool = [u for u in universo if u["g"] in (2, 3) and not u["rem"]]
-    val = [u for u in pool if u["r"] == "Valparaíso"]
-    rm = sorted([u for u in pool if u["r"] == "Metropolitana"], key=lambda u: u["lon"])
-    n2_rm = max(0, (len(pool) + 1) // 2 - len(val))
-    k2 = set(id(u) for u in val + rm[:n2_rm])
-    for u in pool:
-        u["resp"] = "KAM 2" if id(u) in k2 else "KAM 1"
-    # Isla de Pascua queda a cargo del KAM de Valparaíso, fuera de la agenda en
-    # auto: requiere un viaje aparte.
-    for u in universo:
-        if u["g"] in (2, 3) and u["rem"]:
-            u["resp"] = "KAM 2"
+    # ── Cartera por ejecutivo ──
+    # Valparaíso completo es de Cristián Pérez; la Metropolitana se reparte por
+    # comuna. Un cliente cuya comuna no está en ninguna de las dos listas —o del
+    # que no se conoce la comuna— se asigna al ejecutivo cuyo territorio le
+    # queda más cerca, y queda marcado como tal para poder corregirlo en la
+    # planilla de comunas.
+    centro_eje = {}
+    for eje in _PLAN_EJECUTIVOS:
+        pts = [(u["lat"], u["lon"]) for u in universo
+               if u["resp"] == eje and u["r"] == "Metropolitana" and u["resp_src"] == "Comuna"]
+        if pts:
+            centro_eje[eje] = (sum(p0[0] for p0 in pts) / len(pts), sum(p0[1] for p0 in pts) / len(pts))
+    sin_asignar = 0
+    pendientes = [u for u in universo if not u["resp"]]
+    # Los que tienen ubicación real se asignan al territorio más cercano.
+    for u in pendientes:
+        if u["prec"].startswith("Aproximada") or not centro_eje:
+            continue
+        sin_asignar += 1
+        u["resp"] = min(centro_eje, key=lambda e: _plan_dist(centro_eje[e], (u["lat"], u["lon"])))
+        u["resp_src"] = "Cercanía (comuna por confirmar)"
+    # Los que no tienen ni comuna ni ubicación quedan en el centro de la región,
+    # así que la cercanía no dice nada: se reparten de mayor a menor potencial
+    # entre los dos ejecutivos, dejando cada uno con una carga parecida. Es una
+    # asignación provisoria hasta que se confirme la comuna en la planilla.
+    sueltos = sorted([u for u in pendientes if not u["resp"]], key=lambda u: (-u["pot"], -u["eq"]["total"], u["n"]))
+    carga = {e: sum(1 for u in universo if u["resp"] == e) for e in _PLAN_EJECUTIVOS}
+    for u in sueltos:
+        sin_asignar += 1
+        e = min(_PLAN_EJECUTIVOS, key=lambda x: carga[x])
+        u["resp"], u["resp_src"] = e, "Reparto provisorio (comuna y ubicación por confirmar)"
+        carga[e] += 1
 
     # ── Agenda ──
-    # Cada KAM visita primero a sus clientes con plan de entrada (grupo 2) y
-    # después al resto (grupo 3). KAM 2 hace todo Valparaíso en un solo bloque
-    # seguido —su grupo 2 y luego su grupo 3—, para no ir y volver desde
-    # Santiago en la misma semana: RM grupo 2 → Valparaíso grupo 2 →
-    # Valparaíso grupo 3 → RM grupo 3.
+    # Los dos ejecutivos visitan a toda su cartera, en este orden: primero los
+    # clientes de mayor potencial (grupo 1), después los de mayor tamaño (grupo
+    # 2) y al final el resto, que se recorre de mayor a menor potencial. Cada
+    # día junta 3 clientes cercanos entre sí y Valparaíso va en un bloque
+    # seguido para no ir y volver desde Santiago en la misma semana.
     agenda = []
     lunes0 = _PLAN_INICIO - timedelta(days=_PLAN_INICIO.weekday())
-    orden_bloques = [(2, "Metropolitana"), (2, "Valparaíso"), (3, "Valparaíso"), (3, "Metropolitana")]
-    for kam in ("KAM 1", "KAM 2"):
+    pool = [u for u in universo if not u["rem"]]
+    orden_bloques = [(1, "Metropolitana"), (2, "Metropolitana"),
+                     (1, "Valparaíso"), (2, "Valparaíso"), (3, "Valparaíso"),
+                     (3, "Metropolitana")]
+    for eje in _PLAN_EJECUTIVOS:
         dias, arrastre = [], None
         for g, reg in orden_bloques:
-            sub = [u for u in pool if u["resp"] == kam and u["g"] == g and u["r"] == reg]
-            if sub:
-                nuevos, arrastre = _plan_rutear(sub, _PLAN_CENTRO[reg], arrastre)
-                dias += nuevos
+            sub_ = [u for u in pool if u["resp"] == eje and u["g"] == g and u["r"] == reg]
+            if not sub_:
+                continue
+            rutear = _plan_rutear_pot if g == 3 else _plan_rutear
+            nuevos, arrastre = rutear(sub_, _PLAN_CENTRO[reg], arrastre)
+            dias += nuevos
         if arrastre:
-            dias.append(arrastre)
+            dias.append(list(arrastre))
         fechas = _plan_dias_habiles(_PLAN_INICIO, len(dias))
         for dia, fecha in zip(dias, fechas):
             for o, u in enumerate(dia):
                 u["v1"] = fecha.isoformat()
-                agenda.append({"f": fecha.isoformat(), "k": kam, "o": o + 1, "h": _PLAN_HORAS[o],
+                agenda.append({"f": fecha.isoformat(), "k": eje, "o": o + 1, "h": _PLAN_HORAS[o],
                                "s": (fecha - lunes0).days // 7 + 1, "c": universo.index(u)})
 
     agenda.sort(key=lambda a: (a["f"], a["k"], a["o"]))
@@ -3249,6 +3581,9 @@ def build_plan_rm(app_data, contratos, direcciones, mapa_data):
                         "g2": sum(1 for u in us if u["g"] == 2), "g3": sum(1 for u in us if u["g"] == 3)}
     from collections import Counter
     cam_f = Counter(u["camF"] for u in universo)
+    por_eje = Counter(u["resp"] for u in universo)
+    print("       PLAN · cartera: " + " | ".join(f"{e} {n}" for e, n in por_eje.most_common()) +
+          f" | {sin_asignar} asignados por cercanía")
     print(f"       PLAN RM/VALPARAÍSO: {len(excluidos)} clientes fuera por contrato Activado | " + " | ".join(
         f"{r} {v['n']} (G1 {v['g1']} · G2 {v['g2']} · G3 {v['g3']})" for r, v in resumen.items()) +
         f" | camas: {cam_f.get('Registro', 0)} registro, {cam_f.get('Estimado', 0)} estimadas, "
@@ -3256,11 +3591,222 @@ def build_plan_rm(app_data, contratos, direcciones, mapa_data):
         f"{agenda[0]['f'] if agenda else ''} a {agenda[-1]['f'] if agenda else ''}")
     return {
         "regiones": _PLAN_REGIONES, "clientes": universo, "excluidos": excluidos,
+        "ejecutivos": _PLAN_EJECUTIVOS,
+        "comunas_eje": _PLAN_COMUNAS_EJE, "eje_valpo": _PLAN_EJE_VALPO,
         "agenda": agenda, "semanas": semanas,
         "resumen": resumen, "inicio": _PLAN_INICIO.isoformat(),
         "feriados": sorted(d.isoformat() for d in _PLAN_FERIADOS),
         "top_pot": _PLAN_TOP_POT, "top_camas": _PLAN_TOP_CAMAS, "visitas_dia": _PLAN_VISITAS_DIA,
         "medianas": med,
+    }
+
+
+def build_cartera_st(app_data, contratos, direcciones, mapa_data):
+    """Cartera de clientes de Servicio Técnico repartida entre los ejecutivos.
+
+    El universo es el mismo que muestra la hoja Base Instalada en «Detalle por
+    Cliente» con el filtro Potencial ST = Sí y los clientes con contrato
+    incluidos: todo cliente con al menos un equipo factible de ST. A diferencia
+    del Plan RM —que mira sólo lo que está por capturar— acá está la cartera
+    completa, porque el cliente con contrato también hay que atenderlo.
+
+    El reparto sigue tres reglas, en este orden: la Región de Valparaíso y las
+    demás regiones completas van a un ejecutivo (_ST_EJE_POR_REGION); la
+    Metropolitana se divide por comuna (_PLAN_COMUNAS_EJE); y lo que no calza
+    queda «Por asignar», a la vista en la hoja.
+    """
+    bi = app_data.get("base_instalada") or {}
+    clientes = [c for c in (bi.get("clientes") or []) if (c.get("total_si") or 0) > 0]
+    if not clientes:
+        return {}
+    # BASE INSTALADA trae equipos cargados con el nombre en blanco o en cero:
+    # no son clientes de nadie, pero se dejan en la cartera para que los totales
+    # cuadren con la hoja Base Instalada. Van marcados para poder aislarlos.
+    _SIN_NOMBRE = {"VACIO", "0", "SIN CLIENTE", "-", "N/A", "SIN INFORMACION"}
+
+    plan = (app_data.get("plan_rm") or {}).get("clientes") or []
+    plan_idx = {_norm_cli(u["n"]): u for u in plan}
+    comunas_manual = _plan_leer_comunas()
+    deis, centros_com = _plan_leer_deis()
+    comunas_reg = defaultdict(set)
+    for (rg, cm) in centros_com:
+        comunas_reg[rg].add(cm)
+    mapa_idx = {_norm_cli(m.get("n")): m for m in (mapa_data or [])}
+
+    # Facturación y contrato, con la misma resolución que la hoja Base Instalada.
+    pf = app_data.get("panel_fact") or app_data.get("panel") or []
+    panel = {_norm_cli(p.get("cliente")): p for p in pf if p.get("cliente")}
+    res, tomadas, pend = {}, set(), []
+    for c in clientes:
+        k = _norm_cli(c["nombre"])
+        if not k:
+            continue
+        if k in panel:
+            res[k] = panel[k]; tomadas.add(k)
+        elif len(k) >= 8:
+            pend.append(k)
+    cand = defaultdict(list)
+    for k in pend:
+        hit = [pk for pk in panel if len(pk) >= 8 and pk not in tomadas and (k in pk or pk in k)]
+        if len(hit) == 1:
+            cand[hit[0]].append(k)
+    for pk, ks in cand.items():
+        if len(ks) == 1:
+            res[ks[0]] = panel[pk]
+
+    # % de vida útil, igual que la hoja Base Instalada.
+    pb = app_data.get("prosp_bi") or {}
+    vut = app_data.get("vida_util") or {}
+    vida = defaultdict(lambda: [0, 0.0])
+    tp, cl_pb, hoy_ym = pb.get("tipos") or [], pb.get("clientes") or [], pb.get("hoy_ym") or 0
+    for f in pb.get("filas") or []:
+        u = vut.get(safe_str(tp[f[2]]).strip().upper(), 0) if f[2] < len(tp) else 0
+        if f[6] >= 0 and u > 0:
+            v = vida[_norm_cli(cl_pb[f[3]])]
+            v[0] += 1; v[1] += (hoy_ym - f[6]) / 12 / u * 100
+
+    LINEAS = ("dental", "esterilizacion", "endoscopia", "incardia", "mobiliario", "mmq_reas", "otros")
+    out, sin_eje, reg_deducida = [], 0, 0
+    for c in clientes:
+        k = _norm_cli(c["nombre"])
+        reg = c.get("region") or "Sin región"
+        reg_src = "Base instalada" if reg != "Sin región" else ""
+        if reg == "Sin región":
+            # BASE INSTALADA deja 115 clientes sin región y sin ella no hay
+            # cartera a la que asignarlos: se busca en el mapa de clientes, en
+            # la hoja Direcciones y, por último, en el nombre del cliente.
+            m0 = mapa_idx.get(k) or {}
+            cand = safe_str(m0.get("region")).strip()
+            if cand and cand != "Sin región":
+                reg, reg_src = _norm_region(cand), "Mapa de clientes"
+            else:
+                cand = safe_str((direcciones.get(k) or {}).get("region")).strip()
+                if cand:
+                    reg, reg_src = _norm_region(cand), "Direcciones"
+                else:
+                    cand = _st_region_nombre(c["nombre"])
+                    if cand:
+                        reg, reg_src = cand, "Nombre del cliente"
+            if reg != "Sin región":
+                reg_deducida += 1
+        u = plan_idx.get(k)
+        p = res.get(k) or {}
+
+        # ── Comuna y ubicación ──
+        com = (u or {}).get("com") or comunas_manual.get(k) or ""
+        lat = (u or {}).get("lat")
+        lon = (u or {}).get("lon")
+        prec = (u or {}).get("prec") or ""
+        if not com or lat is None:
+            dr = direcciones.get(k) or {}
+            if not com:
+                com = dr.get("comuna") or ""
+            if lat is None and dr.get("lat") is not None:
+                lat, lon, prec = dr["lat"], dr["lon"], "Dirección del cliente"
+        m = mapa_idx.get(k)
+        if lat is None and m and m.get("lat") is not None:
+            lat, lon, prec = m["lat"], m["lon"], "Base Mapa"
+            com = com or safe_str(m.get("comuna"))
+        if lat is None:
+            for rr in ([reg] if reg in _PLAN_REGIONES else _PLAN_REGIONES):
+                de, _sc = _plan_calce(c["nombre"], rr, deis, 0.78)
+                if de:
+                    lat, lon, prec = de["lat"], de["lon"], "Establecimiento DEIS"
+                    com = com or de["comuna"]
+                    if reg == "Sin región":
+                        reg, reg_src, reg_deducida = rr, "Establecimiento DEIS", reg_deducida + 1
+                    break
+        if not com and comunas_reg.get(reg):
+            com = _plan_comuna_nombre(c["nombre"], reg, comunas_reg[reg])
+        if lat is None and com:
+            ce = centros_com.get((reg, _plan_norm(com)))
+            if ce:
+                lat, lon, prec = ce[0], ce[1], "Centro de la comuna"
+
+        # ── Ejecutivo ──
+        if u and u.get("resp") and u.get("resp_src") in ("Comuna", "Región completa"):
+            resp, resp_src = u["resp"], u["resp_src"]
+        elif reg in _ST_EJE_POR_REGION:
+            resp, resp_src = _ST_EJE_POR_REGION[reg], "Región completa"
+        else:
+            # La comuna sirve aunque la base no traiga la región: las comunas de
+            # las carteras son todas de la Metropolitana.
+            resp = ""
+            for parte in re.split(r"[,/]| Y ", (com or "").upper()):
+                resp = _PLAN_EJE_POR_COMUNA.get(_plan_norm(parte), "")
+                if resp:
+                    break
+            resp_src = "Comuna" if resp else ""
+            if resp and reg == "Sin región":
+                reg, reg_src, reg_deducida = "Metropolitana", "Comuna del cliente", reg_deducida + 1
+        if not resp:
+            resp, resp_src = "Por asignar", "Sin región ni comuna"
+            sin_eje += 1
+
+        vv = vida.get(k)
+        cc = bool(c.get("cv"))
+        pot_bruto = sum((c.get(l + "_si") or 0) * t for l, t in _PLAN_TARIFA.items())
+        out.append({
+            "n": c["nombre"], "r": reg, "r_src": reg_src, "com": com, "resp": resp, "resp_src": resp_src,
+            "lat": round(lat, 5) if lat is not None else None,
+            "lon": round(lon, 5) if lon is not None else None,
+            "prec": prec,
+            "eq": {l: c.get(l + "_si") or 0 for l in LINEAS},
+            "tot": c.get("total_si") or 0, "tot_bi": c.get("total") or 0,
+            "vu": round(vv[1] / vv[0], 1) if vv and vv[0] else None,
+            "pot": 0 if cc else round(pot_bruto), "pot_bruto": round(pot_bruto),
+            "pipe_eq": round(c.get("pipe_eq") or 0), "pipe_st": round(c.get("pipe_st") or 0),
+            "cc": cc, "estado": c.get("estado") or "",
+            "sin_nombre": _norm_cli(c["nombre"]) in _SIN_NOMBRE,
+            "_fac_key": p.get("cliente"),
+            "f26": round(p.get("real_ytd_fac") if p.get("real_ytd_fac") is not None else (p.get("real_ytd") or 0)),
+            "fcontr": round(min(p.get("presup_contr_ytd") or 0, p.get("real_ytd_fac") or p.get("real_ytd") or 0)),
+            "rel": p.get("estado_relacion") or ("Con contrato" if cc else "Sin historial"),
+        })
+
+    repetidos = len(out)
+    out = _st_unificar(out)
+    for x in out:
+        x.pop("_fac_key", None)
+    repetidos -= len(out)
+    out.sort(key=lambda x: (-x["tot"], x["n"]))
+    from collections import Counter
+    por_eje = Counter(x["resp"] for x in out)
+    print("       CARTERA ST: %d clientes | %d equipos ST | %s | %d sin ejecutivo | %d con región deducida "
+          "| %d nombres unificados | %d con contrato" % (
+              len(out), sum(x["tot"] for x in out),
+              " · ".join(f"{e} {n}" for e, n in por_eje.most_common()), sin_eje, reg_deducida,
+              repetidos, sum(1 for x in out if x["cc"])))
+    # ── Cuadre contra CONTRATOS TODOS ──
+    # No todos los clientes con contrato entran a esta cartera: para estar hay
+    # que tener al menos un equipo con Potencial ST = Sí. Se deja el detalle a
+    # la vista para que el número de contratos de la hoja se pueda explicar.
+    todos_bi = bi.get("clientes") or []
+    activados = sorted(clientes_con_contrato_activado(contratos))
+    en_cartera, sin_st, sin_bi = 0, [], []
+    for nom in activados:
+        if any(_plan_mismo_cliente(nom, x["n"]) or any(_plan_mismo_cliente(nom, a) for a in x.get("alias", []))
+               for x in out):
+            en_cartera += 1
+            continue
+        eq = sum(c["total"] for c in todos_bi if _plan_mismo_cliente(nom, c["nombre"]))
+        if eq:
+            sin_st.append({"n": nom, "eq": eq})
+        else:
+            sin_bi.append(nom)
+    sin_st.sort(key=lambda x: -x["eq"])
+    print("       CARTERA ST · contratos: %d clientes Activados = %d en la cartera + %d sin equipos ST + %d sin base" % (
+        len(activados), en_cartera, len(sin_st), len(sin_bi)))
+
+    return {
+        "clientes": out,
+        "ejecutivos": _PLAN_EJECUTIVOS,
+        "regiones_eje": _ST_REGION_EJE,
+        "comunas_eje": _PLAN_COMUNAS_EJE,
+        "tarifas": _PLAN_TARIFA,
+        "unificados": repetidos,
+        "cuadre": {"activados": len(activados), "en_cartera": en_cartera,
+                   "sin_st": sin_st, "sin_bi": sin_bi},
     }
 
 
@@ -3798,6 +4344,11 @@ def read_gd_costos(wb):
     Reemplaza a "Total Costo Linea" (col Q de la BBDD de facturación), que
     sólo recogía el costo de las líneas facturadas y dejaba a la mitad de los
     clientes en cero.
+
+    Además de la suma total, acumula "costo_mensual" (12 valores, Ene-Dic del
+    año en curso) desde col L "Fecha de contabilización", para el margen
+    ajustado "Margen Neto" de la hoja Panel Fact Cliente, que sólo considera
+    abril en adelante.
     """
     ws = next((wb[n] for n in wb.sheetnames if n.strip().upper() == "GD"), None)
     if ws is None:
@@ -3812,14 +4363,143 @@ def read_gd_costos(wb):
         if not cli:
             continue
         k = _norm_cli(cli)
-        e = idx.setdefault(k, {"nombre": cli, "costo": 0.0})
-        e["costo"] += to_float(row[17])
+        e = idx.setdefault(k, {"nombre": cli, "costo": 0.0, "costo_mensual": [0.0] * 12})
+        costo = to_float(row[17])
+        e["costo"] += costo
+        f = row[11] if len(row) > 11 else None
+        if isinstance(f, (datetime, date)) and f.year == ANO:
+            e["costo_mensual"][f.month - 1] += costo
         n_filas += 1
     print(f"       GD: {n_filas} movimientos | {len(idx)} clientes | "
           f"costo MM${sum(e['costo'] for e in idx.values())/1e6:,.1f}")
     for e in idx.values():
         e["costo"] = round(e["costo"])
+        e["costo_mensual"] = [round(v) for v in e["costo_mensual"]]
     return idx
+
+
+def read_region_clientes(wb):
+    """Región de cada cliente, para el costo de viajes del "Margen Neto" de
+    Panel Fact Cliente.
+
+    Fuente: hoja "Región Clientes". Col A = Nombre Cliente, col B = Región,
+    con el nombre completo oficial ("Región de Valparaíso", "Región del
+    Biobío", etc.). Se normaliza a las etiquetas cortas de la tabla de
+    tarifas de viaje ("Valparaíso", "Biobío"...), que no incluye la Región
+    Metropolitana —los técnicos están basados ahí, así que su viaje es
+    $0, no "sin región"—. La hoja también trae el valor centinela "Región no
+    Identificada": se trata igual que un cliente sin fila, es decir, sin
+    región conocida, para que el panel lo señale y no lo calcule en $0 en
+    silencio.
+    """
+    ws = next((wb[n] for n in wb.sheetnames if n.strip().lower() == "región clientes"), None)
+    if ws is None:
+        print("  ADVERTENCIA: no se encontró la hoja 'Región Clientes'; el costo de viajes"
+              " del Margen Neto quedará sin región para todos los clientes.")
+        return {}
+    out = {}
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 2:
+            continue
+        cli = safe_str(row[0]).strip()
+        if not cli:
+            continue
+        reg = _norm_region_viaje(row[1])
+        out[_norm_cli(cli)] = reg
+    n_sin = sum(1 for v in out.values() if v is None)
+    print(f"       REGIÓN CLIENTES: {len(out)} clientes | {n_sin} sin región identificada")
+    return out
+
+
+# Nombre oficial completo (hoja "Región Clientes") → etiqueta corta usada en
+# la tabla de tarifas de viaje del Margen Neto. "Región no Identificada" y
+# cualquier valor fuera de esta lista quedan como None ("sin región"), para
+# que el panel los marque en vez de asumir costo $0 en silencio.
+_REGION_VIAJE_MAP = {
+    "REGION METROPOLITANA DE SANTIAGO":                              "Metropolitana",
+    "REGION DE ARICA Y PARINACOTA":                                  "Arica y Parinacota",
+    "REGION DE TARAPACA":                                            "Tarapacá",
+    "REGION DE ANTOFAGASTA":                                         "Antofagasta",
+    "REGION DE ATACAMA":                                             "Atacama",
+    "REGION DE COQUIMBO":                                            "Coquimbo",
+    "REGION DE VALPARAISO":                                          "Valparaíso",
+    "REGION DEL LIBERTADOR GENERAL BERNARDO O'HIGGINS":              "O'Higgins",
+    "REGION DEL MAULE":                                              "Maule",
+    "REGION DE NUBLE":                                               "Ñuble",
+    "REGION DEL BIOBIO":                                             "Biobío",
+    "REGION DE LA ARAUCANIA":                                        "Araucanía",
+    "REGION DE LOS RIOS":                                            "Los Ríos",
+    "REGION DE LOS LAGOS":                                           "Los Lagos",
+    "REGION DE AYSEN DEL GENERAL CARLOS IBANEZ DEL CAMPO":           "Aysén",
+    "REGION DE MAGALLANES Y DE LA ANTARTICA CHILENA":                "Magallanes",
+}
+
+
+def _norm_region_viaje(valor):
+    t = _norm_cli(valor)
+    return _REGION_VIAJE_MAP.get(t)  # None si no calza (incluye "Región no Identificada")
+
+
+def read_citas_costeo(wb):
+    """Citas de servicio en terreno, para el costo operativo (horas hombre +
+    viajes) del "Margen Neto" de Panel Fact Cliente.
+
+    Se lee la misma hoja "Citas Servicios Trimestrales" que read_citas_servicios(),
+    pero por separado y con año/mes/día absolutos —no el índice relativo a los
+    últimos 12 meses que usa la hoja "Servicios en Terreno"—, para no arriesgar
+    ese cálculo ya existente al tocar uno nuevo.
+
+    Columnas (0-index): F/5=Cliente, C/2=Número de cita (se guarda por si
+    sirve para auditar el detalle, pero el viaje único de hoja_panelfact.js
+    ya no la usa: basta cliente + fecha, sin importar cuántas citas o
+    técnicos distintos hubo ese día), O/14=Duración Modificada (minutos),
+    P/15=Fecha Modificada (fecha real del viaje, corregida a mano — mismo
+    criterio que read_citas_servicios()).
+    """
+    ws = None
+    for name in wb.sheetnames:
+        n = name.strip().lower()
+        if "cita" in n and "servicio" in n:
+            ws = wb[name]
+            break
+    if ws is None:
+        return {}
+
+    clientes, atenciones = [], []
+    i_cli, i_at = {}, {}
+
+    def ref(lista, indice, valor):
+        if valor not in indice:
+            indice[valor] = len(lista)
+            lista.append(valor)
+        return indice[valor]
+
+    filas_out = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 16 or not row[0]:
+            continue
+        f = row[15]
+        if not isinstance(f, (datetime, date)):
+            continue
+        cli = safe_str(row[5]).strip()
+        if not cli:
+            continue
+        at = safe_str(row[2]).strip() or "(sin número de cita)"
+        dur = to_float(row[14]) if isinstance(row[14], (int, float)) else 0.0
+        filas_out.append([
+            ref(clientes, i_cli, cli),
+            f.year, f.month, f.day,
+            ref(atenciones, i_at, at),
+            round(dur),
+        ])
+
+    return {
+        "clientes":   clientes,
+        "atenciones": atenciones,
+        # [cliente, año, mes, día, atención, minutos]
+        "filas":      filas_out,
+        "n":          len(filas_out),
+    }
 
 
 def read_back_order_idx(wb):
@@ -4820,6 +5500,7 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
     _contr_norm = {_norm(c) for c in active_contract_clients}
 
     costo_cli = bbdd.get("costo_cli_2026", {})
+    mensual_cli = bbdd.get("mensual_por_cliente", {})
     fact_clientes = []
     for cli_bbdd, monto in bbdd.get("ytd_cli_2026", {}).items():
         nom = safe_str(cli_bbdd).strip()
@@ -4834,6 +5515,12 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
             "contrato": bool(pe.get("tiene_contrato")) if pe else (k in _contr_norm),
             "real":     round(float(monto)),
             "costo":    round(float(costo_cli.get(cli_bbdd, 0))),
+            # Ingresos Ene-Dic del año en curso, mismo criterio (empresa TS,
+            # tipo Factura, catálogos Servicio Técnico/REAS/Trazabilidad) que
+            # "real". Alimenta el "Margen Neto" de Panel Fact Cliente, que
+            # sólo cuenta desde abril en adelante.
+            "mensual":       [round(v) for v in mensual_cli.get(cli_bbdd, [0.0] * 12)],
+            "costo_mensual": [0] * 12,   # se rellena abajo desde la hoja GD, si está disponible
         })
     # ── Costo de repuestos por cliente, desde la hoja GD ────────────────────
     # Reemplaza al costo de la BBDD y suma a los clientes que consumieron
@@ -4847,6 +5534,7 @@ def build_app_data(contratos, panel_raw, bbdd, visitas, satisf, mes_corte, anali
             k = _norm_cli(c["cliente"])
             _vistos.add(k)
             c["costo"] = gd_costo.get(k, {}).get("costo", 0)
+            c["costo_mensual"] = gd_costo.get(k, {}).get("costo_mensual", [0] * 12)
             c["solo_costo"] = False
         # Los que consumieron repuestos sin facturar van consolidados en una
         # sola fila; el detalle queda en el tooltip.
@@ -5411,6 +6099,8 @@ def main():
     back_ord = read_back_order_idx(wb2)
     pipe_st  = read_pipeline_st(wb2)
     gd_costo = read_gd_costos(wb2)
+    region_clientes = read_region_clientes(wb2)
+    citas_costeo    = read_citas_costeo(wb2)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -5434,6 +6124,8 @@ def main():
     app_data["rep_vend"] = rep_vend
     app_data["eq_fallas"] = eq_fallas
     app_data["citas"] = citas
+    app_data["region_clientes"] = region_clientes
+    app_data["citas_costeo"] = citas_costeo
     app_data["vida_util"] = vida_util
     app_data["prosp_bi"] = prosp_bi
     app_data["fact_desglose"] = fact_desg
@@ -5540,6 +6232,8 @@ def main():
     # Va al final: necesita los contratos activos (data), la facturación, la base
     # instalada, la vida útil y el mapa ya armados.
     app_data["plan_rm"] = build_plan_rm(app_data, contratos, direcciones, mapa_data)
+    # Va después del plan: reutiliza las comunas y ubicaciones que éste resolvió.
+    app_data["cartera_st"] = build_cartera_st(app_data, contratos, direcciones, mapa_data)
     print(f"       CASOS: {len(casos_data['casos'])} casos relevantes | {len(casos_data['equipos'])} equipos detenidos")
 
     # ── Parchear template.html (fuente de build.ps1) ─────────────────────────

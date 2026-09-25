@@ -8,6 +8,117 @@ let pfContr='todos';
 let pfSrch='';
 let _pfSortCol='real_ytd',_pfSortAsc=false;
 
+// ═══════════════════════════════════════════════════════════════
+// MARGEN NETO — margen de "Facturación del Año por Cliente" ajustado por
+// costo operativo (horas hombre + viajes), sólo con datos desde abril en
+// adelante, que es desde donde hay costo de terreno cargado.
+// Fuente: APP_DATA.citas_costeo (hoja "Citas Servicios Trimestrales") y
+// APP_DATA.region_clientes (hoja "Región Clientes"). Con el botón
+// desactivado, la tabla no cambia en nada: _pfRenderDetalle() corta al tiro
+// hacia _pfRenderMargenNeto() sólo cuando mgActivo es true.
+// ═══════════════════════════════════════════════════════════════
+let mgActivo = false;
+
+const MG_COSTO_HORA = 25000;   // $/hora hombre
+const MG_MES_DESDE  = 4;       // abril: primer mes con costo de terreno cargado
+
+// Tarifa de "Total viaje" por región (valor único ida y vuelta, no por
+// técnico). La Región Metropolitana no venía en la tabla entregada porque
+// los técnicos están basados ahí, pero igual tiene un costo fijo de
+// movilización por viaje único: no es un caso "sin región".
+const MG_TARIFA_VIAJE = {
+  'Arica y Parinacota': 556000, 'Tarapacá': 476000, 'Antofagasta': 446000,
+  'Atacama': 416000, 'Coquimbo': 366000, 'Valparaíso': 194000,
+  "O'Higgins": 188000, 'Maule': 198000, 'Ñuble': 416000, 'Biobío': 366000,
+  'Araucanía': 396000, 'Los Ríos': 426000, 'Los Lagos': 436000,
+  'Aysén': 506000, 'Magallanes': 526000, 'Metropolitana': 50000,
+};
+
+function _mgNorm(s){
+  return s ? String(s).trim().toUpperCase().replace(/\s+/g,' ')
+             .normalize('NFD').replace(/[̀-ͯ]/g,'') : '';
+}
+
+// Filas de Citas Servicios Trimestrales de un cliente, desde abril del año
+// dado. Cada fila es [cliente_idx, año, mes, día, atención_idx, minutos].
+function _mgFilasCliente(clienteKey, anio){
+  const CC = (window.APP_DATA || {}).citas_costeo;
+  if(!CC || !CC.filas || !CC.filas.length) return [];
+  const idx = (CC.clientes || []).findIndex(c => _mgNorm(c) === clienteKey);
+  if(idx < 0) return [];
+  return CC.filas.filter(f => f[0] === idx && f[1] === anio && f[2] >= MG_MES_DESDE);
+}
+
+// Viajes únicos de un cliente desde abril: la llave es cliente + fecha. No
+// importa cuántas citas o técnicos distintos atendieron ese día —es un solo
+// viaje a terreno—, así que dos o más filas del mismo cliente el mismo día
+// cuentan como un solo viaje. Devuelve un Set con esa llave por cada viaje
+// distinto.
+function getUniqueTrips(clienteKey, anio){
+  const filas = _mgFilasCliente(clienteKey, anio);
+  const trips = new Set();
+  filas.forEach(f => {
+    trips.add(f[1] + '-' + f[2] + '-' + f[3]);   // año-mes-día
+  });
+  return trips;
+}
+
+// Costo de viaje único a la región del cliente. Devuelve null si la región
+// no está en la tabla de tarifas (no debería pasar salvo error de datos: las
+// regiones que entrega el extractor ya vienen acotadas a esta lista).
+function getRegionTravelCost(region){
+  return Object.prototype.hasOwnProperty.call(MG_TARIFA_VIAJE, region) ? MG_TARIFA_VIAJE[region] : null;
+}
+
+// Costo operativo (horas hombre + viajes) de un cliente, desde abril del año
+// dado. "sinRegion" es true cuando el cliente no tiene región conocida —no
+// aparece en la hoja "Región Clientes", o aparece como "Región no
+// Identificada"—: en ese caso NO se asume costo de viaje $0, se deja en null
+// y se marca para revisión explícita en la tabla.
+function getClientOperationalCosts(clienteNombre, anio){
+  const RC = (window.APP_DATA || {}).region_clientes || {};
+  const key = _mgNorm(clienteNombre);
+  const filas = _mgFilasCliente(key, anio);
+  const horasMin = filas.reduce((s,f) => s + (f[5] || 0), 0);
+  const costoHoras = Math.round(horasMin / 60 * MG_COSTO_HORA);
+  const trips = getUniqueTrips(key, anio);
+  const viajesUnicos = trips.size;
+  const sinRegion = !Object.prototype.hasOwnProperty.call(RC, key) || RC[key] == null;
+  const region = sinRegion ? null : RC[key];
+  const costoViajeUnitario = sinRegion ? null : getRegionTravelCost(region);
+  const costoViajes = (sinRegion || costoViajeUnitario == null) ? 0 : viajesUnicos * costoViajeUnitario;
+  return {
+    horasMin, costoHoras, viajesUnicos, region, costoViajeUnitario, costoViajes,
+    costoOperativo: costoHoras + costoViajes,
+    sinRegion: sinRegion && viajesUnicos > 0,   // sin datos de viaje, "sin región" no aplica: no hay nada que costear
+  };
+}
+
+// Margen ajustado de un cliente: toma el objeto de APP_DATA.fact_clientes
+// (con .mensual y .costo_mensual, 12 valores Ene-Dic ya calculados por el
+// extractor) y le resta el costo operativo desde abril. ingresos_desde_abril
+// y margen_bruto_desde_abril excluyen enero-marzo, tal como el resto de este
+// cálculo, porque el costo de terreno sólo está cargado desde ahí.
+function getAdjustedClientMargin(clienteObj, anio){
+  anio = anio || (window.ANO_ACTUAL || new Date().getFullYear());
+  const mensual = clienteObj.mensual || [];
+  const costoMensual = clienteObj.costo_mensual || [];
+  const ingresosAbril = mensual.slice(MG_MES_DESDE - 1).reduce((s,v) => s + (v || 0), 0);
+  const costoGdAbril  = costoMensual.slice(MG_MES_DESDE - 1).reduce((s,v) => s + (v || 0), 0);
+  const margenBrutoAbril = ingresosAbril - costoGdAbril;
+  const op = getClientOperationalCosts(clienteObj.cliente, anio);
+  const margenAjustado = margenBrutoAbril - op.costoOperativo;
+  const margenAjustadoPct = ingresosAbril ? (margenAjustado / ingresosAbril * 100) : 0;
+  return Object.assign({ ingresosAbril, costoGdAbril, margenBrutoAbril, margenAjustado, margenAjustadoPct }, op);
+}
+
+function pfToggleMargenNeto(){
+  mgActivo = !mgActivo;
+  const btn = document.getElementById('pf-mg-toggle');
+  if(btn) btn.classList.toggle('on', mgActivo);
+  _pfRenderDetalle();
+}
+
 // Facturación real del cliente a la fecha. Usa real_ytd_fac, que el extractor
 // calcula con la misma base que "Ingresos Totales" de Analisis Facturación
 // (Empresa TS + Tipo Factura + catálogos Servicio Técnico / REAS /
@@ -149,6 +260,11 @@ function _pfRenderDetalle(){
   const q = (pfSrch || '').trim().toLowerCase();
   if(q) filas = filas.filter(x => x.cliente.toLowerCase().includes(q));
 
+  // Con el toggle "Margen Neto" activado, la tabla original no se toca: se
+  // corta acá y se dibuja la vista de margen ajustado en su lugar, sobre el
+  // mismo universo ya filtrado (tipo, contrato, búsqueda).
+  if(mgActivo){ _pfRenderMargenNeto(filas, todos, totGeneral); return; }
+
   const _mgPct = x => x.real ? (x.real - (x.costo || 0)) / x.real * 100 : (x.costo ? -100 : 0);
   // Tooltip: para la fila consolidada lista los clientes que la componen
   const _pfTip = function(x){
@@ -239,6 +355,139 @@ function _pfRenderDetalle(){
   const kGeneral = todos.reduce((s, x) => s + (x.costo || 0), 0);
   if(lbl) lbl.textContent = todos.length + ' clientes · ' + fmtMM(totGeneral) + ' facturado · ' +
     fmtMM(kGeneral) + ' costo · margen ' + (totGeneral ? ((totGeneral - kGeneral) / totGeneral * 100).toFixed(1).replace('.', ',') : '0') + '%';
+}
+
+// Vista "Margen Neto" de la tabla "Facturación del Año por Cliente": mismo
+// universo de clientes ya filtrado por tipo/contrato/búsqueda, sobre la
+// MISMA tabla "Facturación del Año por Cliente" —mismas columnas, mismo
+// estilo—, sólo que los datos van desde abril en adelante y se agregan dos
+// columnas al final: Costo Horas Hombre y Costo Viajes, para terminar en
+// Margen Neto. La fila consolidada "Clientes sin Facturación" no representa
+// un cliente real (es un agregado sin nombre propio que cruzar contra
+// Citas/Región), así que queda fuera de esta vista.
+function _pfRenderMargenNeto(filasFiltradas, todos, totGeneral){
+  const box = document.getElementById('pf-det-tabla');
+  if(!box) return;
+  const anio = window.ANO_ACTUAL || new Date().getFullYear();
+
+  const filas = filasFiltradas.filter(x => !x.solo_costo)
+    .map(x => Object.assign({}, x, { _mg: getAdjustedClientMargin(x, anio) }));
+  filas.sort((a,b) => b._mg.margenAjustado - a._mg.margenAjustado);
+
+  const nSinRegion = filas.filter(x => x._mg.sinRegion).length;
+  const totIng = filas.reduce((s,x) => s + x._mg.ingresosAbril, 0);
+  const totCosto = filas.reduce((s,x) => s + x._mg.costoGdAbril, 0);
+  const totMB  = filas.reduce((s,x) => s + x._mg.margenBrutoAbril, 0);
+  const totCH  = filas.reduce((s,x) => s + x._mg.costoHoras, 0);
+  const totCV  = filas.reduce((s,x) => s + x._mg.costoViajes, 0);
+  const totMN  = filas.reduce((s,x) => s + x._mg.margenAjustado, 0);
+  const totMNP = totIng ? (totMN / totIng * 100) : 0;
+  const totMBP = totIng ? (totMB / totIng * 100) : 0;
+  // Ingresos desde abril de TODOS los clientes reales (sin la fila consolidada), base del % del total
+  const totIngGeneral = todos.filter(x => !x.solo_costo)
+    .reduce((s,x) => s + (x.mensual || []).slice(MG_MES_DESDE - 1).reduce((a,v) => a + (v || 0), 0), 0);
+  const maxIng = Math.max.apply(null, filas.map(x => x._mg.ingresosAbril).concat([1]));
+
+  const SEP  = 'border-right:1px solid var(--brd)';
+  const thPlain = (t, al) =>
+    '<th style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;padding:.35rem .6rem;' +
+    'font-size:.57rem;text-align:' + al + ';white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)">' + t + '</th>';
+
+  const nUn = v => Math.round(v || 0).toLocaleString('es-CL');
+
+  // Tooltip con el detalle auditable de cómo se llegó al margen neto de esa fila.
+  const _tip = x => {
+    const m = x._mg;
+    const lines = [
+      'Ingresos desde abril: ' + fmtMM(m.ingresosAbril),
+      'Margen bruto desde abril: ' + fmtMM(m.margenBrutoAbril),
+      'Horas hombre: ' + (m.horasMin/60).toFixed(1).replace('.', ',') + ' h (' + nUn(m.horasMin) + ' min)',
+      'Costo horas hombre: ' + fmtMM(m.costoHoras),
+      'Viajes únicos: ' + m.viajesUnicos,
+      'Región: ' + (m.region || (m.sinRegion ? 'SIN REGIÓN — revisar' : 'Metropolitana (sin viajes registrados)')),
+      'Costo por viaje: ' + (m.costoViajeUnitario != null ? fmtMM(m.costoViajeUnitario) : '—'),
+      'Costo total de viajes: ' + fmtMM(m.costoViajes),
+      'Margen neto: ' + fmtMM(m.margenAjustado),
+      'Margen neto %: ' + m.margenAjustadoPct.toFixed(1).replace('.', ',') + '%',
+    ];
+    return x.cliente + '\n' + lines.join('\n');
+  };
+
+  const cuerpo = filas.map(function(x, i){
+    const m = x._mg;
+    const col = m.margenAjustadoPct >= 60 ? 'var(--gn)' : m.margenAjustadoPct >= 35 ? 'var(--am)' : 'var(--rd)';
+    // % margen bruto recalculado con los datos desde abril (mismos umbrales de color que la tabla original)
+    const pctB = m.ingresosAbril ? m.margenBrutoAbril / m.ingresosAbril * 100 : 0;
+    const colB = pctB >= 60 ? 'var(--gn)' : pctB >= 35 ? 'var(--am)' : 'var(--rd)';
+    const tb2 = x.tipo_cli === 'Público' ? 'pb' : x.tipo_cli === 'Privado' ? 'por' : 'pgr';
+    const tl  = x.tipo_cli === 'Público' ? 'PÚB' : x.tipo_cli === 'Privado' ? 'PRIV' : 'N/D';
+    const warn = m.sinRegion
+      ? '<span title="Sin región asignada en la hoja Región Clientes: el costo de viaje no se puede calcular y no se asume $0." ' +
+        'style="font-size:.52rem;background:var(--rd2);color:var(--rd);border-radius:3px;padding:.05rem .3rem;margin-left:.3rem;font-weight:700">⚠ SIN REGIÓN</span>'
+      : '';
+    return '<tr style="background:' + (i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)') + '" title="' + _tip(x) + '">' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-family:\'Roboto Mono\',monospace;font-size:.58rem;color:var(--mut);' + SEP + '">' + (i + 1) + '</td>' +
+      '<td style="padding:.26rem .6rem;font-size:.64rem;font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + SEP + '">' + x.cliente + warn + '</td>' +
+      '<td style="padding:.26rem .6rem;' + SEP + '"><span class="pill ' + tb2 + '">' + tl + '</span></td>' +
+      '<td style="padding:.26rem .6rem;text-align:center;' + SEP + '"><span class="pill ' + (x.contrato ? 'pg' : 'pgr') + '" style="font-size:.55rem">' + (x.contrato ? 'CON' : 'SIN') + '</span></td>' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-size:.65rem;font-weight:700;font-variant-numeric:tabular-nums;' + SEP + '">' + fmtMM(m.ingresosAbril) + '</td>' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-size:.63rem;color:var(--or);font-variant-numeric:tabular-nums;' + SEP + '">' + (m.costoGdAbril ? fmtMM(m.costoGdAbril) : '<span style="color:var(--mut)">—</span>') + '</td>' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-size:.64rem;font-weight:700;font-variant-numeric:tabular-nums;color:' +
+        (m.margenBrutoAbril >= 0 ? 'var(--gn)' : 'var(--rd)') + ';' + SEP + '">' + fmtMM(m.margenBrutoAbril) + '</td>' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-size:.62rem;font-weight:700;font-variant-numeric:tabular-nums;color:' + colB + ';' + SEP + '">' +
+        (m.ingresosAbril ? pctB.toFixed(1).replace('.', ',') + '%' : '<span style="color:var(--mut)">—</span>') + '</td>' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-size:.63rem;color:var(--or);font-variant-numeric:tabular-nums;' + SEP + '">' + (m.costoHoras ? fmtMM(m.costoHoras) : '<span style="color:var(--mut)">—</span>') + '</td>' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-size:.63rem;color:var(--or);font-variant-numeric:tabular-nums;' + SEP + '">' + (m.costoViajes ? fmtMM(m.costoViajes) : '<span style="color:var(--mut)">—</span>') + '</td>' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-size:.64rem;font-weight:700;font-variant-numeric:tabular-nums;color:' +
+        (m.margenAjustado >= 0 ? 'var(--gn)' : 'var(--rd)') + ';' + SEP + '">' + fmtMM(m.margenAjustado) + '</td>' +
+      '<td style="padding:.26rem .6rem;text-align:right;font-size:.62rem;font-weight:700;font-variant-numeric:tabular-nums;color:' + col + '">' +
+        (m.ingresosAbril ? m.margenAjustadoPct.toFixed(1).replace('.', ',') + '%' : '<span style="color:var(--mut)">—</span>') + '</td>' +
+      '<td style="padding:.26rem .6rem"><div style="display:flex;align-items:center;gap:5px">' +
+        '<div style="flex:1;height:5px;background:var(--gy);border-radius:3px;overflow:hidden;min-width:36px">' +
+        '<div style="height:100%;width:' + (m.ingresosAbril / maxIng * 100) + '%;background:var(--az2)"></div></div>' +
+        '<span style="font-size:.55rem;color:var(--mut);min-width:32px;text-align:right">' + (totIng ? (m.ingresosAbril / totIng * 100) : 0).toFixed(1) + '%</span>' +
+      '</div></td>' +
+    '</tr>';
+  }).join('');
+
+  box.innerHTML =
+    '<div style="overflow-x:auto;max-height:520px;overflow-y:auto">' +
+    '<table style="width:100%;border-collapse:collapse;min-width:900px">' +
+    '<thead><tr>' + thPlain('#', 'right') + thPlain('CLIENTE / INSTITUCIÓN', 'left') +
+      thPlain('TIPO', 'left') + thPlain('CONTRATO', 'center') +
+      thPlain('REAL FACTURADO DESDE ABRIL', 'right') + thPlain('COSTO TOTAL', 'right') + thPlain('MARGEN BRUTO', 'right') + thPlain('% MARGEN BRUTO', 'right') +
+      thPlain('COSTO HORAS HOMBRE', 'right') + thPlain('COSTO VIAJES', 'right') +
+      thPlain('MARGEN NETO', 'right') + thPlain('% MARGEN NETO', 'right') + thPlain('% DEL TOTAL', 'right') +
+    '</tr></thead><tbody>' + (cuerpo || '<tr><td colspan="13" style="text-align:center;padding:1.4rem;color:var(--mut)">Sin resultados</td></tr>') + '</tbody>' +
+    '<tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">' +
+      '<td colspan="4" style="padding:.35rem .6rem;font-size:.64rem;' + SEP + '">TOTAL · ' + filas.length + ' clientes' +
+        (nSinRegion ? ' · ⚠ ' + nSinRegion + ' sin región' : '') + '</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.65rem;' + SEP + '">' + fmtMM(totIng) + '</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.63rem;' + SEP + '">' + fmtMM(totCosto) + '</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.64rem;' + SEP + '">' + fmtMM(totMB) + '</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.62rem;' + SEP + '">' + totMBP.toFixed(1).replace('.', ',') + '%</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.62rem;' + SEP + '">' + fmtMM(totCH) + '</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.62rem;' + SEP + '">' + fmtMM(totCV) + '</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.65rem;' + SEP + '">' + fmtMM(totMN) + '</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.62rem;' + SEP + '">' + totMNP.toFixed(1).replace('.', ',') + '%</td>' +
+      '<td style="padding:.35rem .6rem;text-align:right;font-size:.6rem">' + (totIngGeneral ? (totIng / totIngGeneral * 100) : 0).toFixed(1) + '%</td>' +
+    '</tr></tfoot></table></div>' +
+    '<p style="font-size:.55rem;color:var(--mut);margin:.5rem 0 0;line-height:1.45">' +
+    '<strong>Margen Neto</strong>: la misma tabla de arriba, pero desde <strong>abril</strong> en adelante —enero a marzo ' +
+    'quedan fuera de ingresos, costo y margen bruto—, porque el costo de terreno recién está cargado desde ahí. Se agregan dos ' +
+    'columnas: <strong>Costo Horas Hombre</strong> = (Duración Modificada / 60) × $25.000, sumando todas las filas de la hoja ' +
+    '<strong>Citas Servicios Trimestrales</strong> del cliente desde abril, y <strong>Costo Viajes</strong> = viajes únicos ' +
+    '(cliente + fecha, sin importar cuántas citas o técnicos hubo ese día) × tarifa de la región del cliente (hoja ' +
+    '<strong>Región Clientes</strong>; Metropolitana cuesta $50.000 por viaje). El resultado final es <strong>Margen Neto</strong> = ' +
+    'Margen Bruto − Costo Horas Hombre − Costo Viajes. Un cliente <strong>sin región</strong> con viajes registrados se marca ' +
+    'en rojo y su costo de viaje NO se calcula —no se asume $0—, para que se revise a mano.<br>' +
+    'La fila <strong>Clientes sin Facturación</strong> queda fuera de esta vista: es un agregado sin nombre real que cruzar ' +
+    'contra Citas o Región Clientes.</p>';
+
+  const lbl = document.getElementById('pf-det-lbl');
+  if(lbl) lbl.textContent = filas.length + ' clientes · ' + fmtMM(totIng) + ' ingresos desde abril · margen neto ' +
+    fmtMM(totMN) + ' (' + totMNP.toFixed(1).replace('.', ',') + '%)' +
+    (nSinRegion ? ' · ⚠ ' + nSinRegion + ' sin región' : '');
 }
 
 function initPanelFact(){

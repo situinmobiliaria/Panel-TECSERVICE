@@ -104,6 +104,7 @@ function initVisitas(){
 
   renderVisClienteChart('');
   renderVisTabla();
+  vxInit();
 
   document.querySelectorAll('#vis-filt-eje .btn').forEach(b=>{
     b.addEventListener('click',()=>{document.querySelectorAll('#vis-filt-eje .btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');visFiltEje=b.dataset.vfe;renderVisTabla();});
@@ -310,4 +311,795 @@ function renderVisBuscaCliente(busqueda){
           y:{grid:{display:false},ticks:{font:{size:9}}}}}
     });
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// COBERTURA COMERCIAL — filtros, mapa, regiones y evolución
+//
+// Todo lo de esta sección sale de APP_DATA.visitas.det, una fila por
+// (ejecutivo, cliente, tipo de actividad, año, mes). Tenerlo al detalle es lo
+// que permite que los filtros se crucen entre sí: con los totales ya agregados
+// sólo se podía filtrar por una dimensión a la vez.
+//
+// La hoja VISITAS no dice dónde queda el cliente ni cuánto factura. La región
+// y las coordenadas se cruzan con «Mapa Clientes Actuales», con BASE INSTALADA
+// y con la ubicación que ya resolvió el Plan RM; la facturación, con el panel
+// de facturación. El calce de nombres es el mismo del resto del panel: exacto
+// y, si no hay, una única coincidencia parcial —con dos candidatos no se
+// asigna ninguno, para no atribuirle las visitas al hospital equivocado.
+// ═══════════════════════════════════════════════════════════════
+const VX = {
+  COL: { 'Eglys Ramirez': '#7A1FAA', 'Cristian Perez': '#003F7F', ambos: '#28D2C3' },
+  NOM: { 'Eglys Ramirez': 'Eglys Ramírez', 'Cristian Perez': 'Cristián Pérez' },
+  f: { eje: 'todos', tipo: 'todos', per: String(typeof ANO_ACTUAL !== 'undefined' ? ANO_ACTUAL : 2026), reg: 'todas', q: '' },
+  sel: null,          // cliente seleccionado en el mapa o la tabla
+  sort: 'v',          // columna de orden de la tabla de clientes
+  asc: false,
+  base: null,         // índice cliente → región, coordenadas, facturación
+  sinVisita: [],      // clientes del panel de facturación sin ninguna visita
+  facPanel: 0, contrPanel: 0,
+  map: null, lyr: null, marks: {},
+  chReg: null, chEvo: null, chCli: null, chDisp: null,
+};
+
+const vxNorm = s => s ? String(s).trim().toUpperCase().replace(/\s+/g, ' ')
+                        .normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
+const vxEsc  = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const vxMM   = v => 'MM$' + ((v || 0) / 1e6).toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const vxN1   = v => (v || 0).toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const vxN0   = v => Math.round(v || 0).toLocaleString('es-CL');
+
+// Las fuentes escriben algunas regiones distinto —«Magallanes» y «Magallanes y
+// la Antártica Chilena» son la misma—: sin unificarlas salen dos filas.
+const VX_REG = [['ARICA', 'Arica y Parinacota'], ['TARAPACA', 'Tarapacá'], ['ANTOFAGASTA', 'Antofagasta'],
+  ['ATACAMA', 'Atacama'], ['COQUIMBO', 'Coquimbo'], ['VALPARAISO', 'Valparaíso'], ['METROPOLITANA', 'Metropolitana'],
+  ['HIGGINS', "O'Higgins"], ['MAULE', 'Maule'], ['NUBLE', 'Ñuble'], ['BIO', 'Bío Bío'], ['ARAUCANIA', 'Araucanía'],
+  ['LOS RIOS', 'Los Ríos'], ['LOS LAGOS', 'Los Lagos'], ['AYSEN', 'Aysén'], ['MAGALLANES', 'Magallanes']];
+function vxRegNom(r) {
+  const k = vxNorm(r);
+  if (!k) return 'Sin región';
+  const h = VX_REG.find(x => k.indexOf(x[0]) >= 0);
+  return h ? h[1] : r;
+}
+// Orden geográfico, de norte a sur: una tabla de regiones ordenada así se lee
+// como el mapa. «Sin región» va al final porque no es un lugar.
+function vxRegOrden(r) {
+  const i = VX_REG.findIndex(x => x[1] === r);
+  return i < 0 ? 99 : i;
+}
+
+// ── CRUCE DE NOMBRES ─────────────────────────────────────────
+// Las cuatro fuentes escriben al mismo cliente de formas distintas: «Hospital
+// Base Osorno» y «Hospital Base de Osorno», «Municipalidad de Independencia» e
+// «I.Municipalidad de Independencia». El cruce compara las palabras del nombre
+// y no el texto: se sacan tildes, puntuación, conectores y la razón social
+// (SpA, Ltda, S.A.), y se comparan los conjuntos de palabras que quedan.
+//
+// El tipo de institución NO se saca: «Municipalidad de Puerto Montt» y
+// «Hospital de Puerto Montt» son clientes distintos, y una regla que sólo
+// mirara la ciudad los fundiría. Por lo mismo no se aceptan coincidencias
+// parciales sueltas —«Hospital San José» calza con cuatro hospitales— y un
+// nombre que calce con dos candidatos no se asigna a ninguno.
+const VX_RAZON = new Set(['SPA', 'LTDA', 'LIMITADA', 'EIRL', 'CIA', 'COMPANIA', 'SA', 'SAC',
+  'DR', 'DRA', 'DOCTOR', 'DOCTORA', 'ILUSTRE', 'ILUSTRA']);
+const VX_CONECT = new Set(['DE', 'DEL', 'LA', 'LAS', 'LOS', 'EL', 'Y', 'E', 'AL', 'EN']);
+
+function vxClave(nombre) {
+  const t = vxNorm(nombre).replace(/[^A-Z0-9Ñ ]+/g, ' ').split(/\s+/)
+    .filter(w => w.length > 1 && !VX_CONECT.has(w) && !VX_RAZON.has(w));
+  return t.length ? Array.from(new Set(t)).sort().join(' ') : vxNorm(nombre);
+}
+
+// Equivalencias revisadas a mano, para lo que ninguna regla puede saber: la
+// misma institución escrita con otro nombre en otra hoja (24-09-2026).
+const VX_ALIAS = {
+  'SERVICIO DE SALUD ORIENTE HOSPITAL DEL SALVADOR': 'HOSPITAL DEL SALVADOR',
+  'CLINICA INDISA': 'INSTITUTO DE DIAGNOSTICO S.A. / CLINICA INDISA',
+  'CENTRO OFTAMOLOGICO LASER CEOLA ANTOFAGASTA S.A.': 'CENTRO OFTALMOLOGICO LASER CEOLA ANTOFAGASTA',
+  'HOSPITAL REGIONAL DE COPIAPO': 'HOSPITAL DE COPIAPO',
+  'S. SALUD METROPOLITANO SUR ORIENTE': 'SERVICIO DE SALUD METROPOLITANO SUR ORIENTE',
+  'CENTRAL ODONTOLOGICA FACH': 'CENTRAL ODONTOLOGICA DE LA FUERZA AEREA',
+};
+function vxAlias(nombre) {
+  const k = vxNorm(nombre);
+  return VX_ALIAS[k] ? vxClave(VX_ALIAS[k]) : vxClave(nombre);
+}
+
+// Ciudades que aparecen en el nombre del cliente y dicen en qué región está.
+// Es el último recurso, cuando el cliente no está en ninguna otra fuente.
+const VX_CIUDAD = [
+  ['ARICA', 'Arica y Parinacota'], ['IQUIQUE', 'Tarapacá'], ['ALTO HOSPICIO', 'Tarapacá'],
+  ['ANTOFAGASTA', 'Antofagasta'], ['CALAMA', 'Antofagasta'], ['TOCOPILLA', 'Antofagasta'],
+  ['COPIAPO', 'Atacama'], ['VALLENAR', 'Atacama'], ['CHANARAL', 'Atacama'],
+  ['SERENA', 'Coquimbo'], ['COQUIMBO', 'Coquimbo'], ['OVALLE', 'Coquimbo'], ['ILLAPEL', 'Coquimbo'],
+  ['VALPARAISO', 'Valparaíso'], ['VINA DEL MAR', 'Valparaíso'], ['QUILLOTA', 'Valparaíso'],
+  ['SAN ANTONIO', 'Valparaíso'], ['QUILPUE', 'Valparaíso'], ['LOS ANDES', 'Valparaíso'],
+  ['RANCAGUA', "O'Higgins"], ['SAN FERNANDO', "O'Higgins"], ['SANTA CRUZ', "O'Higgins"],
+  ['TALCA', 'Maule'], ['CURICO', 'Maule'], ['LINARES', 'Maule'], ['PARRAL', 'Maule'], ['CAUQUENES', 'Maule'],
+  ['CHILLAN', 'Ñuble'], ['CONCEPCION', 'Bío Bío'], ['TALCAHUANO', 'Bío Bío'], ['LOS ANGELES', 'Bío Bío'],
+  ['CORONEL', 'Bío Bío'], ['LOTA', 'Bío Bío'], ['CANETE', 'Bío Bío'],
+  ['TEMUCO', 'Araucanía'], ['VILLARRICA', 'Araucanía'], ['ANGOL', 'Araucanía'], ['LONCOCHE', 'Araucanía'],
+  ['VALDIVIA', 'Los Ríos'], ['OSORNO', 'Los Lagos'], ['PUERTO MONTT', 'Los Lagos'],
+  ['CASTRO', 'Los Lagos'], ['ANCUD', 'Los Lagos'], ['QUELLON', 'Los Lagos'], ['CHILOE', 'Los Lagos'],
+  ['COYHAIQUE', 'Aysén'], ['AYSEN', 'Aysén'], ['PUNTA ARENAS', 'Magallanes'], ['MAGALLANES', 'Magallanes'],
+  // Nombres propios que ubican igual de bien que una ciudad.
+  ['ARAUCANIA', 'Araucanía'], ['MAKEWE', 'Araucanía'], ['METROPOLITANO', 'Metropolitana'],
+  ['METROPOLITANA', 'Metropolitana'], ['ZONA NAVAL', 'Valparaíso'], ['LAUTARO NAVARRO', 'Magallanes'],
+];
+function vxRegionPorNombre(nombre) {
+  const k = ' ' + vxNorm(nombre) + ' ';
+  const h = VX_CIUDAD.find(x => k.indexOf(' ' + x[0] + ' ') >= 0 || k.indexOf(' ' + x[0] + '-') >= 0);
+  return h ? h[1] : null;
+}
+
+// Índice de una fuente por nombre exacto y por clave de palabras. Una clave
+// que apunta a dos registros distintos queda marcada como ambigua y no se usa.
+function vxIndice(lista, nombreDe) {
+  const exacto = {}, porClave = {};
+  (lista || []).forEach(o => {
+    const n0 = nombreDe(o);
+    if (!n0) return;
+    const k = vxNorm(n0);
+    if (exacto[k] === undefined) exacto[k] = o;
+    (porClave[vxClave(n0)] || (porClave[vxClave(n0)] = [])).push(o);
+  });
+  const clave = {};
+  Object.keys(porClave).forEach(c => { if (porClave[c].length === 1) clave[c] = porClave[c][0]; });
+  return { exacto: exacto, clave: clave };
+}
+function vxBuscar(idx, nombre) {
+  if (!idx) return null;
+  const k = vxNorm(nombre);
+  if (idx.exacto && idx.exacto[k]) return idx.exacto[k];
+  const c = vxAlias(nombre);
+  if (idx.clave && idx.clave[c]) return idx.clave[c];
+  return null;
+}
+
+// ── Índice de clientes: región, ubicación, facturación, contrato ──
+// Deja además el rastro del cruce (c.src) para poder auditarlo desde la hoja:
+// de dónde salió la región y con qué cuentas de facturación quedó asociado.
+function vxBase() {
+  if (VX.base) return VX.base;
+  const det = (APP_DATA.visitas || {}).det || { clientes: [] };
+  const idxMapa = vxIndice(window.MAPA_DATA || [], m => m.n);
+  const idxBI   = vxIndice(((APP_DATA.base_instalada || {}).clientes) || [], c => c.nombre);
+  const idxPlan = vxIndice((((APP_DATA.plan_rm || {}).clientes) || [])
+    .filter(u => u.lat != null && u.prec !== 'Aproximada (centro de la región)'), u => u.n);
+
+  VX.base = det.clientes.map(nombre => {
+    const m = vxBuscar(idxMapa, nombre), b = vxBuscar(idxBI, nombre), pl = vxBuscar(idxPlan, nombre);
+    let region = 'Sin región', src = '';
+    if (m && m.region && m.region !== 'Sin región') { region = m.region; src = 'Mapa Clientes'; }
+    else if (b && b.region && b.region !== 'Sin región') { region = b.region; src = 'Base Instalada'; }
+    else if (pl && pl.r) { region = pl.r; src = 'Plan RM'; }
+    else {
+      const rn = vxRegionPorNombre(nombre);
+      if (rn) { region = rn; src = 'ciudad en el nombre'; }
+    }
+    return { n: nombre, region: vxRegNom(region), regSrc: src,
+      lat: (m && m.lat != null) ? m.lat : (pl ? pl.lat : null),
+      lon: (m && m.lon != null) ? m.lon : (pl ? pl.lon : null),
+      geoSrc: (m && m.lat != null) ? 'Mapa Clientes' : (pl ? 'Plan RM' : ''),
+      comuna: (m && m.comuna) || (pl && pl.com) || '',
+      fac: 0, contr: 0, noContr: 0, cuentas: [],
+      cc: !!(m && m.cc), bi: b ? (b.total || 0) : 0, sat: m ? m.sat : null };
+  });
+
+  // ── Reparto de la facturación ──
+  // El cruce se hace desde el panel de facturación hacia los clientes visitados
+  // y no al revés: así cada peso cae en un solo lado —visitado o no visitado— y
+  // las dos partes suman exactamente el total del año.
+  const idxVis = vxIndice(VX.base, c => c.n);
+  VX.sinVisita = [];
+  VX.facPanel = 0; VX.contrPanel = 0; VX.facFuera = 0;
+  const panel = (APP_DATA.panel_fact && APP_DATA.panel_fact.length) ? APP_DATA.panel_fact : (APP_DATA.panel || []);
+  panel.forEach(p => {
+    const fac = (p.real_ytd_fac !== undefined) ? (p.real_ytd_fac || 0) : (p.real_ytd || 0);
+    const contr = Math.min(p.presup_contr_ytd || 0, fac);
+    VX.facPanel += fac; VX.contrPanel += contr;
+    const c = vxBuscar(idxVis, p.cliente);
+    if (c) {
+      c.fac += fac; c.contr += contr; c.noContr = c.fac - c.contr;
+      c.cc = c.cc || !!p.tiene_contrato;
+      c.cuentas.push(p.cliente);
+    } else {
+      // Sin visita. El total incluye los saldos negativos —notas de crédito de
+      // clientes que no se visitaron— para que el cuadre cierre; la tabla lista
+      // sólo a los que facturan.
+      VX.facFuera += fac;
+      if (fac > 0) {
+        const m = vxBuscar(idxMapa, p.cliente), b = vxBuscar(idxBI, p.cliente);
+        let reg = (m && m.region) || (b && b.region) || vxRegionPorNombre(p.cliente) || 'Sin región';
+        VX.sinVisita.push({ n: p.cliente, fac: fac, contr: contr, cc: !!p.tiene_contrato,
+          region: vxRegNom(reg), bi: b ? (b.total || 0) : (m ? (m.bi || 0) : 0) });
+      }
+    }
+  });
+  VX.sinVisita.sort((a, b) => b.fac - a.fac);
+  return VX.base;
+}
+
+// ── Agregación con los filtros activos ──
+// per: '2026' y '2025' son Ene–mes de corte del año respectivo; 'todo' suma
+// todos los meses cargados de los dos años.
+function vxAgg() {
+  const det = (APP_DATA.visitas || {}).det;
+  const base = vxBase();
+  if (!det || !det.filas) return { cli: [], meses: {}, regs: [], tot: 0, tot25: 0, tipos: {}, ejes: {} };
+  const q = vxNorm(VX.f.q);
+  const porCli = {};
+  const mesAct = new Array(12).fill(0), mesAnt = new Array(12).fill(0);
+  const tipos = {}, ejes = {};
+  let tot = 0, tot25 = 0;
+
+  det.filas.forEach(f => {
+    const eje = det.ejecutivos[f[0]], tipo = det.tipos[f[2]], ano = f[3], mes = f[4], n = f[5];
+    const c = base[f[1]];
+    if (!c) return;
+    if (VX.f.eje !== 'todos' && eje !== VX.f.eje) return;
+    if (VX.f.tipo !== 'todos' && tipo !== VX.f.tipo) return;
+    if (VX.f.reg !== 'todas' && c.region !== VX.f.reg) return;
+    if (q && vxNorm(c.n).indexOf(q) < 0) return;
+
+    const esAct = ano === ANO_ACTUAL && mes <= MES_CORTE;
+    const esAnt = ano === ANO_ACTUAL - 1 && mes <= MES_CORTE;
+    const cuenta = VX.f.per === 'todo' ? true : (VX.f.per === String(ANO_ACTUAL) ? esAct : esAnt);
+    if (esAct) mesAct[mes - 1] += n;
+    if (esAnt) mesAnt[mes - 1] += n;
+    if (esAct) tot += n;
+    if (esAnt) tot25 += n;
+    if (!cuenta) return;
+
+    const d = porCli[c.n] || (porCli[c.n] = { c: c, v: 0, eje: {}, tipo: {}, ult: null, meses: new Array(12).fill(0) });
+    d.v += n;
+    d.eje[eje] = (d.eje[eje] || 0) + n;
+    d.tipo[tipo] = (d.tipo[tipo] || 0) + n;
+    if (ano === ANO_ACTUAL) d.meses[mes - 1] += n;
+    const idx = ano * 12 + mes;
+    if (d.ult == null || idx > d.ult) d.ult = idx;
+    tipos[tipo] = (tipos[tipo] || 0) + n;
+    ejes[eje] = (ejes[eje] || 0) + n;
+  });
+
+  const cli = Object.values(porCli).map(d => {
+    const es = Object.keys(d.eje).filter(e => d.eje[e] > 0);
+    d.dueno = es.length > 1 ? 'ambos' : (es[0] || 'ambos');
+    return d;
+  });
+
+  const regMap = {};
+  cli.forEach(d => {
+    const r = regMap[d.c.region] || (regMap[d.c.region] = { region: d.c.region, v: 0, cli: 0, fac: 0, eje: {}, conContrato: 0 });
+    r.v += d.v; r.cli++; r.fac += d.c.fac;
+    if (d.c.cc) r.conContrato++;
+    Object.keys(d.eje).forEach(e => { r.eje[e] = (r.eje[e] || 0) + d.eje[e]; });
+  });
+  const regs = Object.values(regMap).sort((a, b) => b.v - a.v);
+  return { cli: cli, mesAct: mesAct, mesAnt: mesAnt, regs: regs, tot: tot, tot25: tot25, tipos: tipos, ejes: ejes };
+}
+
+// ── Filtros ──
+function vxChip(cont, opts, activo, fn) {
+  const box = document.getElementById(cont);
+  if (!box) return;
+  box.innerHTML = opts.map(o =>
+    '<button class="btn' + (o.k === activo ? ' on' : '') + '" onclick="' + fn + '(' +
+    JSON.stringify(o.k).replace(/"/g, '&quot;') + ')" style="font-size:.57rem;padding:.16rem .5rem' +
+    (o.col ? ';border-left:2px solid ' + o.col : '') + '">' + vxEsc(o.t) + '</button>').join('');
+}
+function vxPintaFiltros() {
+  const det = (APP_DATA.visitas || {}).det || { ejecutivos: [], tipos: [] };
+  vxChip('vx-f-eje', [{ k: 'todos', t: 'Ambos' }].concat(det.ejecutivos.map(e =>
+    ({ k: e, t: VX.NOM[e] || e, col: VX.COL[e] }))), VX.f.eje, 'vxSetEje');
+  vxChip('vx-f-tipo', [{ k: 'todos', t: 'Todas' }].concat(det.tipos.map(t => ({ k: t, t: t }))), VX.f.tipo, 'vxSetTipo');
+  vxChip('vx-f-per', [{ k: String(ANO_ACTUAL), t: ANO_ACTUAL + ' · Ene–' + MES_CORTE_NOMBRE },
+    { k: String(ANO_ACTUAL - 1), t: (ANO_ACTUAL - 1) + ' · Ene–' + MES_CORTE_NOMBRE },
+    { k: 'todo', t: 'Todo el histórico' }], VX.f.per, 'vxSetPer');
+  const sel = document.getElementById('vx-f-reg');
+  if (sel) {
+    const regs = [...new Set(vxBase().map(c => c.region))].sort((a, b) => vxRegOrden(a) - vxRegOrden(b));
+    sel.innerHTML = ['<option value="todas">Todas las regiones</option>']
+      .concat(regs.map(r => '<option value="' + vxEsc(r) + '"' + (VX.f.reg === r ? ' selected' : '') + '>' + vxEsc(r) + '</option>')).join('');
+  }
+  const q = document.getElementById('vx-f-q');
+  if (q && q.value !== VX.f.q) q.value = VX.f.q;
+}
+function vxSetEje(v)  { VX.f.eje = v;  VX.sel = null; vxRender(); }
+function vxSetTipo(v) { VX.f.tipo = v; VX.sel = null; vxRender(); }
+function vxSetPer(v)  { VX.f.per = v;  VX.sel = null; vxRender(); }
+function vxSetReg(v)  { VX.f.reg = v;  VX.sel = null; vxRender(true); }
+function vxSetQ(v)    { VX.f.q = v;    VX.sel = null; vxRender(true); }
+function vxReset()    { VX.f = { eje: 'todos', tipo: 'todos', per: String(ANO_ACTUAL), reg: 'todas', q: '' }; VX.sel = null; vxRender(true); }
+function vxSort(col)  { if (VX.sort === col) VX.asc = !VX.asc; else { VX.sort = col; VX.asc = col === 'n'; } vxTablaCli(vxAgg()); }
+
+// Selección: la comparten el mapa y la tabla.
+function vxSel(nombre) {
+  VX.sel = (VX.sel === nombre) ? null : nombre;
+  const A = vxAgg();
+  vxTablaCli(A);
+  vxDetalleCli(A);
+  if (VX.sel && VX.marks[VX.sel]) {
+    const m = VX.marks[VX.sel];
+    VX.map.setView(m.getLatLng(), Math.max(VX.map.getZoom(), 9), { animate: true });
+    m.openTooltip();
+  }
+  const fila = document.getElementById('vx-row-' + vxNorm(nombre).replace(/[^A-Z0-9]/g, ''));
+  if (fila && fila.scrollIntoView) fila.scrollIntoView({ block: 'nearest' });
+}
+
+// ── KPIs ──
+function vxKpis(A) {
+  const box = document.getElementById('vx-kpi');
+  if (!box) return;
+  const nCli = A.cli.length;
+  const fac = A.cli.reduce((s, d) => s + d.c.fac, 0);
+  vxBase();
+  const facPanel = VX.facPanel || 0;
+  const regs = A.regs.filter(r => r.region !== 'Sin región').length;
+  const sinGeo = A.cli.filter(d => d.c.lat == null).length;
+  const totPer = A.cli.reduce((s, d) => s + d.v, 0);
+  const varPct = (VX.f.per === String(ANO_ACTUAL) && A.tot25) ? (A.tot - A.tot25) / A.tot25 * 100 : null;
+  const conContr = A.cli.filter(d => d.c.cc).length;
+  const k = (col, val, lbl, sub) =>
+    '<div class="kpi" style="--kc:' + col + '"><div class="kpi-lbl">' + lbl + '</div>' +
+    '<div class="kpi-val">' + val + '</div><div class="kpi-sub">' + sub + '</div></div>';
+  box.innerHTML =
+    k('var(--az1)', vxN0(totPer), 'Visitas', VX.f.per === 'todo' ? 'todo el histórico cargado'
+      : (varPct == null ? 'Ene–' + MES_CORTE_NOMBRE + ' ' + VX.f.per
+        : 'Ene–' + MES_CORTE_NOMBRE + ' · ' + (varPct >= 0 ? '+' : '') + varPct.toFixed(0) + '% vs ' + (ANO_ACTUAL - 1))) +
+    k('#7A1FAA', vxN0(nCli), 'Clientes visitados',
+      sinGeo ? sinGeo + ' sin ubicación en el mapa' : 'todos ubicados en el mapa') +
+    k('var(--teal)', regs, 'Regiones cubiertas',
+      A.regs.length ? 'lidera ' + vxEsc(A.regs[0].region) + ' con ' + vxN0(A.regs[0].v) : '—') +
+    k('var(--or)', vxN1(nCli ? totPer / nCli : 0), 'Visitas por cliente',
+      conContr + ' de ' + nCli + ' con contrato vigente') +
+    k('var(--am)', vxMM(fac), 'Facturación visitada',
+      facPanel ? (fac / facPanel * 100).toFixed(0) + '% de los ' + vxMM(facPanel) + ' del año' : '—');
+  const res = document.getElementById('vx-f-res');
+  if (res) {
+    const partes = [];
+    if (VX.f.eje !== 'todos') partes.push(VX.NOM[VX.f.eje] || VX.f.eje);
+    if (VX.f.tipo !== 'todos') partes.push(VX.f.tipo);
+    if (VX.f.reg !== 'todas') partes.push(VX.f.reg);
+    if (VX.f.q) partes.push('«' + VX.f.q + '»');
+    res.innerHTML = '<strong>' + vxN0(totPer) + '</strong> visitas · <strong>' + nCli + '</strong> clientes' +
+      (partes.length ? ' · filtros: ' + vxEsc(partes.join(' · ')) : ' · sin filtros');
+  }
+}
+
+// ── Mapa ──
+function vxMapa(A, recentrar) {
+  if (!window.L) return;
+  const cont = document.getElementById('vxMapa');
+  if (!cont) return;
+  if (!VX.map) {
+    VX.map = L.map('vxMapa', { zoomControl: true, scrollWheelZoom: false }).setView([-35.5, -70.8], 4);
+    if (window.mapaTiles) mapaTiles(VX.map);
+  }
+  if (!VX.lyr) VX.lyr = L.layerGroup().addTo(VX.map);
+  VX.lyr.clearLayers();
+  VX.marks = {};
+
+  const pts = A.cli.filter(d => d.c.lat != null && d.c.lon != null);
+  const maxV = Math.max.apply(null, pts.map(d => d.v).concat([1]));
+  pts.forEach(d => {
+    const col = VX.COL[d.dueno] || VX.COL.ambos;
+    const activo = VX.sel === d.c.n;
+    const mk = L.circleMarker([d.c.lat, d.c.lon], {
+      radius: Math.max(5, Math.sqrt(d.v / maxV) * 19) + (activo ? 4 : 0),
+      fillColor: col, color: activo ? '#111827' : col,
+      weight: activo ? 3 : 1.5, opacity: 1, fillOpacity: activo ? .92 : .62,
+    });
+    const ejeTxt = Object.keys(d.eje).map(e => (VX.NOM[e] || e) + ': ' + d.eje[e]).join(' · ');
+    const tipoTxt = Object.keys(d.tipo).map(t => t + ': ' + d.tipo[t]).join(' · ');
+    mk.bindTooltip(
+      '<div style="font-family:Roboto,sans-serif;min-width:205px">' +
+      '<div style="font-weight:900;font-size:.75rem;color:' + col + ';border-bottom:1px solid #ddd;padding-bottom:3px;margin-bottom:4px">' +
+      vxEsc(d.c.n) + '</div>' +
+      '<div style="font-size:.7rem"><strong>' + d.v + '</strong> visitas</div>' +
+      '<div style="font-size:.63rem;color:#555">' + vxEsc(ejeTxt) + '</div>' +
+      '<div style="font-size:.63rem;color:#555">' + vxEsc(tipoTxt) + '</div>' +
+      '<div style="font-size:.63rem;color:#555">' + vxEsc(d.c.region) + (d.c.comuna ? ' · ' + vxEsc(d.c.comuna) : '') + '</div>' +
+      '<div style="font-size:.63rem;color:#555">Facturación ' + ANO_ACTUAL + ': <strong>' + vxMM(d.c.fac) + '</strong>' +
+      (d.c.cc ? ' · con contrato' : '') + '</div>' +
+      (d.c.bi ? '<div style="font-size:.63rem;color:#555">' + d.c.bi + ' equipos instalados</div>' : '') +
+      '<div style="font-size:.58rem;color:#888;margin-top:3px">clic para fijarlo en la tabla</div></div>',
+      { sticky: true, direction: 'top', opacity: .97 });
+    mk.on('click', () => vxSel(d.c.n));
+    mk.addTo(VX.lyr);
+    VX.marks[d.c.n] = mk;
+  });
+
+  if (recentrar && pts.length) {
+    try { VX.map.fitBounds(L.latLngBounds(pts.map(d => [d.c.lat, d.c.lon])).pad(.15)); } catch (e) {}
+  }
+  const sinGeo = A.cli.length - pts.length;
+  const lbl = document.getElementById('vx-map-lbl');
+  if (lbl) lbl.textContent = pts.length + ' clientes en el mapa' + (sinGeo ? ' · ' + sinGeo + ' sin ubicación' : '');
+  const leg = document.getElementById('vx-map-leg');
+  if (leg) {
+    const cuenta = k => A.cli.filter(d => d.dueno === k).length;
+    const item = (col, txt, n) => '<span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.57rem;margin-right:1rem">' +
+      '<span style="width:10px;height:10px;border-radius:50%;background:' + col + ';opacity:.7;border:1.5px solid ' + col + '"></span>' +
+      txt + ' <strong>' + n + '</strong></span>';
+    leg.innerHTML = item(VX.COL['Eglys Ramirez'], 'Solo Eglys', cuenta('Eglys Ramirez')) +
+      item(VX.COL['Cristian Perez'], 'Solo Cristián', cuenta('Cristian Perez')) +
+      item(VX.COL.ambos, 'Ambos', cuenta('ambos')) +
+      '<span style="font-size:.57rem;color:var(--mut)">· el tamaño es el número de visitas · clic en una burbuja para verla en la tabla</span>';
+  }
+  setTimeout(() => { if (VX.map) VX.map.invalidateSize(); }, 60);
+}
+function vxFit() {
+  const A = vxAgg();
+  const pts = A.cli.filter(d => d.c.lat != null);
+  if (VX.map && pts.length) { try { VX.map.fitBounds(L.latLngBounds(pts.map(d => [d.c.lat, d.c.lon])).pad(.15)); } catch (e) {} }
+}
+window._visMapRefresh = function () { if (VX.map) VX.map.invalidateSize(); };
+
+// ── Tabla de clientes, enlazada con el mapa ──
+function vxTablaCli(A) {
+  const box = document.getElementById('vx-cli-tabla');
+  if (!box) return;
+  const SEP = 'border-right:1px solid var(--brd)';
+  const th = (t, col, al) => '<th onclick="vxSort(' + JSON.stringify(col).replace(/"/g, '&quot;') + ')" ' +
+    'style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;padding:.3rem .45rem;cursor:pointer;' +
+    'font-size:.54rem;text-align:' + al + ';white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)">' + t +
+    (VX.sort === col ? (VX.asc ? ' ▲' : ' ▼') : '') + '</th>';
+  const val = d => VX.sort === 'n' ? d.c.n : VX.sort === 'reg' ? d.c.region
+    : VX.sort === 'fac' ? d.c.fac : VX.sort === 'ult' ? (d.ult || 0) : d.v;
+  const arr = A.cli.slice().sort((a, b) => {
+    const x = val(a), y = val(b);
+    const c = (typeof x === 'string') ? String(x).localeCompare(String(y), 'es') : (x - y);
+    return (VX.asc ? c : -c) || b.v - a.v;
+  });
+  const mesTxt = idx => { if (!idx) return '—'; const a = Math.floor((idx - 1) / 12), m = (idx - 1) % 12;
+    return MESES_ABR[m] + " '" + String(a).slice(2); };
+  const filas = arr.map((d, i) => {
+    const act = VX.sel === d.c.n;
+    const col = VX.COL[d.dueno] || VX.COL.ambos;
+    return '<tr id="vx-row-' + vxNorm(d.c.n).replace(/[^A-Z0-9]/g, '') + '" onclick="vxSel(' +
+      JSON.stringify(d.c.n).replace(/"/g, '&quot;') + ')" style="cursor:pointer;background:' +
+      (act ? 'rgba(255,192,0,.18)' : (i % 2 ? 'var(--bg)' : 'var(--bg2)')) + ';border-left:3px solid ' + col + '">' +
+      '<td style="padding:.24rem .45rem;font-size:.6rem;font-weight:600;max-width:190px;overflow:hidden;' +
+        'text-overflow:ellipsis;white-space:nowrap;' + SEP + '" title="' + vxEsc(d.c.n) + '">' + vxEsc(d.c.n) + '</td>' +
+      '<td style="padding:.24rem .45rem;font-size:.56rem;color:var(--mut);white-space:nowrap;' + SEP + '">' + vxEsc(d.c.region) + '</td>' +
+      '<td style="padding:.24rem .45rem;text-align:right;font-size:.62rem;font-weight:700;' +
+        'font-variant-numeric:tabular-nums;color:' + col + ';' + SEP + '">' + d.v + '</td>' +
+      '<td style="padding:.24rem .45rem;text-align:right;font-size:.56rem;color:var(--mut);white-space:nowrap;' + SEP + '">' + mesTxt(d.ult) + '</td>' +
+      '<td style="padding:.24rem .45rem;text-align:right;font-size:.6rem;font-variant-numeric:tabular-nums;color:var(--am);' + SEP + '">' +
+        (d.c.fac ? vxMM(d.c.fac) : '—') + '</td>' +
+      '<td style="padding:.24rem .45rem;text-align:center;font-size:.55rem">' +
+        (d.c.cc ? '<span class="badge bok">Sí</span>' : '<span style="color:var(--mut)">—</span>') + '</td></tr>';
+  }).join('');
+  const totV = arr.reduce((s, d) => s + d.v, 0), totF = arr.reduce((s, d) => s + d.c.fac, 0);
+  box.innerHTML = '<table style="width:100%;border-collapse:collapse;min-width:520px"><thead><tr>' +
+    th('CLIENTE', 'n', 'left') + th('REGIÓN', 'reg', 'left') + th('VISITAS', 'v', 'right') +
+    th('ÚLTIMA', 'ult', 'right') + th('FACT. ' + ANO_ACTUAL, 'fac', 'right') +
+    '<th style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;padding:.3rem .45rem;font-size:.54rem">CONTR.</th>' +
+    '</tr></thead><tbody>' + (filas || '<tr><td colspan="6" style="padding:1rem;text-align:center;color:var(--mut);font-style:italic">Sin visitas para los filtros elegidos</td></tr>') +
+    '</tbody><tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">' +
+    '<td colspan="2" style="padding:.28rem .45rem;font-size:.58rem;' + SEP + '">' + arr.length + ' clientes</td>' +
+    '<td style="padding:.28rem .45rem;text-align:right;font-size:.62rem;' + SEP + '">' + totV + '</td>' +
+    '<td style="' + SEP + '"></td>' +
+    '<td style="padding:.28rem .45rem;text-align:right;font-size:.6rem;color:#FFC000;' + SEP + '">' + vxMM(totF) + '</td>' +
+    '<td></td></tr></tfoot></table>';
+  const lbl = document.getElementById('vx-cli-lbl');
+  if (lbl) lbl.textContent = arr.length + ' clientes · clic para fijar uno en el mapa';
+}
+
+// ── Ficha del cliente seleccionado ──
+function vxDetalleCli(A) {
+  const box = document.getElementById('vx-cli-det');
+  if (!box) return;
+  if (!VX.sel) {
+    if (VX.chCli) { VX.chCli.destroy(); VX.chCli = null; }
+    box.innerHTML = '<div style="font-size:.58rem;color:var(--mut);text-align:center;padding:.6rem;' +
+      'border:1px dashed var(--brd);border-radius:5px">Elige un cliente en el mapa o en la tabla para ver su ficha</div>';
+    return;
+  }
+  const d = A.cli.find(x => x.c.n === VX.sel);
+  if (!d) { VX.sel = null; return vxDetalleCli(A); }
+  const dato = (l, v2, col) => '<div style="display:flex;justify-content:space-between;gap:.5rem;font-size:.6rem;padding:.12rem 0">' +
+    '<span style="color:var(--mut)">' + l + '</span><strong style="color:' + (col || 'var(--txt)') + '">' + v2 + '</strong></div>';
+  box.innerHTML =
+    '<div style="border:1px solid var(--brd);border-radius:6px;padding:.55rem .7rem;background:var(--bg2)">' +
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;margin-bottom:.35rem">' +
+      '<strong style="font-size:.72rem;color:var(--az1)">' + vxEsc(d.c.n) + '</strong>' +
+      '<button class="btn" onclick="vxSel(' + JSON.stringify(d.c.n).replace(/"/g, '&quot;') + ')" style="font-size:.53rem;padding:.1rem .4rem">Quitar</button>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 .9rem">' +
+      dato('Visitas', d.v, VX.COL[d.dueno]) +
+      dato('Región', vxEsc(d.c.region) + (d.c.comuna ? ' · ' + vxEsc(d.c.comuna) : '')) +
+      dato('Ejecutivos', vxEsc(Object.keys(d.eje).map(e => (VX.NOM[e] || e).split(' ')[0] + ' ' + d.eje[e]).join(' · '))) +
+      dato('Actividades', vxEsc(Object.keys(d.tipo).map(t => t + ' ' + d.tipo[t]).join(' · '))) +
+      dato('Facturación ' + ANO_ACTUAL, vxMM(d.c.fac), 'var(--am)') +
+      dato('De contratos', d.c.fac ? vxMM(d.c.contr) : '—', 'var(--teal)') +
+      dato('Equipos instalados', d.c.bi || '—') +
+      dato('Contrato vigente', d.c.cc ? 'Sí' : 'No', d.c.cc ? 'var(--gn)' : 'var(--mut)') +
+    '</div>' +
+    '<div style="position:relative;height:96px;margin-top:.4rem"><canvas id="cVxCli"></canvas></div></div>';
+  const ctx = document.getElementById('cVxCli');
+  if (ctx && typeof safeChart === 'function') {
+    if (VX.chCli) VX.chCli.destroy();
+    VX.chCli = safeChart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: { labels: MESES_ABR.slice(0, MES_CORTE),
+        datasets: [{ label: 'Visitas ' + ANO_ACTUAL, data: d.meses.slice(0, MES_CORTE),
+          backgroundColor: VX.COL[d.dueno] || VX.COL.ambos, borderRadius: 3 }] },
+      options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ' ' + c.parsed.y + ' visitas' } } },
+        scales: { x: { grid: { display: false }, ticks: { font: { size: 8 } } },
+          y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 8 } }, grid: { color: '#E2E6F0' } } } },
+    });
+  }
+}
+
+// ── Visitas por región ──
+function vxRegion(A) {
+  const ctx = document.getElementById('cVxReg');
+  const regs = A.regs.slice();
+  if (ctx && typeof safeChart === 'function') {
+    if (VX.chReg) VX.chReg.destroy();
+    const top = regs.slice(0, 12);
+    const det = (APP_DATA.visitas || {}).det || { ejecutivos: [] };
+    const ds = VX.f.eje === 'todos'
+      ? det.ejecutivos.map(e => ({ label: VX.NOM[e] || e, data: top.map(r => r.eje[e] || 0),
+          backgroundColor: VX.COL[e], borderRadius: 4, stack: 'r' }))
+      : [{ label: VX.NOM[VX.f.eje] || VX.f.eje, data: top.map(r => r.v), backgroundColor: VX.COL[VX.f.eje], borderRadius: 4 }];
+    VX.chReg = safeChart(ctx.getContext('2d'), {
+      type: 'bar', data: { labels: top.map(r => r.region), datasets: ds },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        onClick: (evt, els) => { if (els && els.length) vxSetReg(top[els[0].index].region); },
+        plugins: { legend: { display: ds.length > 1, position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } },
+          tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ': ' + c.parsed.x + ' visitas' } } },
+        scales: { x: { stacked: ds.length > 1, beginAtZero: true, grid: { color: '#E2E6F0' } },
+          y: { stacked: ds.length > 1, grid: { display: false }, ticks: { font: { size: 9 } } } } },
+    });
+  }
+
+  const box = document.getElementById('vx-reg-tabla');
+  if (box) {
+    const SEP = 'border-right:1px solid var(--brd)';
+    const th = (t, al) => '<th style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;padding:.3rem .45rem;' +
+      'font-size:.54rem;text-align:' + al + ';white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)">' + t + '</th>';
+    const totV = regs.reduce((s, r) => s + r.v, 0), totF = regs.reduce((s, r) => s + r.fac, 0);
+    const maxV = Math.max.apply(null, regs.map(r => r.v).concat([1]));
+    const td = (v2, extra) => '<td style="padding:.22rem .45rem;text-align:right;font-size:.6rem;' +
+      'font-variant-numeric:tabular-nums;' + (extra || '') + SEP + '">' + v2 + '</td>';
+    const filas = regs.map((r, i) => {
+      const act = VX.f.reg === r.region;
+      return '<tr onclick="vxSetReg(' + JSON.stringify(act ? 'todas' : r.region).replace(/"/g, '&quot;') + ')" ' +
+        'style="cursor:pointer;background:' + (act ? 'rgba(255,192,0,.18)' : (i % 2 ? 'var(--bg)' : 'var(--bg2)')) + '">' +
+        '<td style="padding:.22rem .45rem;font-size:.61rem;font-weight:600;white-space:nowrap;' + SEP + '">' + vxEsc(r.region) + '</td>' +
+        td(r.v, 'font-weight:700;color:var(--az1);') +
+        '<td style="padding:.22rem .45rem;' + SEP + '"><div style="height:5px;background:var(--gy);border-radius:3px;overflow:hidden">' +
+          '<div style="height:100%;width:' + (r.v / maxV * 100) + '%;background:var(--az2)"></div></div></td>' +
+        td((r.v / (totV || 1) * 100).toFixed(1) + '%', 'color:var(--mut);') +
+        td(r.cli, 'color:var(--mut);') + td(vxN1(r.cli ? r.v / r.cli : 0)) +
+        td(r.conContrato, 'color:var(--teal);') +
+        td(r.fac ? vxMM(r.fac) : '—', 'color:var(--am);font-weight:700;') +
+        td(totF ? (r.fac / totF * 100).toFixed(1) + '%' : '—', 'color:var(--mut);') + '</tr>';
+    }).join('');
+    const tdF = (v2, col) => '<td style="padding:.28rem .45rem;text-align:right;font-size:.6rem;' +
+      'font-variant-numeric:tabular-nums;color:' + (col || '#fff') + ';' + SEP + '">' + v2 + '</td>';
+    box.innerHTML = '<table style="width:100%;border-collapse:collapse;min-width:560px"><thead><tr>' +
+      th('REGIÓN', 'left') + th('VISITAS', 'right') + th('', 'left') + th('%', 'right') + th('CLIENTES', 'right') +
+      th('VIS./CLI.', 'right') + th('CON CONTR.', 'right') + th('FACT. ' + ANO_ACTUAL, 'right') + th('% FACT.', 'right') +
+      '</tr></thead><tbody>' + (filas || '<tr><td colspan="9" style="padding:.8rem;text-align:center;color:var(--mut);font-style:italic">Sin datos</td></tr>') +
+      '</tbody><tfoot><tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">' +
+      '<td style="padding:.28rem .45rem;font-size:.6rem;' + SEP + '">TOTAL · ' + regs.length + '</td>' +
+      tdF(totV) + '<td style="' + SEP + '"></td>' + tdF('100%') +
+      tdF(regs.reduce((s, r) => s + r.cli, 0)) +
+      tdF(vxN1(regs.reduce((s, r) => s + r.cli, 0) ? totV / regs.reduce((s, r) => s + r.cli, 0) : 0)) +
+      tdF(regs.reduce((s, r) => s + r.conContrato, 0), '#7FE8DF') + tdF(vxMM(totF), '#FFC000') + tdF('100%') +
+      '</tr></tfoot></table>';
+    const lbl = document.getElementById('vx-reg-lbl');
+    if (lbl) lbl.textContent = regs.length + ' regiones · ' + vxN0(totV) + ' visitas' +
+      (VX.f.reg !== 'todas' ? ' · filtrado en ' + VX.f.reg : '');
+  }
+}
+
+// ── Evolución mensual ──
+function vxEvolucion(A) {
+  const meses = MESES_ABR.slice(0, MES_CORTE);
+  const act = A.mesAct.slice(0, MES_CORTE), ant = A.mesAnt.slice(0, MES_CORTE);
+  let a1 = 0, a2 = 0;
+  const acAct = act.map(x => (a1 += x)), acAnt = ant.map(x => (a2 += x));
+  const ctx = document.getElementById('cVxEvo');
+  if (ctx && typeof safeChart === 'function') {
+    if (VX.chEvo) VX.chEvo.destroy();
+    VX.chEvo = safeChart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: { labels: meses, datasets: [
+        { label: 'Visitas ' + ANO_ACTUAL, data: act, backgroundColor: 'rgba(0,45,115,.8)', borderRadius: 4, order: 3 },
+        { label: 'Visitas ' + (ANO_ACTUAL - 1), data: ant, backgroundColor: 'rgba(184,193,216,.85)', borderRadius: 4, order: 3 },
+        { label: 'Acumulado ' + ANO_ACTUAL, data: acAct, type: 'line', borderColor: '#FFC000',
+          backgroundColor: 'rgba(255,192,0,.12)', pointRadius: 3, borderWidth: 2.5, tension: .3, yAxisID: 'y1', order: 1 },
+        { label: 'Acumulado ' + (ANO_ACTUAL - 1), data: acAnt, type: 'line', borderColor: '#8A93AB',
+          borderDash: [5, 4], pointRadius: 0, borderWidth: 2, tension: .3, yAxisID: 'y1', order: 2 },
+      ] },
+      options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } },
+        scales: { x: { grid: { display: false } },
+          y: { beginAtZero: true, grid: { color: '#E2E6F0' }, title: { display: true, text: 'Visitas del mes', font: { size: 9 }, color: '#6B7BA8' } },
+          y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: 'Acumulado', font: { size: 9 }, color: '#6B7BA8' } } } },
+    });
+  }
+  const box = document.getElementById('vx-evo-tabla');
+  if (box) {
+    const SEP = 'border-right:1px solid var(--brd)';
+    const th = (t, al) => '<th style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;padding:.28rem .45rem;' +
+      'font-size:.54rem;text-align:' + al + ';white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)">' + t + '</th>';
+    const td = (v2, extra) => '<td style="padding:.22rem .45rem;text-align:right;font-size:.6rem;' +
+      'font-variant-numeric:tabular-nums;' + (extra || '') + SEP + '">' + v2 + '</td>';
+    const filas = meses.map((m, i) => {
+      const vr = ant[i] ? (act[i] - ant[i]) / ant[i] * 100 : null;
+      return '<tr style="background:' + (i % 2 ? 'var(--bg)' : 'var(--bg2)') + '">' +
+        '<td style="padding:.22rem .45rem;font-size:.61rem;font-weight:600;' + SEP + '">' + m + '</td>' +
+        td(act[i] || '—', 'font-weight:700;') + td(ant[i] || '—', 'color:var(--mut);') +
+        td(vr == null ? 's/d' : (vr >= 0 ? '+' : '') + vr.toFixed(0) + '%',
+           'font-weight:700;color:' + (vr == null ? 'var(--mut)' : vr >= 0 ? 'var(--gn)' : 'var(--rd)') + ';') +
+        td(acAct[i], 'color:var(--am);font-weight:700;') + td(acAnt[i] || '—', 'color:var(--mut);') + '</tr>';
+    }).join('');
+    const t1 = act.reduce((s, x) => s + x, 0), t2 = ant.reduce((s, x) => s + x, 0);
+    const vrT = t2 ? (t1 - t2) / t2 * 100 : null;
+    const tdF = (v2, col) => '<td style="padding:.28rem .45rem;text-align:right;font-size:.6rem;' +
+      'font-variant-numeric:tabular-nums;color:' + (col || '#fff') + ';' + SEP + '">' + v2 + '</td>';
+    box.innerHTML = '<div style="overflow-x:auto;max-height:300px;overflow-y:auto">' +
+      '<table style="width:100%;border-collapse:collapse;min-width:520px"><thead><tr>' +
+      th('MES', 'left') + th(ANO_ACTUAL, 'right') + th(ANO_ACTUAL - 1, 'right') + th('VAR.', 'right') +
+      th('ACUM. ' + ANO_ACTUAL, 'right') + th('ACUM. ' + (ANO_ACTUAL - 1), 'right') +
+      '</tr></thead><tbody>' + filas + '</tbody><tfoot>' +
+      '<tr style="position:sticky;bottom:0;background:var(--az3);color:#fff;font-weight:700">' +
+      '<td style="padding:.28rem .45rem;font-size:.6rem;' + SEP + '">Ene–' + MES_CORTE_NOMBRE + '</td>' +
+      tdF(t1) + tdF(t2, '#B8C1D8') +
+      tdF(vrT == null ? 's/d' : (vrT >= 0 ? '+' : '') + vrT.toFixed(0) + '%', vrT == null ? '#B8C1D8' : vrT >= 0 ? '#7FE8B0' : '#FFB3B3') +
+      tdF(t1, '#FFC000') + tdF(t2, '#B8C1D8') + '</tr></tfoot></table></div>' +
+      '<p style="font-size:.55rem;color:var(--mut);margin:.45rem 0 0;line-height:1.5">Las dos columnas comparan los ' +
+      'mismos meses de cada año y respetan los filtros de ejecutivo, actividad, región y cliente; el filtro de ' +
+      'período no las afecta, porque la gracia de esta tabla es justamente comparar los dos años.</p>';
+    const lbl = document.getElementById('vx-evo-lbl');
+    if (lbl) lbl.textContent = t1 + ' visitas en ' + ANO_ACTUAL + ' vs ' + t2 + ' en ' + (ANO_ACTUAL - 1) +
+      (vrT == null ? '' : ' · ' + (vrT >= 0 ? '+' : '') + vrT.toFixed(0) + '%');
+  }
+}
+
+// ── Cuadre de la facturación ──
+// Lo que factura la cartera se reparte en tres: los clientes visitados en el
+// período, los que sólo tienen visitas fuera de él y los que no registran
+// ninguna. La suma es la facturación del año, así que la tabla de arriba se
+// puede leer contra el total del panel sin dudar de si falta alguien.
+function vxCuadre(A) {
+  const el = document.getElementById('vx-cli-cuadre');
+  if (!el) return;
+  vxBase();
+  const facVis = A.cli.reduce((s, d) => s + d.c.fac, 0);
+  const facOtro = VX.facPanel - facVis - VX.facFuera;
+  if (VX.f.reg !== 'todas' || VX.f.q) {
+    el.innerHTML = 'Facturación de los clientes listados: <strong>' + vxMM(facVis) + '</strong>. El cuadre contra ' +
+      'el total del año se muestra sin filtro de región ni búsqueda.';
+    return;
+  }
+  el.innerHTML = 'Cuadre: <strong>' + vxMM(facVis) + '</strong> de los clientes visitados' +
+    (Math.abs(facOtro) > 5e4 ? ' + <strong>' + vxMM(facOtro) + '</strong> de los visitados sólo fuera del período' : '') +
+    ' + <strong>' + vxMM(VX.facFuera) + '</strong> de ' + (VX.sinVisita || []).length + ' clientes sin ninguna visita' +
+    ' = <strong>' + vxMM(VX.facPanel) + '</strong>, la facturación del año del panel.';
+}
+
+// ── Productividad por ejecutivo ──
+function vxProd(A) {
+  const box = document.getElementById('vx-prod-tabla');
+  if (!box) return;
+  const det = (APP_DATA.visitas || {}).det || { ejecutivos: [] };
+  const meses = VX.f.per === 'todo' ? 12 + MES_CORTE : MES_CORTE;
+  const filas = det.ejecutivos.map(e => {
+    const suyos = A.cli.filter(d => (d.eje[e] || 0) > 0);
+    const v = suyos.reduce((s, d) => s + d.eje[e], 0);
+    const reg = new Set(suyos.map(d => d.c.region));
+    const fac = suyos.reduce((s, d) => s + d.c.fac, 0);
+    const solos = suyos.filter(d => d.dueno === e).length;
+    const conContr = suyos.filter(d => d.c.cc).length;
+    const reuniones = suyos.reduce((s, d) => s + Object.keys(d.tipo)
+      .filter(t => vxNorm(t).indexOf('REUNION') >= 0).reduce((x, t) => x + d.tipo[t], 0), 0);
+    return { e: e, v: v, cli: suyos.length, solos: solos, reg: reg.size, fac: fac,
+             conContr: conContr, reuniones: reuniones };
+  }).filter(r => r.v > 0);
+
+  const SEP = 'border-right:1px solid var(--brd)';
+  const fila = (lbl, val, ayuda) => '<tr><td style="padding:.24rem .5rem;font-size:.6rem;color:var(--mut);' + SEP + '" ' +
+    (ayuda ? 'title="' + vxEsc(ayuda) + '"' : '') + '>' + lbl + '</td>' + val + '</tr>';
+  const celda = (v2, col) => '<td style="padding:.24rem .5rem;text-align:right;font-size:.63rem;font-weight:700;' +
+    'font-variant-numeric:tabular-nums;color:' + (col || 'var(--txt)') + ';' + SEP + '">' + v2 + '</td>';
+  const th = t => '<th style="background:var(--az1);color:#fff;padding:.3rem .5rem;font-size:.55rem;text-align:right;' +
+    'border-right:1px solid rgba(255,255,255,.18)">' + t + '</th>';
+  box.innerHTML = '<table style="width:100%;border-collapse:collapse"><thead><tr>' +
+    '<th style="background:var(--az1);color:#fff;padding:.3rem .5rem;font-size:.55rem;text-align:left;' + SEP + '">INDICADOR</th>' +
+    filas.map(r => th((VX.NOM[r.e] || r.e).toUpperCase())).join('') + '</tr></thead><tbody>' +
+    fila('Visitas', filas.map(r => celda(vxN0(r.v), VX.COL[r.e])).join('')) +
+    fila('Clientes atendidos', filas.map(r => celda(r.cli)).join('')) +
+    fila('Clientes exclusivos', filas.map(r => celda(r.solos)).join(''), 'Clientes que en este período visitó sólo este ejecutivo') +
+    fila('Regiones', filas.map(r => celda(r.reg)).join('')) +
+    fila('Visitas por cliente', filas.map(r => celda(vxN1(r.cli ? r.v / r.cli : 0))).join('')) +
+    fila('Visitas por mes', filas.map(r => celda(vxN1(r.v / meses))).join(''), 'Sobre los meses del período elegido') +
+    fila('Reuniones', filas.map(r => celda(r.reuniones + ' · ' + (r.v ? Math.round(r.reuniones / r.v * 100) : 0) + '%')).join('')) +
+    fila('Clientes con contrato', filas.map(r => celda(r.conContr + ' · ' + (r.cli ? Math.round(r.conContr / r.cli * 100) : 0) + '%')).join('')) +
+    fila('Facturación de sus clientes', filas.map(r => celda(vxMM(r.fac), 'var(--am)')).join('')) +
+    '</tbody></table>';
+  const lbl = document.getElementById('vx-prod-lbl');
+  if (lbl) lbl.textContent = VX.f.per === 'todo' ? 'todo el histórico' : 'Ene–' + MES_CORTE_NOMBRE + ' ' + VX.f.per;
+}
+
+// ── Dispersión visitas vs facturación ──
+// Las medianas se dibujan como plugin: Chart.js no trae anotaciones y cargar
+// otra librería por dos líneas no se justifica.
+const vxGuias = {
+  id: 'vxGuias',
+  beforeDatasetsDraw(ch, args, opt) {
+    if (!opt || !isFinite(opt.mx) || !isFinite(opt.my)) return;
+    const { ctx, chartArea: a, scales } = ch;
+    const px = scales.x.getPixelForValue(opt.mx), py = scales.y.getPixelForValue(opt.my);
+    ctx.save();
+    ctx.fillStyle = 'rgba(212,96,0,.06)';
+    ctx.fillRect(a.left, a.top, px - a.left, py - a.top);
+    ctx.strokeStyle = 'rgba(107,123,168,.55)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(px, a.top); ctx.lineTo(px, a.bottom);
+    ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#A34515'; ctx.font = '600 10px Roboto, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('Factura mucho · pocas visitas', a.left + 8, a.top + 14);
+    ctx.restore();
+  },
+};
+
+function vxDispersion(A) {
+  const ctx = document.getElementById('cVxDisp');
+  if (!ctx || typeof safeChart !== 'function') return;
+  if (VX.chDisp) VX.chDisp.destroy();
+  const pts = A.cli.filter(d => d.c.fac > 0).map(d => ({
+    x: d.v, y: +(d.c.fac / 1e6).toFixed(2), n: d.c.n, reg: d.c.region, cc: d.c.cc, dueno: d.dueno }));
+  const med = arr => { if (!arr.length) return 0; const o = arr.slice().sort((a, b) => a - b), m = o.length >> 1;
+    return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2; };
+  VX.chDisp = safeChart(ctx.getContext('2d'), {
+    type: 'scatter',
+    data: { datasets: [{ label: 'Clientes', data: pts,
+      backgroundColor: pts.map(p => (VX.COL[p.dueno] || VX.COL.ambos) + 'B3'),
+      borderColor: '#fff', borderWidth: 1.5, pointRadius: 6, pointHoverRadius: 9 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      onClick: (evt, els) => { if (els && els.length) vxSel(pts[els[0].index].n); },
+      plugins: { legend: { display: false },
+        vxGuias: { mx: med(pts.map(p => p.x)), my: med(pts.map(p => p.y)) },
+        tooltip: { callbacks: { title: c => c[0].raw.n,
+          label: c => [c.raw.reg, c.raw.x + ' visitas', 'Facturación: MM$' + vxN1(c.raw.y),
+            c.raw.cc ? 'Con contrato vigente' : 'Sin contrato'] } } },
+      scales: { x: { beginAtZero: true, grid: { color: '#E2E6F0' }, ticks: { stepSize: 1, font: { size: 9 } },
+          title: { display: true, text: 'Visitas del período', font: { size: 9 }, color: '#6B7BA8' } },
+        y: { beginAtZero: true, grid: { color: '#E2E6F0' }, ticks: { font: { size: 9 } },
+          title: { display: true, text: 'Facturación del año (MM$)', font: { size: 9 }, color: '#6B7BA8' } } } },
+    plugins: [vxGuias],
+  });
+  const lbl = document.getElementById('vx-disp-lbl');
+  if (lbl) lbl.textContent = pts.length + ' clientes con facturación · ' +
+    (A.cli.length - pts.length) + ' visitados sin facturación cruzada';
+}
+
+// ── Orquestación ──
+function vxRender(recentrar) {
+  const A = vxAgg();
+  vxPintaFiltros();
+  vxKpis(A);
+  vxMapa(A, recentrar);
+  vxTablaCli(A);
+  vxDetalleCli(A);
+  vxRegion(A);
+  vxEvolucion(A);
+  vxProd(A);
+  vxDispersion(A);
+  vxCuadre(A);
+}
+
+function vxInit() {
+  if (!((APP_DATA.visitas || {}).det || {}).filas) return;
+  vxRender(true);
 }
