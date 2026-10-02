@@ -21,7 +21,7 @@
          col: '#002D73', fondo: 'rgba(0,45,115,.11)', xl: 'DCE6F4' },
     2: { nom: 'Grupo 2 · Top ' + P.top_camas + ' por camas', quien: 'Con plan de entrada escrito',
          col: '#B86E00', fondo: 'rgba(255,170,20,.17)', xl: 'FFEFC9' },
-    3: { nom: 'Grupo 3 · Resto de la cartera', quien: 'De mayor a menor potencial ST',
+    3: { nom: 'Grupo 3 · Clientes retail', quien: 'De mayor a menor potencial ST',
          col: '#2E7D4F', fondo: 'rgba(46,125,79,.08)', xl: 'E8F3EC' },
   };
   // Quién visita a cada cliente ya no depende del grupo sino de su comuna: los
@@ -223,7 +223,7 @@
         (r === 'Metropolitana' ? ' RM' : ' Valparaíso')).join(' · ')) +
       k(GRUPO[1].col, n0(cnt(1)), 'Top por potencial ST', porReg(1) + ' · primeros en la agenda') +
       k(GRUPO[2].col, n0(cnt(2)), 'Con plan de entrada', porReg(2) + ' · top por camas') +
-      k(GRUPO[3].col, n0(cnt(3)), 'Resto de la cartera', porReg(3) + ' · por potencial ST') +
+      k(GRUPO[3].col, n0(cnt(3)), 'Clientes retail', porReg(3) + ' · por potencial ST') +
       k('var(--or)', n0(AG.length), 'Visitas agendadas',
         diasK + ' días hábiles por ejecutivo · ' + (AG.length ? fCorta(AG[0].f) + ' a ' + fCorta(fin) : '—'));
   }
@@ -305,7 +305,7 @@
           'de los clientes que no quedaron en el grupo 1, los de mayor número de camas. Las camas miden el tamaño de la ' +
           'institución y, con él, la puerta de entrada a futuros negocios.',
           'Para cada uno se escribe un <strong>plan de entrada</strong> en la columna de la tabla.') + flecha +
-        paso(3, 'Resto de la cartera',
+        paso(3, 'Clientes retail',
           'todos los demás clientes con Potencial de ST de la región.',
           'Se visitan de mayor a menor potencial ST anual: primero las cuentas grandes de la cola.') +
       '</div>' +

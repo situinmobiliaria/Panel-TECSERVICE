@@ -27,23 +27,33 @@ function _biNorm(s){ return s?s.trim().toUpperCase().replace(/\s+/g,' ').normali
 // Ahora el match exacto reclama primero y el parcial sólo toma entradas
 // libres y sin ambigüedad: si dos clientes BI se disputan la misma entrada,
 // ninguno se la queda.
+// Un cliente puede traer varios nombres juntados (c.alias): el calce se intenta
+// con cada uno y el resultado queda bajo el nombre que manda.
+let _biAlias={};
+const _biCanon = k => _biAlias[k] || k;
 function _biResolverFac(clientes){
-  _biFacRes={};
+  _biFacRes={}; _biAlias={};
   const tomadas=new Set(), pendientes=[];
   (clientes||[]).forEach(c=>{
-    const k=_biNorm(c.nombre);
-    if(!k) return;
-    if(_biPanelMap[k]){ _biFacRes[k]=_biPanelMap[k]; tomadas.add(k); }
-    else if(k.length>=8) pendientes.push(k);
+    const kc=_biNorm(c.nombre);
+    if(!kc) return;
+    (c.alias||[]).forEach(a=>{ _biAlias[_biNorm(a)]=kc; });
+    [c.nombre].concat(c.alias||[]).forEach(n=>{
+      const k=_biNorm(n);
+      if(!k) return;
+      if(_biPanelMap[k]){ if(!_biFacRes[kc]) _biFacRes[kc]=_biPanelMap[k]; tomadas.add(k); }
+      else if(k.length>=8) pendientes.push([k,kc]);
+    });
   });
   const cand={};
-  pendientes.forEach(k=>{
+  pendientes.forEach(([k,kc])=>{
+    if(_biFacRes[kc]) return;
     const hit=Object.keys(_biPanelMap).filter(pk=>
       pk.length>=8 && !tomadas.has(pk) && (pk.includes(k)||k.includes(pk)));
-    if(hit.length===1){ (cand[hit[0]]=cand[hit[0]]||[]).push(k); }
+    if(hit.length===1){ (cand[hit[0]]=cand[hit[0]]||[]).push(kc); }
   });
   Object.keys(cand).forEach(pk=>{
-    if(cand[pk].length===1) _biFacRes[cand[pk][0]]=_biPanelMap[pk];
+    if(cand[pk].length===1 && !_biFacRes[cand[pk][0]]) _biFacRes[cand[pk][0]]=_biPanelMap[pk];
   });
 }
 function _biLookupPanel(nombre){ return _biFacRes[_biNorm(nombre)]||null; }
@@ -339,7 +349,7 @@ function _biVidaIndice(){
   const cl = P.clientes || [], tp = P.tipos || [], filas = P.filas || [], hoy = P.hoy_ym || 0;
   const idx = {};
   filas.forEach(f=>{
-    const k = _biNorm(cl[f[3]] || '');
+    const k = _biCanon(_biNorm(cl[f[3]] || ''));
     if(!k) return;
     const d = idx[k] || (idx[k] = { n:0, nf:0, suma:0, sumaA:0 });
     d.n++;
@@ -406,7 +416,7 @@ function _biVidaLinIndice() {
         filas = P.filas || [], hoy = P.hoy_ym || 0;
   const idx = {};
   filas.forEach(f => {
-    const k = _biNorm(cl[f[3]] || '');
+    const k = _biCanon(_biNorm(cl[f[3]] || ''));
     if (!k) return;
     const pr = _biLineaProp(ln[f[1]] || '');
     const c = idx[k] || (idx[k] = {});
@@ -913,9 +923,10 @@ const _BI_CV_CORTES = [0.5, 0.8];
 window._biCvReg = function (v) { _biCvRegion = v; _biRenderCurva(); };
 window._biCvCli = function (v) { _biCvSel = v || null; _biRenderCurva(); };
 
-function _biCurvaDatos() {
+function _biCurvaDatos(region) {
+  if (region === undefined) region = _biCvRegion;
   const list = _biClientesFiltrados().filter(c =>
-    _biCvRegion === 'todas' || (c.region || 'Sin región') === _biCvRegion);
+    region === 'todas' || (c.region || 'Sin región') === region);
   const arr = [];
   list.forEach(c => {
     const p = _biLookupPanel(c.nombre), d = _biLookupContrato(c.nombre);
@@ -1057,6 +1068,7 @@ function _biCvFicha(pt, total, n, cortes) {
 }
 
 function _biRenderCurva() {
+  _biRenderCurva2();
   const cv = document.getElementById('cBiCurva');
   if (!cv || typeof Chart === 'undefined') return;
   if (_biCvChart) { _biCvChart.destroy(); _biCvChart = null; }
@@ -1190,6 +1202,146 @@ function _biRenderCurva() {
   _biCvFicha(pts.find(p => p.nombre === _biCvSel) || null, total, pts.length, cortes);
 }
 window._biCvReset = function () { if (_biCvChart && _biCvChart.resetZoom) _biCvChart.resetZoom(); };
+
+// ── CURVA DE CONCENTRACIÓN · TODAS LAS REGIONES CON PORCENTAJE A ELEGIR ──
+// Misma curva, sin segmentadores de región ni de cliente. El porcentaje que se
+// escribe recorta la curva: se muestran los clientes que hacen falta, de mayor a
+// menor, para llegar a ese porcentaje del potencial total, y el eje vertical
+// termina en lo que ellos suman. La tabla de la derecha reparte esa selección
+// por región: cuántos clientes, cuánto potencial y qué parte del potencial de la
+// región representa.
+let _biCv2Chart = null;
+let _biCv2Pct = 80;
+
+window._biCv2Set = function (v) {
+  let n = parseFloat(String(v).replace(',', '.'));
+  if (!isFinite(n)) n = 80;
+  _biCv2Pct = Math.min(100, Math.max(1, n));
+  _biRenderCurva2();
+};
+window._biCv2Reset = function () { if (_biCv2Chart && _biCv2Chart.resetZoom) _biCv2Chart.resetZoom(); };
+
+function _biRenderCurva2() {
+  const cv = document.getElementById('cBiCurva2');
+  if (!cv || typeof Chart === 'undefined') return;
+  if (_biCv2Chart) { _biCv2Chart.destroy(); _biCv2Chart = null; }
+
+  const inp = document.getElementById('bi-cv2-pct');
+  if (inp && document.activeElement !== inp) inp.value = _biCv2Pct;
+
+  const { pts, total } = _biCurvaDatos('todas');
+  const res = document.getElementById('bi-cv2-res');
+  const tb = document.getElementById('bi-cv2-tab');
+  if (!pts.length || !(total > 0)) {
+    if (res) res.innerHTML = 'Sin clientes con potencial para este filtro.';
+    if (tb) tb.innerHTML = '';
+    return;
+  }
+
+  // Clientes necesarios para llegar al porcentaje pedido.
+  const q = _biCv2Pct / 100;
+  let k = pts.findIndex(p => p.acum >= total * q - 1e-6);
+  if (k < 0) k = pts.length - 1;
+  const sel = pts.slice(0, k + 1);
+  const potSel = sel[sel.length - 1].acum;
+  const nf = v => v.toLocaleString('es-CL');
+
+  if (res) {
+    res.innerHTML = '<strong>' + nf(sel.length) + '</strong> clientes de ' + nf(pts.length) +
+      ' concentran <strong>' + mm(potSel) + '</strong> (' + fN1(potSel / total * 100) +
+      '% del potencial ST anual total de <strong>' + mm(total) + '</strong>) · todas las regiones' +
+      ' · <span style="color:var(--mut)">sin los clientes con contrato Activado</span>';
+  }
+
+  // Tabla por región: clientes de la selección, su potencial y cuánto es del
+  // potencial total de esa región.
+  const reg = {};
+  pts.forEach((p, i) => {
+    const r = reg[p.region] || (reg[p.region] = { n: 0, pot: 0, tot: 0 });
+    r.tot += p.st;
+    if (i <= k) { r.n++; r.pot += p.st; }
+  });
+  const rows = Object.keys(reg).filter(r => reg[r].n > 0)
+    .sort((a, b) => reg[b].pot - reg[a].pot || reg[b].n - reg[a].n);
+  const tn = rows.reduce((s, r) => s + reg[r].n, 0);
+  const tp = rows.reduce((s, r) => s + reg[r].pot, 0);
+  const th = 'padding:.3rem .5rem;font-size:.55rem;text-transform:uppercase;letter-spacing:.04em;' +
+    'color:#fff;background:#002D73;text-align:right;white-space:nowrap';
+  const td = 'padding:.28rem .5rem;font-size:.62rem;text-align:right;border-bottom:1px solid var(--brd);white-space:nowrap';
+  if (tb) {
+    tb.innerHTML =
+      '<table style="border-collapse:collapse;width:100%">' +
+      '<thead><tr><th style="' + th + ';text-align:left">Región</th><th style="' + th + '">Clientes</th>' +
+      '<th style="' + th + '">Potencial ST</th><th style="' + th + '">% del potencial de la región</th></tr></thead><tbody>' +
+      rows.map(r => '<tr><td style="' + td + ';text-align:left">' + _biEsc(r) + '</td>' +
+        '<td style="' + td + '">' + nf(reg[r].n) + '</td>' +
+        '<td style="' + td + '">' + mm(reg[r].pot) + '</td>' +
+        '<td style="' + td + '">' + fN1(reg[r].tot ? reg[r].pot / reg[r].tot * 100 : 0) + '%</td></tr>').join('') +
+      '</tbody><tfoot><tr style="font-weight:700;background:var(--bg2)">' +
+      '<td style="' + td + ';text-align:left">Total</td><td style="' + td + '">' + nf(tn) + '</td>' +
+      '<td style="' + td + '">' + mm(tp) + '</td><td style="' + td + '">' +
+      fN1(total ? tp / total * 100 : 0) + '%</td></tr></tfoot></table>';
+  }
+
+  const rBase = sel.length > 400 ? 2.5 : 3.5;
+  _biCv2Chart = new Chart(cv.getContext('2d'), {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: 'Clientes',
+        data: sel,
+        showLine: true,
+        borderColor: 'rgba(0,45,115,.35)',
+        borderWidth: 1.5,
+        pointRadius: rBase,
+        pointHoverRadius: 7,
+        pointBackgroundColor: '#002D73',
+        pointBorderColor: '#002D73',
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        zoom: {
+          limits: { x: { min: 'original', max: 'original' }, y: { min: 'original', max: 'original' } },
+          pan: {
+            enabled: true, mode: 'xy', threshold: 4,
+            onPanStart:    ({ chart }) => { chart.canvas.style.cursor = 'grabbing'; },
+            onPanComplete: ({ chart }) => { chart.canvas.style.cursor = 'grab'; },
+          },
+          zoom: { wheel: { enabled: true, speed: 0.08 }, pinch: { enabled: true }, mode: 'xy' },
+        },
+        tooltip: {
+          callbacks: {
+            title: c => '#' + c[0].raw.x + ' · ' + c[0].raw.nombre,
+            label: c => {
+              const p = c.raw;
+              return [
+                p.region + ' · ' + _biVal(p.c, 'total').toLocaleString('es-CL') + ' equipos',
+                'Potencial ST anual: ' + mm(p.mant),
+                'Acumulado: ' + mm(p.acum) + '  (' + fN1(p.pct) + '% del total)',
+              ];
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'N° de clientes foco (de mayor a menor potencial)', font: { size: 9 }, color: '#6B7BA8' },
+          grid: { color: '#E2E6F0' }, beginAtZero: true, max: sel.length,
+          ticks: { font: { size: 9 }, precision: 0 },
+        },
+        y: {
+          title: { display: true, text: 'Potencial ST anual acumulado · mantenimiento BI (MM$)', font: { size: 9 }, color: '#6B7BA8' },
+          grid: { color: '#E2E6F0' }, beginAtZero: true, max: potSel,
+          ticks: { font: { size: 9 }, callback: v => Math.round(v / 1e6).toLocaleString('es-CL') },
+        },
+      },
+    },
+  });
+  cv.style.cursor = 'grab';
+}
 
 // El exportable es un Excel con una hoja por región, cada una con sus diez
 // clientes a visitar y una columna en blanco para escribir el plan de acción:
@@ -2121,6 +2273,35 @@ function initBaseInstalada(){
         de su parque y cómo va la relación comercial.
         Como no depende de la vida útil, entran también los clientes que la matriz deja fuera por falta de fecha de
         instalación. Rueda del mouse para acercar la cabeza de la curva.</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:.9rem" id="bi-cv2-card">
+    <div class="ch" style="flex-wrap:wrap;gap:.5rem">
+      <span class="ct">Concentración del Potencial ST Anual · Todas las Regiones</span>
+      <span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
+                   margin-left:.4rem">% del potencial total</span>
+      <input id="bi-cv2-pct" type="number" min="1" max="100" step="1" value="80"
+        onchange="window._biCv2Set(this.value)" onkeydown="if(event.key==='Enter')window._biCv2Set(this.value)"
+        style="width:4.2rem;font-size:.62rem;padding:.2rem .4rem;border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt)">
+      <button onclick="window._biCv2Reset()" title="Volver a la vista completa"
+        style="font-size:.57rem;padding:.2rem .55rem;border-radius:3px;cursor:pointer;
+               border:1px solid var(--brd);background:var(--bg2);color:var(--mut)">Restablecer zoom</button>
+      <button id="bi-cv2-pdf" onclick="exportarPanel({ids:['bi-cv2-card'],titulo:'Base Instalada · Concentración del Potencial ST por región',archivo:'BI_concentracion_potencial_regiones',btn:'bi-cv2-pdf'})"
+        style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;
+               border-radius:4px;cursor:pointer;white-space:nowrap">Exportar</button>
+    </div>
+    <div class="cb">
+      <div id="bi-cv2-res" style="font-size:.62rem;color:var(--txt);margin-bottom:.5rem;line-height:1.6"></div>
+      <div style="display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-start">
+        <div style="position:relative;height:400px;flex:2 1 420px;min-width:0"><canvas id="cBiCurva2"></canvas></div>
+        <div id="bi-cv2-tab" style="flex:1 1 320px;min-width:0;overflow-x:auto"></div>
+      </div>
+      <p style="font-size:.57rem;color:var(--mut);margin:.6rem 0 0;line-height:1.55">
+        Misma curva de arriba, pero con todas las regiones juntas. Escribe en el parámetro qué porcentaje del
+        potencial ST anual total quieres cubrir (por ejemplo 80 o 70): el gráfico muestra los clientes, de mayor a menor
+        potencial, que hacen falta para llegar a ese porcentaje. La tabla reparte esos clientes por región:
+        cuántos son, cuánto potencial suman y qué porcentaje es del potencial total de esa región.</p>
     </div>
   </div>
 

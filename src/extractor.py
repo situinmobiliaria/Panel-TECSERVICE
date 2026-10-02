@@ -1102,10 +1102,7 @@ def read_prospectos_bi(wb):
         estado = _EST.get(safe_str(row[14]).strip().upper() if row[14] else "", "Sin clasificar")
         region = _norm_region(row[29] if len(row) > 29 else None)
 
-        cli = safe_str(row[26]).strip() if row[26] else ""
-        if not cli or cli.lower() in ("none", ""):
-            cli = safe_str(row[13]).strip() if row[13] else "SIN CLIENTE"
-        cli = cli.upper()
+        cli = _bi_nombre_cliente(row)
         # GEMCO es equipamiento propio, no cartera que prospectar. Se excluye
         # igual que en read_base_instalada() para que los totales de las dos
         # hojas hablen del mismo universo.
@@ -1348,6 +1345,77 @@ def clientes_con_contrato_activado(contratos):
     return out
 
 
+# BASE INSTALADA rellena con «VACIO» o «0» las celdas de cliente que quedaron en
+# blanco: no son nombres, son un espacio vacío. Se tratan como vacías.
+_BI_RELLENO = {"", "NONE", "VACIO", "VACÍO", "0", "0.0"}
+
+
+def _bi_nombre_cliente(row):
+    """Cliente de una fila de BASE INSTALADA: «Nombre Analisis» (col AA) y, si
+    está en blanco, «Clasificación 1» (col N). Si ninguna trae un nombre real
+    queda «VACIO», como se ve en el Excel."""
+    for i in (26, 13):
+        v = safe_str(row[i]).strip() if len(row) > i and row[i] is not None else ""
+        if v.upper() not in _BI_RELLENO:
+            return v.upper()
+    return "VACIO"
+
+
+# Cuentas que son el mismo cliente escrito de otra forma, revisadas a mano
+# (01-10-2026): son las que unifica el Plan RM. Sólo se juntan éstas, no los
+# nombres que simplemente se parecen.
+_BI_EQUIV = [
+    ("CORPORACION MUNICIPAL DE PROVIDENCIA", "CORPORACION MUNICIPAL DE PROVIDENCIA"),   # con y sin tilde
+    ("CESFAM JOSE BAUZA FRAU", "CESFAM DR. JOSE BAUZA FRAU"),
+    ("CLINICA UNIVERSIDAD ANDES", "CLINICA UNIVERSIDAD LOS ANDES"),
+    ("HOSPITAL DE LA FLORIDA", "HOSPITAL CLINICO METROPOLITANO LA FLORIDA"),
+    ("INSTITUTO DE SEGURIDAD DEL TRABAJO", "HOSPITAL CLINICO IST VINA DEL MAR"),
+    ("HOSPITAL LA LIGUA", "HOSPITAL SAN AGUSTIN"),
+    ("HOSPITAL DE LIMACHE", "HOSPITAL SANTO TOMAS DE LIMACHE"),
+    ("MEGASALUD CONCHALI", "REDSALUD CONCHALI"),
+]
+
+
+def _bi_unificar(cli_map):
+    """Junta, dentro de cli_map, las cuentas de _BI_EQUIV (el mismo cliente
+    escrito de otra forma), siempre que estén en la misma región o una no tenga
+    región. Manda la de más equipos. Devuelve el mapa unificado y
+    {nombre que manda: [nombres juntados]}."""
+    def region(d):
+        return max(d["regiones"], key=lambda r: d["regiones"][r]) if d["regiones"] else "Sin región"
+    equiv = {frozenset((_norm_cli(a), _norm_cli(b))) for a, b in _BI_EQUIV}
+
+    def mismo(a, b):
+        # Los nombres que sólo difieren en la tilde normalizan igual.
+        return _norm_cli(a) == _norm_cli(b) and _norm_cli(a) in {x for e in equiv for x in e}             or frozenset((_norm_cli(a), _norm_cli(b))) in equiv
+
+    grupos = []
+    for n in sorted(cli_map, key=lambda x: (-cli_map[x]["total"], x)):
+        r = region(cli_map[n])
+        g = next((g for g in grupos if any(
+            mismo(n, o) and (r == g_r or r == "Sin región" or g_r == "Sin región")
+            for o, g_r in ((o, region(cli_map[o])) for o in g))), None)
+        if g is None:
+            grupos.append([n])
+        else:
+            g.append(n)
+    out, alias = {}, {}
+    for g in grupos:
+        base = cli_map[g[0]]
+        for n in g[1:]:
+            d = cli_map[n]
+            for k in ("total", "total_si", "total_no"):
+                base[k] += d[k]
+            for k in ("lineas", "lineas_si", "lineas_no", "estados", "regiones"):
+                for kk, v in d[k].items():
+                    base[k][kk] += v
+            base["_potencial_st"] = base["_potencial_st"] or d["_potencial_st"]
+        out[g[0]] = base
+        if len(g) > 1:
+            alias[g[0]] = g[1:]
+    return out, alias
+
+
 def read_base_instalada(wb, contratos=None):
     # Clientes con contrato «Activado» en CONTRATOS TODOS (sin mirar la fecha de
     # término). Se marcan con «cv» y quedan fuera del
@@ -1411,10 +1479,7 @@ def read_base_instalada(wb, contratos=None):
         estado = _ESTADO_MAP.get(estado_raw, "Sin clasificar")
 
         # Nombre cliente: col[26] si existe, sino col[13]
-        nombre_analisis = safe_str(row[26]).strip() if row[26] else ""
-        if not nombre_analisis or nombre_analisis.lower() in ("none", ""):
-            nombre_analisis = safe_str(row[13]).strip() if row[13] else "SIN CLIENTE"
-        nombre_analisis = nombre_analisis.upper()
+        nombre_analisis = _bi_nombre_cliente(row)
 
         # col[27] = Potencial ST (Si/No)
         potencial_raw = safe_str(row[27]).strip().upper() if len(row) > 27 and row[27] is not None else ""
@@ -1479,6 +1544,14 @@ def read_base_instalada(wb, contratos=None):
     top_tipos_si = sorted([{"tipo": t, "n": n} for t, n in por_tipo_si.items()], key=lambda x: -x["n"])[:20]
     top_tipos_no = sorted([{"tipo": t, "n": n} for t, n in por_tipo_no.items()], key=lambda x: -x["n"])[:20]
 
+    # Una cuenta escrita de dos formas cuenta como un solo cliente.
+    cli_map, alias_bi = _bi_unificar(cli_map)
+    canon = {a: n for n, als in alias_bi.items() for a in als}
+    for mp in (reg_map, reg_map_todos):
+        for rd in mp.values():
+            rd["_clientes"] = {canon.get(n, n) for n in rd["_clientes"]}
+    print(f"       Base Instalada: {len(canon)} cuentas unificadas en {len(alias_bi)} clientes")
+
     # Construir lista de clientes
     clientes = []
     for nombre, d in cli_map.items():
@@ -1542,8 +1615,9 @@ def read_base_instalada(wb, contratos=None):
             "region":            region_cli,
             "estado":            estado_cli,
             "con_contrato":      estado_cli in ("Contrato", "Garantia"),
-            "cv":                con_contrato_vigente(nombre),
+            "cv":                any(con_contrato_vigente(n) for n in [nombre] + alias_bi.get(nombre, [])),
             "potencial_st":      d.get("_potencial_st", False),
+            "alias":             alias_bi.get(nombre, []),
         })
 
     # Excluir clientes internos (GEMCO)
@@ -2802,12 +2876,13 @@ _PLAN_EJE_POR_COMUNA = {}
 _PLAN_ARCHIVO_COMUNAS = "Plan_RM_comunas_por_completar.xlsx"
 
 # Cartera de clientes de ST fuera de la Región Metropolitana: cada región
-# completa es de un ejecutivo (reparto vigente al 25-09-2026). La RM no está
-# acá porque se reparte por comuna, con _PLAN_COMUNAS_EJE.
+# completa es de un ejecutivo (reparto vigente al 30-09-2026: Los Lagos pasó
+# a Cristián Pérez). La RM no está acá porque se reparte por comuna, con
+# _PLAN_COMUNAS_EJE.
 _ST_REGION_EJE = {
     "Cristián Pérez": ["Arica y Parinacota", "Tarapacá", "Antofagasta", "Atacama", "Coquimbo",
-                       "Valparaíso", "Maule"],
-    "Eglys Ramírez": ["O'Higgins", "Ñuble", "Bío Bío", "Araucanía", "Los Ríos", "Los Lagos",
+                       "Valparaíso", "Maule", "Los Lagos"],
+    "Eglys Ramírez": ["O'Higgins", "Ñuble", "Bío Bío", "Araucanía", "Los Ríos",
                       "Aysén", "Magallanes"],
 }
 _ST_EJE_POR_REGION = {r: e for e, rs in _ST_REGION_EJE.items() for r in rs}
@@ -2928,6 +3003,48 @@ def _st_unificar(regs):
     return out
 
 
+def _plan_unificar(universo):
+    """Junta, dentro de cada región, las cuentas que son el mismo cliente
+    escrito de otra forma (misma regla que _st_unificar). El registro que manda
+    es el de más equipos; equipos y potencial se suman y el resto de los
+    nombres queda en «alias»."""
+    grupos = []
+    for u in sorted(universo, key=lambda x: (-x["eq"]["total"], x["n"])):
+        # Dos cuentas que calzan con el mismo establecimiento del registro de
+        # camas son la misma institución («Hospital de La Florida» y «Hospital
+        # Clínico Metropolitano La Florida»), aunque los nombres no se parezcan.
+        mismo_reg = lambda a, b: bool(a["camR"]) and a["camF"] == "Registro" == b["camF"] and a["camR"] == b["camR"]
+        g = next((g for g in grupos if g[0]["r"] == u["r"] and any(
+            _st_clave(u["n"]) == _st_clave(o["n"]) or _plan_mismo_cliente(u["n"], o["n"]) or mismo_reg(u, o)
+            for o in g)), None)
+        if g is None:
+            grupos.append([u])
+        else:
+            g.append(u)
+    out = []
+    for g in grupos:
+        base = g[0]
+        base["alias"] = [o["n"] for o in g[1:]]
+        for o in g[1:]:
+            for l in base["eq"]:
+                base["eq"][l] += o["eq"][l]
+            base["pot"] += o["pot"]
+            base["cc"] = base["cc"] or o["cc"]
+            # La facturación se cuenta una sola vez por cuenta del panel.
+            if o.get("_fac_key") and o["_fac_key"] != base.get("_fac_key"):
+                base["f26"] += o["f26"]
+                base["f25"] += o["f25"]
+            if o["vu"] is not None:
+                if base["vu"] is None:
+                    base["vu"] = o["vu"]
+                else:
+                    t1, t2 = base["eq"]["total"] - o["eq"]["total"], o["eq"]["total"]
+                    if t1 + t2:
+                        base["vu"] = round((base["vu"] * t1 + o["vu"] * t2) / (t1 + t2), 1)
+        out.append(base)
+    return out
+
+
 def _st_region_nombre(nombre):
     k = " " + _plan_norm(nombre) + " "
     for ciudad, reg in _ST_CIUDAD_REGION:
@@ -2964,12 +3081,14 @@ def _plan_leer_comunas():
     for r in filas[cab_i + 1:]:
         if not r or i_cli is None or not r[i_cli]:
             continue
+        # «0» y «Sin Información» son relleno de una celda en blanco, no comunas.
+        relleno = {"", "0", "VACIO", "SIN INFORMACION", "NONE"}
         com = ""
         if i_cor is not None and i_cor < len(r):
             com = safe_str(r[i_cor]).strip()
-        if not com and i_det is not None and i_det < len(r):
+        if _norm_cli(com) in relleno and i_det is not None and i_det < len(r):
             com = safe_str(r[i_det]).strip()
-        if com:
+        if _norm_cli(com) not in relleno:
             out[_norm_cli(r[i_cli])] = com
     print(f"       Comunas revisadas a mano: {len(out)} clientes (desde {_PLAN_ARCHIVO_COMUNAS})")
     return out
@@ -3452,6 +3571,16 @@ def build_plan_rm(app_data, contratos, direcciones, mapa_data):
             cn = _plan_comuna_nombre(c["nombre"], reg, comunas_reg[reg])
             if cn:
                 comuna, comuna_src = cn, "Nombre del cliente"
+        # La comuna revisada a mano llega después de calcular la ubicación: si el
+        # cliente quedó «aproximado» en el centro de la región pero ya tiene
+        # comuna, se ubica en el centro de esa comuna y deja de estar por
+        # confirmar. Una celda puede traer dos comunas: vale la primera conocida.
+        if prec.startswith("Aproximada") and comuna:
+            for parte in re.split(r"[,/]| Y ", comuna.upper()):
+                ce = centros_com.get((reg, _plan_norm(parte)))
+                if ce:
+                    loc, prec = ce, "Centro de la comuna"
+                    break
         if reg == "Valparaíso":
             resp, resp_src = _PLAN_EJE_VALPO, "Región completa"
         else:
@@ -3478,7 +3607,18 @@ def build_plan_rm(app_data, contratos, direcciones, mapa_data):
             "f26": round(p.get("real_ytd_fac") if p.get("real_ytd_fac") is not None else (p.get("real_ytd") or 0)),
             "f25": round(p.get("real_anual_2025") or 0),
             "rel": p.get("estado_relacion") or ("Contrato vigente" if cc else "Sin historial"),
+            "_fac_key": p.get("cliente"),
         })
+
+    # BASE INSTALADA carga al mismo cliente con más de un nombre («Corporación»
+    # con y sin tilde, «Clínica Universidad Los Andes» y «…Andes»). La Cartera ST
+    # ya los junta; si acá siguen separados el plan visita dos veces el mismo
+    # lugar y cuenta dos clientes. Se juntan con la misma regla y dentro de la
+    # misma región, y también las que calzan con el mismo establecimiento del
+    # registro de camas; manda el de más equipos.
+    universo = _plan_unificar(universo)
+    for u in universo:
+        u.pop("_fac_key", None)
 
     # Dos cuentas de la base instalada que calzan con el mismo establecimiento
     # del registro son, en la práctica, la misma institución («Hospital de La
