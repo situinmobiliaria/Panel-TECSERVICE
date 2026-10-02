@@ -7574,6 +7574,15 @@ function _pcClave(s){
 let _pcAbierta = null;   // fila de la tabla con su lista de clientes desplegada
 function pcToggle(k){ _pcAbierta = (_pcAbierta === k) ? null : k; _pfRenderComposicion(); }
 
+// Cliente con un contrato que ya terminó sin renovarse (hoja de contratos
+// perdidos). Se usa para los que sólo existen en BASE MAPA y no traen su
+// historial de contratos.
+function _pcPerdidoVG(nombre){
+  const k = _mgNorm(nombre), cl = _pcClave(nombre);
+  return (typeof PERDIDOS_VG !== 'undefined' ? PERDIDOS_VG : []).some(c =>
+    _mgNorm(c.cliente) === k || _pcClave(c.cliente) === cl);
+}
+
 function _pcClientes(){
   const A = window.APP_DATA || {};
   const hoy = A.hoy || '';
@@ -7595,7 +7604,7 @@ function _pcClientes(){
       r25: Math.max(p.real_anual_2025 || 0, f ? f.t25 || 0 : 0), r24: p.real_anual_2024 || 0,
       f: f, p: p, vig: cs.filter(c => (c.fin || '') >= hoy),
       hist: cs.length > 0 || (p.contr_2025 || 0) > 0 || (p.contr_2024 || 0) > 0 || !!(f && ((f.c25 || 0) > 0 || (f.c26 || 0) > 0)) ||
-        p.estado_relacion === 'Renovado' || p.estado_relacion === 'Perdido' };
+        p.estado_relacion === 'Renovado' || p.estado_relacion === 'Perdido' || _pcPerdidoVG(p.cliente) };
     out.push(d);
     ks.forEach(k => { porNom[k] = d; });
     const cl = _pcClave(p.cliente);
@@ -7611,7 +7620,8 @@ function _pcClientes(){
     const k = norm(m.n);
     const d = porNom[k] || (PC_ALIAS[k] && porNom[norm(PC_ALIAS[k])]) || porClave[_pcClave(m.n)];
     if (d) { d.m25 = (d.m25 || 0) + v25; return; }
-    out.push({ n: m.n, tipo: m.tipo || '', real: m.ingreso_2026 || 0, r25: 0, m25: v25, r24: 0, f: null, p: null, vig: [], hist: false });
+    out.push({ n: m.n, tipo: m.tipo || '', real: m.ingreso_2026 || 0, r25: 0, m25: v25, r24: 0, f: null, p: null, vig: [],
+      hist: _pcPerdidoVG(m.n) });
   });
 
   out.forEach(d => {
@@ -7634,7 +7644,9 @@ function _pcClientes(){
     // por primera vez sin contrato, así que toda su facturación es otras facturaciones.
     if (d.vig.length) d.cat = d.vig.every(c => c.tipo === 'Garantia') ? 'gar' : 'act';
     else if (d.real > 0 && !antes) d.cat = 'nuevo';
-    else if (!d.real) d.cat = hubo25 ? 'perd' : null;
+    // Perdido: tuvo contrato, ya terminó y no ha facturado nada en 2026 en ninguna
+    // fuente (la hoja FACTURACION puede traer cobros que la base de ingresos no).
+    else if (!d.real) d.cat = (d.hist && !((p.real_ytd || 0) > 0) && !(d.f && (d.f.t26 || 0) > 0)) ? 'perd' : null;
     else d.cat = d.hist ? 'venc' : 'spots';
     // Parte de contrato: el presupuesto de contratos a la fecha, la misma cifra
     // con que «Facturación a la Fecha» arma su F. Contratos (y la misma de la
@@ -7697,7 +7709,7 @@ function _pfRenderComposicion(){
   const marca = t => t === 'c' ? '<span style="font-size:.5rem;font-weight:700;color:var(--teal);border:1px solid var(--teal);' +
       'border-radius:3px;padding:0 .25rem;margin-left:.35rem">CONTRATO</span>'
     : t === 's' ? '<span style="font-size:.5rem;font-weight:700;color:var(--or);border:1px solid var(--or);' +
-      'border-radius:3px;padding:0 .25rem;margin-left:.35rem">OTRAS FACTURACIONES</span>' : '';
+      'border-radius:3px;padding:0 .25rem;margin-left:.35rem">MANTENCIONES CORRECTIVAS Y OTRAS FACTURACIONES</span>' : '';
   const fila = r => {
     const [k, lbl, n, f26, f25, niv, lista, tipo] = r;
     const perd = k === 'perd', abierta = _pcAbierta === k;
@@ -7735,7 +7747,7 @@ function _pfRenderComposicion(){
     F.map(fila).join('') +
     '<tr><td colspan="5" style="height:.4rem;border-top:1px solid var(--txt)"></td></tr>' +
     resumen('Total Contratos', totC, totC25, 'var(--teal)') +
-    resumen('Total Otras Facturaciones', totS, totS25, 'var(--or)') +
+    resumen('Total Mantenciones Correctivas y Otras Facturaciones', totS, totS25, 'var(--or)') +
     '<tr style="background:var(--az3);color:#fff;font-weight:800">' +
       '<td style="padding:.34rem .6rem;font-size:.66rem;' + SEP + '">TOTAL</td>' +
       num(L.length, 'color:#fff;') + num(fmtMM(tot26), 'color:#FFC000;') + num('100%', 'color:#fff;') +
@@ -7750,8 +7762,8 @@ function _pfRenderComposicion(){
     'son todos de garantía. Un mismo cliente con contrato aparece en Contratos activos y en su fila de otras facturaciones. ' +
     '<strong>Contratos vencidos</strong>: la parte de contrato de los que tuvieron contrato y hoy no tienen uno vigente. ' +
     'Las otras facturaciones de un cliente salen negativas cuando lo devengado de su contrato supera lo que facturó; el # de esas ' +
-    'filas cuenta sólo a los que tienen otras facturaciones positivas. <strong>Perdidos</strong>: facturaron en ' + (ANO_ACTUAL - 1) +
-    ' y nada en ' + ANO_ACTUAL + '; su columna ' + (ANO_ACTUAL - 1) + ' es la facturación anual perdida. <strong>Nuevos</strong>: ' +
+    'filas cuenta sólo a los que tienen otras facturaciones positivas. <strong>Perdidos</strong>: clientes que tuvieron contrato, cuyo plazo terminó sin renovarse y que no han facturado nada en ' +
+    ANO_ACTUAL + '; su columna ' + (ANO_ACTUAL - 1) + ' es la facturación anual perdida. <strong>Nuevos</strong>: ' +
     'facturan por primera vez en ' + ANO_ACTUAL + ', sin contrato (los que ya firmaron uno están en Con contrato). La facturación ' +
     (ANO_ACTUAL - 1) + ' es de BASE MAPA (año completo), que suma lo mismo que el año completo de la BBDD. Respeta el filtro de ' +
     'tipo de cliente. Clic en una fila para ver sus clientes.</p>';
