@@ -613,8 +613,22 @@ def read_bbdd(xlsx_path):
 # 4. HOJA: VISITAS
 #    0=Asignado  2=Fecha  3=Cliente  6=TipoActividad  8=Conteo  9=Mes  10=Año
 # ══════════════════════════════════════════════════════════════════════════════
+def _fecha_visita(v):
+    """Fecha de una fila de VISITAS (datetime, date o número de serie de Excel)."""
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    if isinstance(v, (int, float)) and v > 30000:
+        return date(1899, 12, 30) + timedelta(days=int(v))
+    return None
+
+
 def read_visitas(wb, mes_corte):
     ws = wb["VISITAS"]
+    # Visitas con fecha posterior a la de esta corrida: están agendadas, no hechas.
+    # No entran en ningún conteo; van aparte, a la tarjeta «Visitas Programadas».
+    programadas = []
 
     mensual        = {e: {str(ANO - 1): [0] * 12, str(ANO): [0] * 12} for e in EJECUTIVOS_VISITAS}
     tipo_acts      = {e: defaultdict(int) for e in EJECUTIVOS_VISITAS}
@@ -638,6 +652,12 @@ def read_visitas(wb, mes_corte):
         conteo   = to_int(row[8], 1)
         mes      = to_int(row[9], 0)
         ano      = to_int(row[10], 0)
+
+        fecha = _fecha_visita(row[2])
+        if fecha and fecha > TODAY and cliente:
+            programadas.append({"e": asignado, "f": fecha.isoformat(), "c": cliente, "t": tipo_act,
+                                "a": safe_str(row[1]), "k": safe_str(row[4])})
+            continue
 
         if not (1 <= mes <= 12) or not ano:
             continue
@@ -710,6 +730,7 @@ def read_visitas(wb, mes_corte):
         "top":         top,
         "cli_mensual": cli_mensual_out,
         "det":         {"ejecutivos": ejes_l, "clientes": clis_l, "tipos": tipos_l, "filas": filas_det},
+        "programadas": sorted(programadas, key=lambda p: (p["f"], p["e"], p["c"])),
     }
 
 
@@ -1462,6 +1483,21 @@ def read_base_instalada(wb, contratos=None):
     # clientes con facturación (182 de 1.501).
     reg_map        = {}
     reg_map_todos  = {}   # el mismo resumen, incluyendo a los clientes con contrato
+    # Salvo en los clientes que la traen vacía: ésos toman la región revisada a
+    # mano en _BI_ARCHIVO_REGIONES, si la tienen.
+    reg_manual     = _bi_leer_regiones()
+    cli_reg_manual = set()
+    # Un cliente con algunos equipos sin región (CESFAM Colbún: 6 en Maule y 3
+    # en blanco) los suma a la región del resto de sus equipos, la misma que
+    # se le asigna como cliente; si no, el resumen por región no calza con él.
+    reg_cli_bi = defaultdict(lambda: defaultdict(int))
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if safe_str(row[0]).upper() != "SI" or safe_str(row[1]).upper() == "SI":
+            continue
+        r_ = _norm_region(row[29] if len(row) > 29 else None)
+        if _norm_cli(r_) not in ("SIN REGION", "REGION NO IDENTIFICADA"):
+            reg_cli_bi[_bi_nombre_cliente(row)][r_] += 1
+    reg_cli_bi = {n: max(rs, key=lambda r: rs[r]) for n, rs in reg_cli_bi.items()}
 
     total = 0
     for row in ws.iter_rows(min_row=2, values_only=True):
@@ -1487,6 +1523,13 @@ def read_base_instalada(wb, contratos=None):
 
         # col[29] = Región (col AD)
         region = _norm_region(row[29] if len(row) > 29 else None)
+        if _norm_cli(region) in ("SIN REGION", "REGION NO IDENTIFICADA"):
+            if nombre_analisis != "VACIO" and nombre_analisis in reg_cli_bi:
+                region = reg_cli_bi[nombre_analisis]
+            else:
+                region = reg_manual.get(_norm_cli(nombre_analisis), "Sin región")
+                if region != "Sin región":
+                    cli_reg_manual.add(nombre_analisis)
         if "GEMCO" not in nombre_analisis:
             # Dos acumuladores: el de la hoja (sin los clientes con contrato
             # vigente) y el de la vista completa, que el botón de la tabla
@@ -1613,6 +1656,7 @@ def read_base_instalada(wb, contratos=None):
             "otros_si":          otros_si,
             "otros_no":          otros_no,
             "region":            region_cli,
+            "region_manual":     any(n in cli_reg_manual for n in [nombre] + alias_bi.get(nombre, [])),
             "estado":            estado_cli,
             "con_contrato":      estado_cli in ("Contrato", "Garantia"),
             "cv":                any(con_contrato_vigente(n) for n in [nombre] + alias_bi.get(nombre, [])),
@@ -1698,6 +1742,43 @@ def _norm_region(s):
     if k in _BI_REGION_ALIAS:
         return _BI_REGION_ALIAS[k]
     return t
+
+
+# Planilla con la región revisada a mano de los clientes que BASE INSTALADA trae
+# sin región (la genera src/gen_bi_sin_region.py). Es opcional: si no está, esos
+# clientes siguen «Sin región». Manda la columna «Región»; la sugerida no se usa.
+_BI_ARCHIVO_REGIONES = "BI_clientes_sin_region.xlsx"
+
+
+def _bi_leer_regiones():
+    """{cliente normalizado: región} desde _BI_ARCHIVO_REGIONES."""
+    ruta = os.path.join(ROOT, _BI_ARCHIVO_REGIONES)
+    if not os.path.exists(ruta):
+        return {}
+    try:
+        wb = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
+    except Exception as exc:
+        print(f"       ADVERTENCIA: no se pudo leer {_BI_ARCHIVO_REGIONES}: {exc}")
+        return {}
+    filas = list(wb[wb.sheetnames[0]].iter_rows(values_only=True))
+    wb.close()
+    if not filas:
+        return {}
+    cab = [_norm_cli(v) for v in filas[0]]
+    i_cli = cab.index("CLIENTE") if "CLIENTE" in cab else None
+    i_reg = cab.index("REGION") if "REGION" in cab else None
+    if i_cli is None or i_reg is None:
+        print(f"       ADVERTENCIA: {_BI_ARCHIVO_REGIONES} sin columnas «Cliente» y «Región».")
+        return {}
+    out = {}
+    for r in filas[1:]:
+        if not r or len(r) <= max(i_cli, i_reg) or not r[i_cli]:
+            continue
+        reg = _norm_region(r[i_reg])
+        if _norm_cli(reg) not in {"SIN REGION", "REGION NO IDENTIFICADA"}:
+            out[_norm_cli(r[i_cli])] = reg
+    print(f"       Regiones revisadas a mano: {len(out)} clientes (desde {_BI_ARCHIVO_REGIONES})")
+    return out
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -3810,7 +3891,8 @@ def build_cartera_st(app_data, contratos, direcciones, mapa_data):
     for c in clientes:
         k = _norm_cli(c["nombre"])
         reg = c.get("region") or "Sin región"
-        reg_src = "Base instalada" if reg != "Sin región" else ""
+        reg_src = ("" if reg == "Sin región" else
+                   "Revisada a mano" if c.get("region_manual") else "Base instalada")
         if reg == "Sin región":
             # BASE INSTALADA deja 115 clientes sin región y sin ella no hay
             # cartera a la que asignarlos: se busca en el mapa de clientes, en
@@ -3891,6 +3973,7 @@ def build_cartera_st(app_data, contratos, direcciones, mapa_data):
             "lat": round(lat, 5) if lat is not None else None,
             "lon": round(lon, 5) if lon is not None else None,
             "prec": prec,
+            "dir": (u or {}).get("dir") or (direcciones.get(k) or {}).get("dir") or "",
             "eq": {l: c.get(l + "_si") or 0 for l in LINEAS},
             "tot": c.get("total_si") or 0, "tot_bi": c.get("total") or 0,
             "vu": round(vv[1] / vv[0], 1) if vv and vv[0] else None,

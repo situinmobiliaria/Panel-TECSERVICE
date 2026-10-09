@@ -458,9 +458,38 @@ window.exportarPanel = async function (o) {
     enc.appendChild(t2);
     wrap.appendChild(enc);
 
+    // Un mapa de Leaflet no sobrevive al clon: se arma con mosaicos y
+    // marcadores posicionados en absoluto, y el clon los aplana (más abajo
+    // todo pasa a position:static). Se fotografía el mapa real antes de
+    // clonar y en el clon se pone la foto en su lugar, como con los canvas.
+    const fotosMapa = [];
+    for (const b of bloques) {
+      const fotos = [];
+      for (const m of b.querySelectorAll('.leaflet-container')) {
+        try {
+          const c = await html2canvas(m, {
+            useCORS: true, logging: false, backgroundColor: '#ffffff', scale: 2,
+            ignoreElements: el => el.classList && el.classList.contains('leaflet-control-zoom'),
+          });
+          fotos.push(c.toDataURL('image/png'));
+        } catch (e) { fotos.push(null); }
+      }
+      fotosMapa.push(fotos);
+    }
+
     const clones = [];
     bloques.forEach((b, i) => {
       const cl = b.cloneNode(true);
+      const mO = b.querySelectorAll('.leaflet-container');
+      cl.querySelectorAll('.leaflet-container').forEach((m, k) => {
+        const src = fotosMapa[i][k];
+        if (!src || !mO[k]) return;
+        const im = document.createElement('img');
+        im.src = src;
+        im.style.cssText = 'display:block;width:' + mO[k].offsetWidth + 'px;height:' +
+          mO[k].offsetHeight + 'px;border-radius:8px';
+        m.parentNode.replaceChild(im, m);
+      });
       // Dos cosas hay que neutralizar en el clon, y sólo dos:
       //  · el recorte y el scroll de los contenedores de pantalla, o el
       //    exportable sale cortado a la altura del viewport;

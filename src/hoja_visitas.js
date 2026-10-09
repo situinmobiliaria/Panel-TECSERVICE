@@ -736,7 +736,10 @@ function vxFit() {
   const pts = A.cli.filter(d => d.c.lat != null);
   if (VX.map && pts.length) { try { VX.map.fitBounds(L.latLngBounds(pts.map(d => [d.c.lat, d.c.lon])).pad(.15)); } catch (e) {} }
 }
-window._visMapRefresh = function () { if (VX.map) VX.map.invalidateSize(); };
+window._visMapRefresh = function () {
+  if (VX.map) VX.map.invalidateSize();
+  if (VP_MAP) { VP_MAP.invalidateSize(); vpProgramadas(); }   // se recentra ya con la hoja visible
+};
 
 // ── Tabla de clientes, enlazada con el mapa ──
 function vxTablaCli(A) {
@@ -1100,6 +1103,7 @@ function vxRender(recentrar) {
 }
 
 function vxInit() {
+  vpProgramadas();   // la tarjeta de arriba no depende de los filtros ni del plan
   if (!((APP_DATA.visitas || {}).det || {}).filas) return;
   vxRender(true);
   vpRender();
@@ -1321,6 +1325,322 @@ function vpKpis(A) {
         (cumple / venc.length * 100).toFixed(0) + '%). VISITAS viene por mes, así que se mide por mes y no por día.';
     }
   }
+}
+
+// ── Visitas programadas: las de la hoja VISITAS con fecha futura, a 15 días desde hoy ──
+// El extractor separa de los conteos las filas de VISITAS con fecha posterior a su
+// corrida y las deja en APP_DATA.visitas.programadas. Región, comuna, potencial y
+// grupo se buscan por el nombre del cliente: primero en el plan RM/Valparaíso y,
+// si no está, en Base Instalada y Mapa Clientes.
+let VP_PROG_ORD = { col: null, asc: true };   // sin columna: el orden de la hoja
+function vpProgOrden(col) {
+  // Fecha parte ascendente y Potencial ST descendente; un segundo clic invierte.
+  if (VP_PROG_ORD.col === col) VP_PROG_ORD.asc = !VP_PROG_ORD.asc;
+  else VP_PROG_ORD = { col: col, asc: col !== 'pot' };
+  vpProgramadas();
+}
+const VP_TARIFA_BI = { esterilizacion: 2043239, endoscopia: 898585, dental: 612671 };   // = _BI_TARIFA
+let VP_PROG_IDX = null;
+// Comunas que no están en el plan ni en Mapa Clientes y se buscaron en internet (clave: nombre normalizado).
+// Superintendencia de Salud, registro de prestadores: Clínica Vespucio, Serafín Zamora 190.
+const VP_COMUNA_WEB = {
+  'CLINICA VESPUCIO SPA': 'La Florida',
+};
+
+function vpProgDatosCliente(nombre) {
+  if (!VP_PROG_IDX) {
+    const P = vpPlan();
+    VP_PROG_IDX = {
+      plan: vxIndice(P ? P.clientes : [], u => u.n),
+      excl: vxIndice(P ? (P.excluidos || []) : [], e => e.n),   // clientes con contrato Activado, fuera del plan
+      bi: vxIndice(((APP_DATA.base_instalada || {}).clientes) || [], c => c.nombre),
+      mapa: vxIndice(window.MAPA_DATA || [], m => m.n),
+    };
+  }
+  const ix = VP_PROG_IDX;
+  const alias = VP_ALIAS[vxNorm(nombre)];
+  const u = vxBuscar(ix.plan, nombre) || (alias ? vxBuscar(ix.plan, alias) : null);
+  const b = vxBuscar(ix.bi, nombre), m = vxBuscar(ix.mapa, nombre);
+  const ex = u ? null : (vxBuscar(ix.excl, nombre) || (alias ? vxBuscar(ix.excl, alias) : null));
+  const contrato = !u && !!(ex || (b && b.cv));
+  let region = '', com = '', pot = null, g = null;
+  if (u) { region = u.r; com = u.com || ''; pot = u.pot || 0; g = u.g; }
+  if (!region && ex && ex.r) region = ex.r;
+  if (!u && b) {
+    pot = b.cv ? 0 : Object.keys(VP_TARIFA_BI).reduce((t, k) => t + (b[k] || 0) * VP_TARIFA_BI[k], 0);
+  }
+  if (!region && m && m.region && m.region !== 'Sin región') region = m.region;
+  if (!region && b && b.region && b.region !== 'Sin región') region = b.region;
+  if (!region) region = vxRegionPorNombre(nombre) || '';
+  // Comuna: plan > Mapa Clientes > búsqueda en internet.
+  if (!com && m && m.comuna) com = m.comuna;
+  if (!com) com = VP_COMUNA_WEB[vxNorm(nombre)] || '';
+  if (contrato) pot = 0;
+  return { region: region ? vxRegNom(region) : 'Sin región', com: com, pot: pot, g: g, contrato: contrato };
+}
+
+// ── Ubicación de cada visita programada ──
+// Orden: plan RM/Valparaíso > Cartera ST (coordenadas por dirección o establecimiento) > Mapa Clientes >
+// centro de la comuna (promedio de los clientes con ubicación en esa comuna) > centro de la región.
+const VP_UBIC_PRECISA = { 'Dirección del cliente': 1, 'Establecimiento DEIS': 1, 'Base Mapa': 1, 'Mapa Clientes': 1 };
+function vpProgGeo(nombre, d) {
+  const ix = VP_PROG_IDX;
+  if (!ix.car) {
+    ix.car = vxIndice(((APP_DATA.cartera_st || {}).clientes) || [], c => c.n);
+    const acc = {};
+    const suma = (com, lat, lon, prec) => {
+      if (!com || lat == null || prec === 'Aproximada (centro de la región)') return;
+      const k = vxNorm(com), a = acc[k] || (acc[k] = { la: 0, lo: 0, n: 0 });
+      a.la += lat; a.lo += lon; a.n++;
+    };
+    (((APP_DATA.cartera_st || {}).clientes) || []).forEach(c => suma(c.com, c.lat, c.lon, c.prec));
+    ((vpPlan() || {}).clientes || []).forEach(c => suma(c.com, c.lat, c.lon, c.prec));
+    ix.com = {};
+    Object.keys(acc).forEach(k => { ix.com[k] = { lat: acc[k].la / acc[k].n, lon: acc[k].lo / acc[k].n }; });
+  }
+  const alias = VP_ALIAS[vxNorm(nombre)];
+  const u = vxBuscar(ix.plan, nombre) || (alias ? vxBuscar(ix.plan, alias) : null);
+  const c = vxBuscar(ix.car, nombre) || (alias ? vxBuscar(ix.car, alias) : null);
+  const m = vxBuscar(ix.mapa, nombre);
+  const de = o => ({ lat: o.lat, lon: o.lon, prec: o.prec || '', dir: o.dir || '' });
+  let g = null;
+  if (u && u.lat != null) g = de(u);
+  if (!g && c && c.lat != null) g = de(c);
+  if (g && !g.dir && c && c.dir) g.dir = c.dir;
+  if (!g && m && m.lat != null) g = { lat: m.lat, lon: m.lon, prec: 'Mapa Clientes', dir: '' };
+  if (g && g.prec === 'Aproximada (centro de la región)') g = null;     // peor que el centro de la comuna, si se conoce
+  if (!g && d.com && ix.com[vxNorm(d.com)]) g = { lat: ix.com[vxNorm(d.com)].lat, lon: ix.com[vxNorm(d.com)].lon, prec: 'Centro de la comuna', dir: '' };
+  if (!g && typeof _BI_GEO !== 'undefined' && _BI_GEO[d.region]) g = { lat: _BI_GEO[d.region].lat, lon: _BI_GEO[d.region].lon, prec: 'Centro de la región', dir: '' };
+  if (g) g.aprox = !VP_UBIC_PRECISA[g.prec];
+  return g;
+}
+
+// ── Estado de los filtros de la tarjeta ──
+const VP_PF = { eje: 'todas', fecha: 'todos', sem: 'todo' };    // responsable y día elegido en el mapa
+let VP_MAP = null, VP_CLUS = null, VP_CHART = null, VP_MARCAS = [];
+
+// Ventana móvil: de hoy a hoy + 15 días. La usan la tabla, el gráfico y el mapa. El selector de
+// semana la recorta a la semana actual (hoy hasta el domingo) o a la próxima (lunes a domingo).
+function vpProgVentana() {
+  const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
+  const fin = new Date(hoy); fin.setDate(fin.getDate() + 15);
+  const lun = new Date(hoy); lun.setDate(lun.getDate() - ((lun.getDay() + 6) % 7));     // lunes de esta semana
+  const sem = (n) => { const a = new Date(lun), b = new Date(lun); a.setDate(a.getDate() + 7 * n); b.setDate(b.getDate() + 7 * n + 6); return [iso(a), iso(b)]; };
+  let r0 = iso(hoy), r1 = iso(fin);
+  if (VP_PF.sem === 'actual') r1 = sem(0)[1] < r1 ? sem(0)[1] : r1;
+  if (VP_PF.sem === 'prox') { r0 = sem(1)[0]; r1 = sem(1)[1] < r1 ? sem(1)[1] : r1; }
+  const fechas = [];
+  for (let d = new Date(hoy); d <= fin; d.setDate(d.getDate() + 1)) { const f = iso(d); if (f >= r0 && f <= r1) fechas.push(f); }
+  return { d0: r0, d1: r1, fechas: fechas, base0: iso(hoy), base1: iso(fin) };
+}
+function vpProgSem(k) { VP_PF.sem = k; VP_PF.fecha = 'todos'; vpProgramadas(); }
+// Única fuente de la tarjeta: las visitas de la ventana, con el filtro de responsable.
+function vpProgLista() {
+  const PR = (APP_DATA.visitas || {}).programadas || [], W = vpProgVentana();
+  return PR.filter(v => v.f >= W.d0 && v.f <= W.d1 && (VP_PF.eje === 'todas' || v.e === VP_PF.eje))
+    .map(v => ({ v: v, d: vpProgDatosCliente(v.c) }));
+}
+function vpProgEje(e) { VP_PF.eje = e; vpProgramadas(); }
+function vpProgFecha(f) {
+  VP_PF.fecha = (!f || f === 'todos' || f === VP_PF.fecha) ? 'todos' : f;
+  vpProgramadas();
+}
+const vpFmtF = s => s.split('-').reverse().join('/');
+const vpDiaCorto = s => { const d = new Date(s + 'T12:00:00'); return d.toLocaleDateString('es-CL', { weekday: 'short' }).replace('.', '') + ' ' + s.slice(8) + '/' + s.slice(5, 7); };
+const vpDiaLargo = s => { const d = new Date(s + 'T12:00:00'); return d.toLocaleDateString('es-CL', { weekday: 'long' }) + ' ' + vpFmtF(s); };
+
+// ── Gráfico: visitas por día y responsable ──
+function vpProgGrafico(lst, W) {
+  const cv = document.getElementById('vp-prog-chart');
+  if (!cv || !window.Chart) return;
+  const ejes = Object.keys(VX.NOM).filter(e => VP_PF.eje === 'todas' || e === VP_PF.eje);
+  const sel = VP_PF.fecha;
+  const ds = ejes.map(e => ({
+    label: VX.NOM[e], data: W.fechas.map(f => lst.filter(x => x.v.e === e && x.v.f === f).length),
+    backgroundColor: VX.COL[e], borderRadius: 3,
+    borderColor: W.fechas.map(f => f === sel ? '#FFC000' : VX.COL[e]),     // el día elegido en el mapa lleva borde dorado
+    borderWidth: W.fechas.map(f => f === sel ? 3 : 0),
+  }));
+  if (VP_CHART) { VP_CHART.destroy(); VP_CHART = null; }
+  VP_CHART = new Chart(cv.getContext('2d'), {
+    type: 'bar',
+    data: { labels: W.fechas.map(vpDiaCorto), datasets: ds },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: true },
+      categoryPercentage: .7, barPercentage: .7,
+      // Un clic en cualquier parte de la columna del día (aunque esa barra sea 0) elige ese día.
+      onClick: (ev, els, ch) => {
+        const col = ch.getElementsAtEventForMode(ev, 'index', { intersect: false }, true);
+        if (col.length) vpProgFecha(W.fechas[col[0].index]);
+      },
+      onHover: (ev, els) => { ev.native.target.style.cursor = 'pointer'; },
+      plugins: {
+        legend: { position: 'top', align: 'end', labels: { boxWidth: 12, font: { size: 10 } } },
+        tooltip: { callbacks: {
+          title: c => vpDiaLargo(W.fechas[c[0].dataIndex]),
+          label: c => c.dataset.label + ': ' + c.raw + (c.raw === 1 ? ' visita' : ' visitas'),
+          footer: c => {
+            const t = c.reduce((s, x) => s + x.raw, 0);
+            return c.length > 1 ? 'Total: ' + t + (t === 1 ? ' visita' : ' visitas') : '';
+          },
+        } },
+      },
+      // Barras apiladas: cada día es una sola columna con las visitas de los dos ejecutivos.
+      scales: {
+        x: { stacked: true, grid: { color: '#E2E6F0' }, ticks: { font: { size: 9 }, maxRotation: 60, minRotation: 0 } },
+        y: { stacked: true, beginAtZero: true, suggestedMax: 3, grid: { color: '#E2E6F0' }, ticks: { precision: 0, stepSize: 1, font: { size: 9 } },
+             title: { display: true, text: 'Visitas programadas', font: { size: 9 }, color: '#6B7BA8' } },
+      },
+    },
+  });
+}
+
+// ── Mapa: un pin por visita, con agrupación al alejar y despliegue al acercar ──
+function vpPin(col) {
+  return L.divIcon({
+    className: 'vp-pin', iconSize: [26, 34], iconAnchor: [13, 33], popupAnchor: [0, -30],
+    html: '<svg width="26" height="34" viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg"><path d="M13 1C6.4 1 1.5 6 1.5 12.4 1.5 21 13 33 13 33S24.5 21 24.5 12.4C24.5 6 19.6 1 13 1z" ' +
+      'fill="' + col + '" stroke="#fff" stroke-width="2"/><circle cx="13" cy="12.5" r="4.5" fill="#fff"/></svg>',
+  });
+}
+function vpProgMapa(lst) {
+  const cont = document.getElementById('vp-prog-mapa');
+  if (!cont || !window.L) return;
+  if (!VP_MAP) {
+    VP_MAP = L.map('vp-prog-mapa', { zoomControl: true, scrollWheelZoom: false }).setView([-33.9, -71.0], 8);
+    if (window.mapaTiles) mapaTiles(VP_MAP);
+    VP_CLUS = L.markerClusterGroup ? L.markerClusterGroup({ showCoverageOnHover: false, spiderfyOnMaxZoom: true, maxClusterRadius: 38 })
+                                   : L.layerGroup();
+    VP_CLUS.addTo(VP_MAP);
+  }
+  VP_CLUS.clearLayers();
+  VP_MARCAS = [];
+  let sinUbic = 0;
+  const nom = e => VX.NOM[e] || e;
+  lst.forEach(x => {
+    const g = vpProgGeo(x.v.c, x.d);
+    if (!g) { sinUbic++; return; }
+    const html = '<div style="font-size:.7rem;line-height:1.55;min-width:210px">' +
+      '<div style="font-weight:700;color:#002D73;margin-bottom:.2rem">' + vxEsc(x.v.c) + '</div>' +
+      '<div><strong>Fecha:</strong> ' + vpDiaLargo(x.v.f) + '</div>' +
+      '<div><strong>Responsable:</strong> <span style="color:' + (VX.COL[x.v.e] || 'inherit') + ';font-weight:600">' + vxEsc(nom(x.v.e)) + '</span></div>' +
+      '<div><strong>Comuna:</strong> ' + vxEsc(x.d.com || '—') + '</div>' +
+      '<div><strong>Región:</strong> ' + vxEsc(x.d.region) + '</div>' +
+      (g.dir ? '<div><strong>Dirección:</strong> ' + vxEsc(g.dir) + '</div>' : '') +
+      (x.v.t ? '<div><strong>Actividad:</strong> ' + vxEsc(x.v.t) + '</div>' : '') +
+      (g.aprox ? '<div style="color:var(--mut);font-size:.6rem;margin-top:.2rem">Ubicación aproximada (' + vxEsc(g.prec.toLowerCase()) + ')</div>' : '') +
+      '</div>';
+    const mk = L.marker([g.lat, g.lon], { icon: vpPin(VX.COL[x.v.e] || '#003F7F'), title: x.v.c }).bindPopup(html);
+    mk._vpF = x.v.f;
+    VP_MARCAS.push(mk);
+    if (VP_PF.fecha === 'todos' || VP_PF.fecha === x.v.f) VP_CLUS.addLayer(mk);
+  });
+  const nota = document.getElementById('vp-prog-mapa-nota');
+  const vis = VP_MARCAS.filter(m => VP_PF.fecha === 'todos' || m._vpF === VP_PF.fecha).length;
+  if (nota) nota.innerHTML = '<strong>' + vis + '</strong> ' + (vis === 1 ? 'visita' : 'visitas') + ' en el mapa' +
+    (VP_PF.fecha === 'todos' ? '' : ' · ' + vpDiaLargo(VP_PF.fecha)) +
+    (sinUbic ? ' · <span style="color:var(--rd)">' + sinUbic + ' sin ubicación conocida</span>' : '');
+  const vistos = VP_MARCAS.filter(m => VP_PF.fecha === 'todos' || m._vpF === VP_PF.fecha);
+  if (vistos.length) {
+    try { VP_MAP.fitBounds(L.latLngBounds(vistos.map(m => m.getLatLng())).pad(.2), { maxZoom: 13 }); } catch (e) {}
+  }
+  setTimeout(() => { if (VP_MAP) VP_MAP.invalidateSize(); }, 60);
+}
+
+// Revisión: por día, filas de la tabla = puntos del gráfico = pins del mapa.
+window.vpProgValida = function () {
+  const W = vpProgVentana(), out = [];
+  const guarda = VP_PF.fecha;
+  VP_PF.fecha = 'todos'; vpProgramadas();
+  W.fechas.forEach(f => {
+    const tabla = document.querySelectorAll('#vp-prog-tabla tbody tr[data-f="' + f + '"]').length;
+    const idx = W.fechas.indexOf(f);
+    const graf = VP_CHART ? VP_CHART.data.datasets.reduce((s, d) => s + d.data[idx], 0) : null;
+    const mapa = VP_MARCAS.filter(m => m._vpF === f).length;
+    out.push({ f: f, tabla: tabla, grafico: graf, mapa: mapa, ok: tabla === graf && graf === mapa });
+  });
+  VP_PF.fecha = guarda; vpProgramadas();
+  return out;
+};
+
+function vpProgramadas() {
+  const tab = document.getElementById('vp-prog-tabla');
+  if (!tab) return;
+  const W = vpProgVentana(), d0 = W.d0, d1 = W.d1, fmt = vpFmtF;
+  const PR = (APP_DATA.visitas || {}).programadas || [];
+  const lst = vpProgLista();
+
+  const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+  const porHoja = (x, y) => cmp(x.v.f, y.v.f) || cmp(x.v.e, y.v.e) || cmp(x.v.c, y.v.c);
+  const sg = VP_PROG_ORD.asc ? 1 : -1;
+  const ORD = {
+    fecha: (x, y) => sg * cmp(x.v.f, y.v.f) || porHoja(x, y),
+    pot: (x, y) => sg * ((x.d.pot || 0) - (y.d.pot || 0)) || porHoja(x, y),
+  };
+  lst.sort(ORD[VP_PROG_ORD.col] || ((x, y) => cmp(x.d.region, y.d.region) || porHoja(x, y)));
+
+  vpBotones('vp-prog-sem', [{ k: 'todo', t: 'Próximos 15 días' }, { k: 'actual', t: 'Semana actual' }, { k: 'prox', t: 'Próxima semana' }], VP_PF.sem, 'vpProgSem');
+  // Filtro de responsable (afecta tabla, gráfico y mapa)
+  vpBotones('vp-prog-eje', [{ k: 'todas', t: 'Todas' }].concat(Object.keys(VX.NOM).map(e =>
+    ({ k: e, t: VX.NOM[e].split(' ')[0], col: VX.COL[e] }))), VP_PF.eje, 'vpProgEje');
+
+  const lbl = document.getElementById('vp-prog-lbl'), res = document.getElementById('vp-prog-res');
+  if (lbl) lbl.innerHTML = fmt(d0) + ' al ' + fmt(d1) + ' · <strong>' + lst.length + '</strong> visitas · potencial ST <strong>' +
+    vxMM(lst.reduce((t, x) => t + (x.d.pot || 0), 0)) + '</strong>';
+
+  // Selector de día del mapa: todos los días de la ventana, con su cantidad de visitas
+  const sel = document.getElementById('vp-prog-fecha');
+  if (sel) {
+    sel.innerHTML = '<option value="todos">Todos los días (' + lst.length + ')</option>' + W.fechas.map(f =>
+      '<option value="' + f + '">' + vpDiaCorto(f) + ' (' + lst.filter(x => x.v.f === f).length + ')</option>').join('');
+    sel.value = VP_PF.fecha;
+  }
+  const viz = document.getElementById('vp-prog-viz');
+  if (viz) viz.style.display = PR.some(v => v.f >= W.base0 && v.f <= W.base1) ? '' : 'none';
+
+  if (!lst.length) {
+    if (res) res.innerHTML = '';
+    tab.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--mut);font-size:.65rem;line-height:1.6">No hay visitas programadas entre ' +
+      fmt(d0) + ' y ' + fmt(d1) + (VP_PF.eje === 'todas' ? '' : ' para ' + VX.NOM[VP_PF.eje]) + '.<br>Se leen de la hoja VISITAS: filas con <strong>fecha posterior a la del último procesamiento</strong>' +
+      (PR.length ? ' (hay ' + PR.length + ' más adelante, entre ' + fmt(PR[0].f) + ' y ' + fmt(PR[PR.length - 1].f) + ')' : '') + '.</div>';
+    vpProgGrafico(lst, W); vpProgMapa(lst);
+    return;
+  }
+  const ejes = Array.from(new Set(lst.map(x => x.v.e))), regs = Array.from(new Set(lst.map(x => x.d.region)));
+  const nom = e => VX.NOM[e] || e;
+  const cnt = (r, e) => lst.filter(x => (r == null || x.d.region === r) && (e == null || x.v.e === e)).length;
+  const chip = (t, n, col) => '<span style="display:inline-block;margin:0 .3rem .25rem 0;padding:.2rem .55rem;border-radius:12px;font-size:.6rem;' +
+    'background:var(--bg2);border-left:3px solid ' + (col || 'var(--az2)') + '">' + vxEsc(t) + ' <strong>' + n + '</strong></span>';
+  if (res) res.innerHTML = regs.map(r => chip(r, cnt(r, null), '#003F7F')).join('') + '<br>' +
+    regs.map(r => ejes.map(e => cnt(r, e) ? chip((r === 'Metropolitana' ? 'RM' : r) + ' · ' + nom(e).split(' ')[0], cnt(r, e), VX.COL[e]) : '').join('')).join('');
+  const th = (t, al, col) => {
+    const act = col && VP_PROG_ORD.col === col;
+    const flecha = col ? ' <span style="font-size:.5rem;opacity:' + (act ? 1 : .55) + '">' + (act ? (VP_PROG_ORD.asc ? '▲' : '▼') : '⇅') + '</span>' : '';
+    return '<th style="position:sticky;top:0;background:var(--az1);color:#fff;padding:.3rem .45rem;font-size:.54rem;text-align:' +
+      (al || 'left') + ';white-space:nowrap' + (col ? ';cursor:pointer;user-select:none' : '') + '"' +
+      (col ? ' onclick="vpProgOrden(&quot;' + col + '&quot;)" title="Ordenar por ' + t.toLowerCase() + '"' : '') + '>' + t + flecha + '</th>';
+  };
+  const td = (v, ex) => '<td style="padding:.24rem .45rem;font-size:.6rem;border-bottom:1px solid var(--brd);' + (ex || '') + '">' + v + '</td>';
+  const CONTR = '<span style="color:var(--teal);font-weight:700;font-size:.55rem">CLIENTE CON CONTRATO</span>';
+  let h = '<table style="width:100%;border-collapse:collapse"><thead><tr>' + th('Cliente') + th('Ejecutivo') + th('Región') +
+    th('Comuna') + th('Fecha', 'left', 'fecha') + th('Actividad') + th('Grupo', 'center') + th('Potencial ST', 'right', 'pot') + '</tr></thead><tbody>';
+  lst.forEach(x => {
+    const g = x.d.g, activa = VP_PF.fecha === x.v.f;
+    // Clic en una fila: el mapa muestra sólo las visitas de ese día (otro clic en el mismo día vuelve a todos).
+    h += '<tr data-f="' + x.v.f + '" onclick="vpProgFecha(\'' + x.v.f + '\')" title="Clic para ver en el mapa las visitas del ' + fmt(x.v.f) + '" ' +
+      'style="cursor:pointer;' + (activa ? 'background:rgba(255,192,0,.22)' : '') + '">' +
+      td('<strong>' + vxEsc(x.v.c) + '</strong>') +
+      td('<span style="color:' + (VX.COL[x.v.e] || 'inherit') + ';font-weight:600">' + vxEsc(nom(x.v.e)) + '</span>') +
+      td(vxEsc(x.d.region)) + td(vxEsc(x.d.com || '—')) + td(fmt(x.v.f), 'white-space:nowrap' + (activa ? ';font-weight:700' : '')) +
+      td(vxEsc(x.v.t || x.v.a || '—')) +
+      td(x.d.contrato ? CONTR : g ? '<span style="color:' + (VP_GCOL[g] || 'inherit') + ';font-weight:700">G' + g + '</span>' : '<span style="color:var(--mut)">—</span>', 'text-align:center;white-space:nowrap') +
+      td(x.d.contrato ? CONTR : x.d.pot == null ? '<span style="color:var(--mut)">—</span>' : vxMM(x.d.pot), 'text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap') + '</tr>';
+  });
+  tab.innerHTML = h + '</tbody></table>';
+  vpProgGrafico(lst, W);
+  vpProgMapa(lst);
 }
 
 // ── Cobertura por grupo y región ──

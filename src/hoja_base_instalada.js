@@ -1211,6 +1211,7 @@ window._biCvReset = function () { if (_biCvChart && _biCvChart.resetZoom) _biCvC
 // por región: cuántos clientes, cuánto potencial y qué parte del potencial de la
 // región representa.
 let _biCv2Chart = null;
+let _biCv2Bar = null;
 let _biCv2Pct = 80;
 
 window._biCv2Set = function (v) {
@@ -1221,10 +1222,59 @@ window._biCv2Set = function (v) {
 };
 window._biCv2Reset = function () { if (_biCv2Chart && _biCv2Chart.resetZoom) _biCv2Chart.resetZoom(); };
 
+// Mismo color por región que el resto de la hoja y que el Desglose (_biRegColor).
+function _biRegColorCv(r) { return _biRegColor(r); }
+
+// Barra única al 100% con la participación de cada región en el potencial ST de la tabla.
+function _biCv2Barra(rows, reg, tp) {
+  const cb = document.getElementById('cBiCurva2Bar');
+  if (!cb || typeof Chart === 'undefined' || !(tp > 0)) return;
+  const etiquetas = {
+    id: 'biCv2BarEt',
+    afterDatasetsDraw(ch) {
+      const { ctx } = ch;
+      ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '700 9px Roboto, sans-serif';
+      ch.data.datasets.forEach((ds, i) => {
+        const el = ch.getDatasetMeta(i).data[0];
+        if (!el || Math.abs(el.base - el.y) < 13) return;     // el tramo no alcanza para el texto
+        ctx.fillStyle = '#fff';
+        ctx.fillText(fN1(ds.data[0]) + '%', el.x, (el.base + el.y) / 2);
+      });
+      ctx.restore();
+    },
+  };
+  _biCv2Bar = new Chart(cb.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['Potencial ST'],
+      datasets: rows.map(r => ({
+        label: r, data: [reg[r].pot / tp * 100], backgroundColor: _biRegColorCv(r),
+        borderColor: '#fff', borderWidth: 1, barPercentage: .9, categoryPercentage: .9,
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => c.dataset.label + ': ' + mm(reg[c.dataset.label].pot) + ' (' + fN1(c.raw) + '%)' } },
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { font: { size: 9 } },
+             title: { display: true, text: 'Por región', font: { size: 9 }, color: '#6B7BA8' } },
+        y: { stacked: true, min: 0, max: 100, grid: { color: '#E2E6F0' },
+             ticks: { font: { size: 9 }, callback: v => v + '%' },
+             title: { display: true, text: '% del potencial ST de la tabla', font: { size: 9 }, color: '#6B7BA8' } },
+      },
+    },
+    plugins: [etiquetas],
+  });
+}
+
 function _biRenderCurva2() {
   const cv = document.getElementById('cBiCurva2');
   if (!cv || typeof Chart === 'undefined') return;
   if (_biCv2Chart) { _biCv2Chart.destroy(); _biCv2Chart = null; }
+  if (_biCv2Bar) { _biCv2Bar.destroy(); _biCv2Bar = null; }
 
   const inp = document.getElementById('bi-cv2-pct');
   if (inp && document.activeElement !== inp) inp.value = _biCv2Pct;
@@ -1268,20 +1318,34 @@ function _biRenderCurva2() {
   const th = 'padding:.3rem .5rem;font-size:.55rem;text-transform:uppercase;letter-spacing:.04em;' +
     'color:#fff;background:#002D73;text-align:right;white-space:nowrap';
   const td = 'padding:.28rem .5rem;font-size:.62rem;text-align:right;border-bottom:1px solid var(--brd);white-space:nowrap';
+  let acum = 0;
   if (tb) {
     tb.innerHTML =
       '<table style="border-collapse:collapse;width:100%">' +
       '<thead><tr><th style="' + th + ';text-align:left">Región</th><th style="' + th + '">Clientes</th>' +
-      '<th style="' + th + '">Potencial ST</th><th style="' + th + '">% del potencial de la región</th></tr></thead><tbody>' +
-      rows.map(r => '<tr><td style="' + td + ';text-align:left">' + _biEsc(r) + '</td>' +
+      '<th style="' + th + '">Potencial ST</th><th style="' + th + '">% del potencial total</th>' +
+      '<th style="' + th + '">% acumulado</th><th style="' + th + '">% del potencial de la región</th></tr></thead><tbody>' +
+      rows.map((r, i) => {
+        // Participación sobre la suma de las regiones mostradas y acumulado en el
+        // orden de la tabla (mayor a menor potencial): la última fila cierra en 100%.
+        acum += reg[r].pot;
+        const pAc = tp ? (i === rows.length - 1 ? 1 : acum / tp) : 0;
+        return '<tr><td style="' + td + ';text-align:left"><span style="display:inline-block;width:.55rem;height:.55rem;border-radius:2px;margin-right:.4rem;background:' +
+          _biRegColorCv(r) + '"></span>' + _biEsc(r) + '</td>' +
         '<td style="' + td + '">' + nf(reg[r].n) + '</td>' +
         '<td style="' + td + '">' + mm(reg[r].pot) + '</td>' +
-        '<td style="' + td + '">' + fN1(reg[r].tot ? reg[r].pot / reg[r].tot * 100 : 0) + '%</td></tr>').join('') +
+        '<td style="' + td + '">' + fN1(tp ? reg[r].pot / tp * 100 : 0) + '%</td>' +
+        '<td style="' + td + '">' + fN1(pAc * 100) + '%</td>' +
+        '<td style="' + td + '">' + fN1(reg[r].tot ? reg[r].pot / reg[r].tot * 100 : 0) + '%</td></tr>';
+      }).join('') +
       '</tbody><tfoot><tr style="font-weight:700;background:var(--bg2)">' +
       '<td style="' + td + ';text-align:left">Total</td><td style="' + td + '">' + nf(tn) + '</td>' +
-      '<td style="' + td + '">' + mm(tp) + '</td><td style="' + td + '">' +
+      '<td style="' + td + '">' + mm(tp) + '</td><td style="' + td + '">' + fN1(tp ? 100 : 0) + '%</td>' +
+      '<td style="' + td + '">' + fN1(tp ? 100 : 0) + '%</td><td style="' + td + '">' +
       fN1(total ? tp / total * 100 : 0) + '%</td></tr></tfoot></table>';
   }
+
+  _biCv2Barra(rows, reg, tp);
 
   const rBase = sel.length > 400 ? 2.5 : 3.5;
   _biCv2Chart = new Chart(cv.getContext('2d'), {
@@ -1579,6 +1643,8 @@ function _biRegColor(r){
       .sort()
       .forEach(x => _biRegOrden.push(x));
   }
+  // «Magallanes» y «Magallanes y la Antártica Chilena» son la misma región.
+  if(/^Magallanes/.test(r||'')) r = _biRegOrden.find(x => /^Magallanes/.test(x)) || r;
   const i = _biRegOrden.indexOf(r);
   return _BI_PALETTE[(i >= 0 ? i : _biRegOrden.length) % _BI_PALETTE.length];
 }
@@ -2294,8 +2360,9 @@ function initBaseInstalada(){
     <div class="cb">
       <div id="bi-cv2-res" style="font-size:.62rem;color:var(--txt);margin-bottom:.5rem;line-height:1.6"></div>
       <div style="display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-start">
-        <div style="position:relative;height:400px;flex:2 1 420px;min-width:0"><canvas id="cBiCurva2"></canvas></div>
-        <div id="bi-cv2-tab" style="flex:1 1 320px;min-width:0;overflow-x:auto"></div>
+        <div style="position:relative;height:400px;flex:2 1 360px;min-width:0"><canvas id="cBiCurva2"></canvas></div>
+        <div style="position:relative;height:400px;flex:0 0 120px;min-width:0"><canvas id="cBiCurva2Bar"></canvas></div>
+        <div id="bi-cv2-tab" style="flex:2 1 470px;min-width:0;overflow-x:auto"></div>
       </div>
       <p style="font-size:.57rem;color:var(--mut);margin:.6rem 0 0;line-height:1.55">
         Misma curva de arriba, pero con todas las regiones juntas. Escribe en el parámetro qué porcentaje del

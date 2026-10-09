@@ -87,19 +87,29 @@
     const cVW = v => `<td class="num" style="${NW};color:rgba(255,255,255,.5)">MM$${fmm(v)}</td>`;
     const cVpW= v => `<td class="num" style="${NW};color:rgba(255,255,255,.5)">${fpct(v)}</td>`;
 
-    // 4 celdas por mes para filas MM$
+    // 4 celdas por mes para filas MM$. La variación se calcula acá como
+    // real − ptto, igual que en el total y en el PDF: la hoja la trae como
+    // |real|−|ptto|, con el signo invertido en las líneas de costo, y en el
+    // último mes viene en blanco.
     const cells4mm = (ar,ap,av,avp, style) => sm.map(i=>{
-      if(style==='white') return cNW(g(ar,i),false)+cPW(g(ap,i),false)+cVW(g(av,i))+cVpW(g(avp,i));
-      if(style==='bold')  return cN(g(ar,i),true)+cP(g(ap,i),true)+cVmm(g(av,i))+cVpct(g(avp,i));
-      return cN(g(ar,i),false)+cP(g(ap,i),false)+cVmm(g(av,i))+cVpct(g(avp,i));
+      const r=g(ar,i), p=g(ap,i), v=r-p, vp=Math.abs(p)>0?v/Math.abs(p):0;
+      if(style==='white') return cNW(r,false)+cPW(p,false)+cVW(v)+cVpW(vp);
+      if(style==='bold')  return cN(r,true)+cP(p,true)+cVmm(v)+cVpct(vp);
+      return cN(r,false)+cP(p,false)+cVmm(v)+cVpct(vp);
     }).join('');
 
-    // 4 celdas por mes para filas %
-    const cells4pct = (ar,ap,av,avp) => sm.map(i=>`
-      <td class="num" style="color:#111">${fpct(g(ar,i))}</td>
-      <td class="num" style="color:var(--mut)">${fpct(g(ap,i))}</td>
-      <td class="num" style="color:#555">${fpct(g(av,i))}</td>
-      <td class="num" style="color:#888">${fpct(g(avp,i))}</td>`).join('');
+    // 4 celdas por mes para filas %: numerador / ingresos del mes, con la
+    // misma fórmula que la columna total. No se usan los % de la hoja porque
+    // vienen en blanco en el último mes.
+    const cells4pct = (numR,numP,denR,denP) => sm.map(i=>{
+      const dR=Math.abs(g(denR,i)), dP=Math.abs(g(denP,i));
+      const r=dR?g(numR,i)/dR:0, p=dP?g(numP,i)/dP:0, v=r-p, vp=Math.abs(p)>0?v/Math.abs(p):0;
+      return `
+      <td class="num" style="color:#111">${fpct(r)}</td>
+      <td class="num" style="color:var(--mut)">${fpct(p)}</td>
+      <td class="num" style="color:#555">${fpct(v)}</td>
+      <td class="num" style="color:#888">${fpct(vp)}</td>`;
+    }).join('');
 
     // totales 4 cols para filas MM$
     const tot4mm = (ar,ap, style) => {
@@ -138,8 +148,10 @@
     const rowSubReal = (lbl, ar) => `<tr>${LBL('↳ '+lbl,'1.4rem')}${
       sm.map(i => cN(g(ar,i),false) + dashCell + dashCell + dashCell).join('')
     }${cN(sumSel(ar),true) + dashCell + dashCell + dashCell}</tr>`;
-    const rowPct     = (lbl,ar,ap,av,avp,numR,numP,denR,denP) =>
-      `<tr>${LBL(lbl,'.6rem')}${cells4pct(ar,ap,av,avp)}${tot4pct(numR||ar,numP||ap,denR||R2.ingresos_totales,denP||R2.ingresos_totales_p)}</tr>`;
+    const rowPct     = (lbl,ar,ap,av,avp,numR,numP,denR,denP) => {
+      const nR=numR||ar, nP=numP||ap, dR=denR||R2.ingresos_totales, dP=denP||R2.ingresos_totales_p;
+      return `<tr>${LBL(lbl,'.6rem')}${cells4pct(nR,nP,dR,dP)}${tot4pct(nR,nP,dR,dP)}</tr>`;
+    };
     const rowCeleste = (lbl,ar,ap,av,avp) => `<tr style="background:rgba(0,160,220,.13)">${LBLb(lbl,undefined,BG_CEL)}${cells4mm(ar,ap,av,avp,'bold')}${tot4mm(ar,ap,'bold')}</tr>`;
     const rowAzul    = (lbl,ar,ap,av,avp) => `<tr class="eerr-azul" style="background:var(--az3)">${LBLb(lbl,'#fff','var(--az3)')}${cells4mm(ar,ap,av,avp,'white')}${tot4mm(ar,ap,'white')}</tr>`;
 
