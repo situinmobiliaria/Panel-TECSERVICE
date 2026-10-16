@@ -27,8 +27,10 @@
     const s = document.createElement('style');
     s.id = 'eerr-azul-style';
     s.textContent = `
-      #eerr-table tr.eerr-azul:hover { background: var(--az3) !important; }
-      #eerr-table tr.eerr-azul:hover td { background-color: transparent; }
+      #eerr-table tr.eerr-azul:hover,
+      #eerr-limpio-table tr.eerr-azul:hover { background: var(--az3) !important; }
+      #eerr-table tr.eerr-azul:hover td,
+      #eerr-limpio-table tr.eerr-azul:hover td { background-color: transparent; }
     `;
     document.head.appendChild(s);
   }
@@ -43,6 +45,83 @@
   const fpct = v => ((v||0)*100).toFixed(1).replace('.',',')+'%';
   const sumArr = arr => (arr||[]).slice(0,n).reduce((s,v)=>s+(v||0),0);
 
+  // ── AJUSTES DEL EERR LIMPIO ───────────────────────────────────
+  // El EERR limpio saca el Arriendo Piso 1 de la depreciación: es un gasto de
+  // la oficina, no del giro del servicio técnico. Como esa línea desaparece,
+  // hay que rehacer todo lo que venía después: la depreciación pasa a ser
+  // sólo S&S más el Arriendo Bodega 50%, y el resultado operacional, el
+  // resultado antes de impuestos y el resultado del ejercicio mejoran en
+  // exactamente lo que se sacó. El EBITDA no se toca: va antes de depreciación.
+  // El presupuesto se deja como viene, porque la apertura no lo distingue.
+  const _sum = (...as) => Array.from({length:n},(_,i)=>
+    as.reduce((t,a)=>t+((a||[])[i]||0),0));
+
+  // Costo de las garantías ya consumido en el año. Sale de la misma tabla de
+  // la hoja Visión General —«Contratos de Garantía · Costo Estimado»—: costo
+  // estimado total menos costo estimado remanente. Entran los contratos que
+  // estuvieron vigentes en algún momento del año, no sólo los de hoy: una
+  // garantía que terminó en agosto igual consumió costo entre enero y agosto,
+  // y ese costo está dentro del costo de ventas del período. El costo estimado
+  // de cada contrato es anual —su valor por el complemento del margen de su
+  // plan CARE—, así que lo consumido no arrastra años anteriores; los que no
+  // tienen plan asignado usan 50%, el mismo supuesto de esa hoja.
+  const _GAR_MG = {BASIC:0.55, ADVANCED:0.60, PROFESIONAL:0.65, INTEGRAL:0.65};
+  function _garCostoFecha(){
+    const hoy = (APP_DATA && APP_DATA.hoy) || '';
+    const eneroAno = String(ANO_ACTUAL) + '-01-01';
+    const lista = (typeof DATA !== 'undefined' ? DATA : []).filter(d =>
+      d.tipo === 'Garantia' && (d.inicio || '') <= hoy && (d.fin || '') >= eneroAno);
+    let total = 0, rem = 0;
+    lista.forEach(d => {
+      const t = String(d.programa || '').toUpperCase();
+      const k = Object.keys(_GAR_MG).find(x => t.indexOf(x) >= 0);
+      const costoT = (d.val || 0) * (1 - (k ? _GAR_MG[k] : 0.50));
+      const pct = Math.max(0, Math.min(100, d.pct_consumido || 0));
+      total += costoT;
+      rem   += costoT * (1 - pct/100);
+    });
+    return {n: lista.length, total: total/1e6, rem: rem/1e6, fecha: (total-rem)/1e6};
+  }
+  const GAR = _garCostoFecha();
+  // Se reparte lineal entre los meses cargados y se descuenta del costo de
+  // ventas, que viene negativo: por eso se suma.
+  const _garMes = n ? GAR.fecha / n : 0;
+  // El resumen A4 vive fuera de este bloque y necesita el mismo ajuste.
+  window._eerrGarMes = _garMes;
+  window._eerrGar = GAR;
+  const _mas = (a,b) => Array.from({length:n},(_,i)=>((a||[])[i]||0)-((b||[])[i]||0));
+  const _piso = R2.dep_arr_piso || [];
+  const _conGar = a => Array.from({length:n},(_,i)=>((a||[])[i]||0) + _garMes);
+  // Tasa de impuesto a la renta con la que se recalcula el EERR limpio: al
+  // cambiar el resultado antes de impuestos, el impuesto contabilizado ya no
+  // corresponde. Se aplica sobre el resultado del mes, así que un mes con
+  // pérdida genera crédito, igual que en la hoja.
+  const EERR_TASA_IMP = 0.27;
+  const LIMPIO = {
+    // El costo de ventas baja en el costo de garantías del mes; todo lo que
+    // viene después sube en lo mismo, porque es un costo menos.
+    costo_ventas:        _conGar(R2.costo_ventas),
+    margen_mm:           _conGar(R2.margen_mm),
+    ebitda_directo:      _conGar(R2.ebitda_directo),
+    ebitda_indirecto:    _conGar(R2.ebitda_indirecto),
+    ebitda_empresa:      _conGar(R2.ebitda_empresa),
+    // La depreciación queda sólo con S&S: el arriendo de bodega pasa a su
+    // propia línea, entre el EBITDAR y el EBITDA.
+    depreciacion:        Array.from({length:n},(_,i)=>((R2.dep_ss||[])[i]||0)),
+    resultado_operacional: _conGar(_mas(R2.resultado_operacional, _piso)),
+    resultado_antes_imp:   _conGar(_mas(R2.resultado_antes_imp, _piso)),
+  };
+  // EBITDAR: resultado antes de intereses, impuestos, depreciación,
+  // amortización y arriendo. En esta hoja el arriendo no está dentro del
+  // EBITDA —viene más abajo, junto a la depreciación—, así que el EBITDAR es
+  // el mismo EBITDA Empresa, y al restarle el arriendo de bodega se llega al
+  // EBITDA ya con el costo de ocupar la bodega adentro.
+  LIMPIO.ebitdar      = LIMPIO.ebitda_empresa.slice();
+  LIMPIO.ebitda_arr   = Array.from({length:n},(_,i)=>
+    LIMPIO.ebitdar[i] + ((R2.dep_arr_bodega||[])[i]||0));
+  LIMPIO.impuesto_renta     = LIMPIO.resultado_antes_imp.map(v => -v * EERR_TASA_IMP);
+  LIMPIO.resultado_ejercicio = LIMPIO.resultado_antes_imp.map(v => v * (1 - EERR_TASA_IMP));
+
   // ── EERR TABLE ────────────────────────────────────────────────
   const eerrEl  = document.getElementById('eerr-table');
   const segEl   = document.getElementById('eerr-mes-seg');
@@ -51,11 +130,15 @@
   const hasGaAd = [R2.finiquitos,R2.multas,R2.prov_obsolescencias,R2.prov_incobrables,R2.prov_habilitacion]
     .some(a=>(a||[]).some(v=>v!==0));
 
-  function renderEERR(){
-    if(!eerrEl) return;
-    const sm = _selMonths;
+  // La misma tabla se pinta dos veces: arriba el EERR de la hoja Ratio Costos
+  // 2 tal cual, y más abajo el «EERR Limpio», que se irá ajustando. Por eso
+  // recibe el contenedor y los meses elegidos en vez de usar los de arriba.
+  function renderEERR(destino, sm, limpio){
+    const el = destino || eerrEl;
+    if(!el) return;
+    sm = sm || _selMonths;
     const ns = sm.length;
-    if(ns===0){ eerrEl.innerHTML='<p style="padding:1rem;color:var(--mut)">Selecciona al menos un mes.</p>'; return; }
+    if(ns===0){ el.innerHTML='<p style="padding:1rem;color:var(--mut)">Selecciona al menos un mes.</p>'; return; }
 
     const colHdr    = 'background:var(--az3);color:rgba(255,255,255,.85);font-size:.6rem;font-weight:700;text-align:center;padding:.35rem .4rem';
     const colHdrSub = 'background:#1e4080;color:rgba(255,255,255,.7);font-size:.55rem;font-weight:600;text-align:center;padding:.2rem .3rem';
@@ -64,6 +147,9 @@
     // label + ns*4 (REAL,PTTO,VAR,VAR%) + 4 totales
     const totalCols = 1 + ns*4 + 4;
 
+    // En la versión limpia, estas líneas vienen recalculadas; el resto sale
+    // tal cual de la hoja Ratio Costos 2.
+    const V = k => (limpio && LIMPIO[k]) ? LIMPIO[k] : R2[k];
     const g = (arr,i) => (arr||[])[i]||0;
     const sumSel = arr => sm.reduce((s,i)=>s+g(arr,i),0);
 
@@ -155,7 +241,7 @@
     const rowCeleste = (lbl,ar,ap,av,avp) => `<tr style="background:rgba(0,160,220,.13)">${LBLb(lbl,undefined,BG_CEL)}${cells4mm(ar,ap,av,avp,'bold')}${tot4mm(ar,ap,'bold')}</tr>`;
     const rowAzul    = (lbl,ar,ap,av,avp) => `<tr class="eerr-azul" style="background:var(--az3)">${LBLb(lbl,'#fff','var(--az3)')}${cells4mm(ar,ap,av,avp,'white')}${tot4mm(ar,ap,'white')}</tr>`;
 
-    eerrEl.innerHTML = `
+    el.innerHTML = `
       <div style="overflow-x:auto;overflow-y:auto;max-height:68vh">
         <table class="tbl" style="font-size:.62rem;width:100%;min-width:600px;border-collapse:separate;border-spacing:0">
           <thead>
@@ -171,19 +257,19 @@
             ${rowBase('Ingresos de actividades ordinarias (MM$)',R2.ingresos_totales,R2.ingresos_totales_p,R2.ingresos_totales_v,R2.ingresos_totales_vp)}
             ${rowSub('Ingresos por contratos (MM$)',R2.ingresos_contratos,R2.ingresos_contratos_p,R2.ingresos_contratos_v,R2.ingresos_contratos_vp)}
             ${rowSub('Ingresos por otras actividades (MM$)',R2.ingresos_otras,R2.ingresos_otras_p,R2.ingresos_otras_v,R2.ingresos_otras_vp)}
-            ${rowBase('(−) Costo de ventas (MM$)',R2.costo_ventas,R2.costo_ventas_p,R2.costo_ventas_v,R2.costo_ventas_vp)}
-            ${R2.costo_tecnicos?rowSubReal('Costo Técnicos y Personal (MM$, sólo Real)',R2.costo_tecnicos):''}
-            ${R2.costo_repuestos?rowSubReal('Costo Repuestos y Otros (MM$, sólo Real)',R2.costo_repuestos):''}
-            ${rowCeleste('= Margen del Producto (MM$)',R2.margen_mm,R2.margen_mm_p,R2.margen_mm_v,R2.margen_mm_vp)}
-            ${rowPct('Margen %',R2.margen_pct,R2.margen_pct_p,R2.margen_pct_v,R2.margen_pct_vp, R2.margen_mm,R2.margen_mm_p,R2.ingresos_totales,R2.ingresos_totales_p)}
+            ${rowBase('(−) Costo de ventas (MM$)',V('costo_ventas'),R2.costo_ventas_p,R2.costo_ventas_v,R2.costo_ventas_vp)}
+            ${(!limpio && R2.costo_tecnicos)?rowSubReal('Costo Técnicos y Personal (MM$, sólo Real)',R2.costo_tecnicos):''}
+            ${(!limpio && R2.costo_repuestos)?rowSubReal('Costo Repuestos y Otros (MM$, sólo Real)',R2.costo_repuestos):''}
+            ${rowCeleste('= Margen del Producto (MM$)',V('margen_mm'),R2.margen_mm_p,R2.margen_mm_v,R2.margen_mm_vp)}
+            ${rowPct('Margen %',R2.margen_pct,R2.margen_pct_p,R2.margen_pct_v,R2.margen_pct_vp, V('margen_mm'),R2.margen_mm_p,R2.ingresos_totales,R2.ingresos_totales_p)}
             ${sepRow('Gastos Operacionales Directos')}
             ${rowBase('(−) Gasto beneficios empleados Directos (MM$)',R2.gastos_empleados,R2.gastos_empleados_p,R2.gastos_empleados_v,R2.gastos_empleados_vp)}
             ${_eerrHay(R2.otros_gastos)||_eerrHay(R2.otros_gastos_p)?rowBase('(−) Otros gastos por naturaleza Directos (MM$)',R2.otros_gastos,R2.otros_gastos_p,R2.otros_gastos_v,R2.otros_gastos_vp):''}
-            ${rowCeleste('= EBITDA Directo (MM$)',R2.ebitda_directo,R2.ebitda_directo_p,R2.ebitda_directo_v,R2.ebitda_directo_vp)}
-            ${rowPct('%  EBITDA Directo',R2.ebitda_directo_pct,R2.ebitda_directo_pct_p,R2.ebitda_directo_pct_v,R2.ebitda_directo_pct_vp, R2.ebitda_directo,R2.ebitda_directo_p,R2.ingresos_totales,R2.ingresos_totales_p)}
+            ${rowCeleste('= EBITDA Directo (MM$)',V('ebitda_directo'),R2.ebitda_directo_p,R2.ebitda_directo_v,R2.ebitda_directo_vp)}
+            ${rowPct('%  EBITDA Directo',R2.ebitda_directo_pct,R2.ebitda_directo_pct_p,R2.ebitda_directo_pct_v,R2.ebitda_directo_pct_vp, V('ebitda_directo'),R2.ebitda_directo_p,R2.ingresos_totales,R2.ingresos_totales_p)}
             ${sepRow('GAV Indirecto')}
             ${rowBase('(−) GAV Indirecto (MM$)',R2.gav_indirecto,R2.gav_indirecto_p,R2.gav_indirecto_v,R2.gav_indirecto_vp)}
-            ${rowCeleste('= EBITDA Indirecto (MM$)',R2.ebitda_indirecto,R2.ebitda_indirecto_p,R2.ebitda_indirecto_v,R2.ebitda_indirecto_vp)}
+            ${rowCeleste('= EBITDA Indirecto (MM$)',V('ebitda_indirecto'),R2.ebitda_indirecto_p,R2.ebitda_indirecto_v,R2.ebitda_indirecto_vp)}
             ${hasGaAd?sepRow('Gastos Adicionales'):''}
             ${hasGaAd?rowBase('Finiquitos (MM$)',R2.finiquitos,R2.finiquitos_p,R2.finiquitos_v,R2.finiquitos_vp):''}
             ${hasGaAd?rowBase('Multas (MM$)',R2.multas,R2.multas_p,R2.multas_v,R2.multas_vp):''}
@@ -191,11 +277,18 @@
             ${hasGaAd?rowBase('Prov. Incobrables (MM$)',R2.prov_incobrables,R2.prov_incobrables_p,R2.prov_incobrables_v,R2.prov_incobrables_vp):''}
             ${hasGaAd?rowBase('Prov. Habilitación Oficinas (MM$)',R2.prov_habilitacion,R2.prov_habilitacion_p,R2.prov_habilitacion_v,R2.prov_habilitacion_vp):''}
             ${hasGaAd?rowBase('Total Gastos Adicionales (MM$)',R2.total_gastos_adicionales,R2.total_gastos_adicionales_p,R2.total_gastos_adicionales_v,R2.total_gastos_adicionales_vp):''}
-            ${rowAzul('= EBITDA Empresa (MM$)',R2.ebitda_empresa,R2.ebitda_empresa_p,R2.ebitda_empresa_v,R2.ebitda_empresa_vp)}
-            ${rowPct('%  EBITDA Empresa',R2.ebitda_directo_pct,R2.ebitda_directo_pct_p,R2.ebitda_directo_pct_v,R2.ebitda_directo_pct_vp, R2.ebitda_empresa,R2.ebitda_empresa_p,R2.ingresos_totales,R2.ingresos_totales_p)}
+            ${rowAzul('= EBITDAR Empresa · antes de arriendo (MM$)'.replace('EBITDAR Empresa · antes de arriendo', limpio?'EBITDAR Empresa · antes de arriendo':'EBITDA Empresa'),V('ebitda_empresa'),R2.ebitda_empresa_p,R2.ebitda_empresa_v,R2.ebitda_empresa_vp)}
+            ${rowPct(limpio?'%  EBITDAR Empresa':'%  EBITDA Empresa',R2.ebitda_directo_pct,R2.ebitda_directo_pct_p,R2.ebitda_directo_pct_v,R2.ebitda_directo_pct_vp, V('ebitda_empresa'),R2.ebitda_empresa_p,R2.ingresos_totales,R2.ingresos_totales_p)}
+            ${limpio?sepRow('Arriendo'):''}
+            ${limpio?rowSubReal('(−) Arriendo Bodega 50% (MM$, sólo Real)',R2.dep_arr_bodega):''}
+            ${limpio?rowCeleste('= EBITDA Empresa · con arriendo (MM$)',LIMPIO.ebitda_arr,R2.ebitda_empresa_p,R2.ebitda_empresa_v,R2.ebitda_empresa_vp):''}
+            ${limpio?rowPct('%  EBITDA Empresa',R2.ebitda_directo_pct,R2.ebitda_directo_pct_p,R2.ebitda_directo_pct_v,R2.ebitda_directo_pct_vp, LIMPIO.ebitda_arr,R2.ebitda_empresa_p,R2.ingresos_totales,R2.ingresos_totales_p):''}
             ${sepRow('Resultado Operacional')}
-            ${rowBase('(−) Depreciación y amortización (MM$)',R2.depreciacion,R2.depreciacion_p,R2.depreciacion_v,R2.depreciacion_vp)}
-            ${rowCeleste('= Resultado Operacional (MM$)',R2.resultado_operacional,R2.resultado_operacional_p,R2.resultado_operacional_v,R2.resultado_operacional_vp)}
+            ${rowBase('(−) Depreciación y amortización'+(limpio?' S&S':'')+' (MM$)',V('depreciacion'),R2.depreciacion_p,R2.depreciacion_v,R2.depreciacion_vp)}
+            ${(!limpio && _eerrHay(R2.dep_ss))?rowSubReal('Depreciación y amortización S&S (MM$, sólo Real)',R2.dep_ss):''}
+            ${(!limpio && _eerrHay(R2.dep_arr_piso))?rowSubReal('Arriendo Piso 1 (MM$, sólo Real)',R2.dep_arr_piso):''}
+            ${(!limpio && _eerrHay(R2.dep_arr_bodega))?rowSubReal('Arriendo Bodega 50% (MM$, sólo Real)',R2.dep_arr_bodega):''}
+            ${rowCeleste('= Resultado Operacional (MM$)',V('resultado_operacional'),R2.resultado_operacional_p,R2.resultado_operacional_v,R2.resultado_operacional_vp)}
             ${sepRow('Resultado No Operacional')}
             ${rowBase('Otros ingresos por función (MM$)',R2.otros_ingresos_funcion,R2.otros_ingresos_funcion_p,R2.otros_ingresos_funcion_v,R2.otros_ingresos_funcion_vp)}
             ${rowBase('Ingreso financiero (MM$)',R2.ingreso_financiero,R2.ingreso_financiero_p,R2.ingreso_financiero_v,R2.ingreso_financiero_vp)}
@@ -204,17 +297,19 @@
             ${rowBase('Diferencia de cambio (MM$)',R2.diferencia_cambio,R2.diferencia_cambio_p,R2.diferencia_cambio_v,R2.diferencia_cambio_vp)}
             ${rowCeleste('= Resultado no operacional (MM$)',R2.resultado_no_operacional,R2.resultado_no_operacional_p,R2.resultado_no_operacional_v,R2.resultado_no_operacional_vp)}
             ${sepRow('Resultado Final')}
-            ${rowCeleste('= Resultado antes de impuestos (MM$)',R2.resultado_antes_imp,R2.resultado_antes_imp_p,R2.resultado_antes_imp_v,R2.resultado_antes_imp_vp)}
-            ${rowBase('(−) Impuesto a la renta (MM$)',R2.impuesto_renta,R2.impuesto_renta_p,R2.impuesto_renta_v,R2.impuesto_renta_vp)}
-            ${rowAzul('= Resultado del ejercicio Empresa (MM$)',R2.resultado_ejercicio,R2.resultado_ejercicio_p,R2.resultado_ejercicio_v,R2.resultado_ejercicio_vp)}
-            ${rowPct('%  Resultado / Ingresos',R2.resultado_ejercicio,R2.resultado_ejercicio_p,R2.resultado_ejercicio_v,R2.resultado_ejercicio_vp, R2.resultado_ejercicio,R2.resultado_ejercicio_p,R2.ingresos_totales,R2.ingresos_totales_p)}
+            ${rowCeleste('= Resultado antes de impuestos (MM$)',V('resultado_antes_imp'),R2.resultado_antes_imp_p,R2.resultado_antes_imp_v,R2.resultado_antes_imp_vp)}
+            ${rowBase('(−) Impuesto a la renta (MM$)'+(limpio?' · 27%':''),V('impuesto_renta'),R2.impuesto_renta_p,R2.impuesto_renta_v,R2.impuesto_renta_vp)}
+            ${rowAzul('= Resultado del ejercicio Empresa (MM$)',V('resultado_ejercicio'),R2.resultado_ejercicio_p,R2.resultado_ejercicio_v,R2.resultado_ejercicio_vp)}
+            ${rowPct('%  Resultado / Ingresos',V('resultado_ejercicio'),R2.resultado_ejercicio_p,R2.resultado_ejercicio_v,R2.resultado_ejercicio_vp, V('resultado_ejercicio'),R2.resultado_ejercicio_p,R2.ingresos_totales,R2.ingresos_totales_p)}
           </tbody>
         </table>
       </div>`;
   }
 
-  // Segmentador de meses
-  if(segEl){
+  // Segmentador de meses. Cada tabla lleva el suyo: se pueden comparar meses
+  // distintos en el EERR de arriba y en el limpio.
+  function montarSeg(cont, sel, destino, limpio){
+    if(!cont) return;
     meses.forEach((m,i)=>{
       const b = document.createElement('button');
       b.className = 'btn on';
@@ -222,14 +317,73 @@
       b.style.cssText = 'font-size:.55rem;padding:.15rem .45rem';
       b.addEventListener('click',()=>{
         b.classList.toggle('on');
-        if(_selMonths.includes(i)) _selMonths = _selMonths.filter(x=>x!==i);
-        else _selMonths = [..._selMonths,i].sort((a,b)=>a-b);
-        renderEERR();
+        const k = sel.v.indexOf(i);
+        if(k >= 0) sel.v.splice(k,1); else sel.v = [...sel.v,i].sort((a,b)=>a-b);
+        renderEERR(destino, sel.v, limpio);
       });
-      segEl.appendChild(b);
+      cont.appendChild(b);
     });
   }
-  renderEERR();
+
+  const selArriba = { v: _selMonths };
+  montarSeg(segEl, selArriba, eerrEl);
+  renderEERR(eerrEl, selArriba.v);
+
+  // ── EERR LIMPIO ───────────────────────────────────────────────
+  // Por ahora es el mismo estado de resultado; queda como base para los
+  // ajustes que se le harán después (normalizaciones, gastos por única vez).
+  // Nota del EERR Limpio: deja a la vista de dónde sale el descuento, ya que
+  // la línea de costo de ventas se muestra neta. Se arma una sola vez y la
+  // reutilizan los dos exportables, para que el PDF explique lo mismo que la
+  // pantalla y no haya que mantener dos textos.
+  window._eerrNotaLimpio = function(chico){
+    const _mm = v => 'MM$' + fN1(v);
+    const esc = chico ? 'font-size:7.5px;line-height:1.45' : '';
+    const punto = (t, d) => '<li style="margin-bottom:' + (chico ? '.12rem' : '.3rem') + '"><strong>' + t +
+      '</strong> ' + d + '</li>';
+    return '<div style="' + esc + '">' +
+      '<div style="margin-bottom:.35rem">Este estado de resultado es el mismo de arriba con <strong>tres ' +
+      'ajustes</strong>, pensados para ver el resultado del negocio sin partidas que no son del giro del ' +
+      'período:</div>' +
+      '<ol style="margin:0 0 .35rem 1.1rem;padding:0">' +
+      punto('Costo de ventas en una sola línea.',
+            'No se abre en Técnicos y Repuestos, porque esa apertura existe sólo en Real y no tiene presupuesto ' +
+            'contra el cual compararse.') +
+      punto('Costo de ventas neto de garantías.',
+            'A ese costo se le descuenta lo que ya se gastó en atender las garantías vigentes: ' +
+            '<strong>' + _mm(GAR.fecha) + '</strong>, repartidos en partes iguales entre los ' + n + ' meses ' +
+            'cargados (<strong>' + _mm(_garMes) + ' por mes</strong>). El monto sale de la tabla «Contratos de ' +
+            'Garantía · Costo Estimado» de Visión General: de los ' + GAR.n + ' contratos que estuvieron vigentes ' +
+            'en algún momento del año —incluidos los que ya terminaron, porque su costo igual se incurrió—, su ' +
+            'costo estimado total del año (' + _mm(GAR.total) + ') menos el costo que queda por delante (' +
+            _mm(GAR.rem) + ').') +
+      punto('Depreciación sin el Arriendo Piso 1.',
+            'Ese arriendo es de la oficina, no del giro, y sale del estado de resultado.') +
+      punto('EBITDAR y arriendo de bodega separados.',
+            'En la hoja el arriendo no está dentro del EBITDA —viene más abajo, junto a la depreciación—, así que ' +
+            'ese EBITDA es en realidad un <strong>EBITDAR</strong>: resultado antes de intereses, impuestos, ' +
+            'depreciación, amortización y arriendo. Por eso la línea se rotula así y debajo va el arriendo de ' +
+            'bodega y el <strong>EBITDA Empresa con arriendo</strong>. La depreciación queda sólo con S&amp;S, de ' +
+            'modo que el resultado operacional no cambia.') +
+      '</ol>' +
+      '<div>Los dos primeros ajustes bajan el costo y el tercero baja la depreciación, así que <strong>suben el ' +
+      'margen, los tres EBITDA y los resultados</strong>. El <strong>impuesto a la renta se recalcula al 27%</strong> ' +
+      'del nuevo resultado antes de impuestos —en un mes con pérdida queda como crédito, igual que en la hoja—, ' +
+      'de modo que no es el impuesto contabilizado. Los <strong>ingresos, los gastos de personal, el GAV, los ' +
+      'gastos adicionales y el resultado no operacional</strong> no se tocan, y las columnas de presupuesto se ' +
+      'muestran tal como vienen en la hoja Ratio Costos 2.</div>' +
+      '</div>';
+  };
+
+  const notaLimpio = document.getElementById('eerr-limpio-nota');
+  if(notaLimpio) notaLimpio.innerHTML = window._eerrNotaLimpio();
+
+  const limpioEl = document.getElementById('eerr-limpio-table');
+  if(limpioEl){
+    const selLimpio = { v: Array.from({length:n},(_,i)=>i) };
+    montarSeg(document.getElementById('eerr-limpio-seg'), selLimpio, limpioEl, true);
+    renderEERR(limpioEl, selLimpio.v, true);
+  }
 
   // ── RATIO ANALYSIS ────────────────────────────────────────────
   const absArr = arr => (arr||[]).slice(0,n).map(v=>Math.abs(v||0));
@@ -425,7 +579,31 @@ async function eerrExportResumenPDF() {
   const M  = R2.meses || [];
   if (!M.length) { alert('No hay datos EERR para exportar.'); return; }
 
-  const btn  = document.getElementById('eerr-pdf-res-btn');
+  // Con 'limpio' sale la misma hoja A4 pero sin abrir el costo de ventas,
+  // igual que la tabla del EERR Limpio en pantalla.
+  const _limpio = arguments[0] === 'limpio';
+  // Las líneas que el EERR limpio recalcula, para que el A4 muestre lo mismo
+  // que la tabla: depreciación sin Arriendo Piso 1 y los resultados corregidos.
+  const _nL = M.length;
+  const _restaPiso = a => Array.from({length:_nL},(_,i)=>((a||[])[i]||0)-((R2.dep_arr_piso||[])[i]||0));
+  const _garMesA4 = (window._eerrGarMes || 0);
+  const _conGarA4 = a => Array.from({length:_nL},(_,i)=>((a||[])[i]||0) + _garMesA4);
+  const _LIM = {
+    costo_ventas:     _conGarA4(R2.costo_ventas),
+    margen_mm:        _conGarA4(R2.margen_mm),
+    ebitda_directo:   _conGarA4(R2.ebitda_directo),
+    ebitda_indirecto: _conGarA4(R2.ebitda_indirecto),
+    ebitda_empresa:   _conGarA4(R2.ebitda_empresa),
+    depreciacion: Array.from({length:_nL},(_,i)=>((R2.dep_ss||[])[i]||0)),
+    resultado_operacional: _conGarA4(_restaPiso(R2.resultado_operacional)),
+    resultado_antes_imp:   _conGarA4(_restaPiso(R2.resultado_antes_imp)),
+  };
+  _LIM.ebitdar    = _LIM.ebitda_empresa.slice();
+  _LIM.ebitda_arr = Array.from({length:_nL},(_,i)=>_LIM.ebitdar[i] + ((R2.dep_arr_bodega||[])[i]||0));
+  _LIM.impuesto_renta      = _LIM.resultado_antes_imp.map(v => -v * 0.27);
+  _LIM.resultado_ejercicio = _LIM.resultado_antes_imp.map(v => v * 0.73);
+  const _vL = k => (_limpio && _LIM[k]) ? _LIM[k] : R2[k];
+  const btn  = document.getElementById(_limpio ? 'eerr-limpio-res-btn' : 'eerr-pdf-res-btn');
   const ICON = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
 
@@ -508,20 +686,20 @@ async function eerrExportResumenPDF() {
       fila('Ingresos de actividades ordinarias (MM$)', R2.ingresos_totales, R2.ingresos_totales_p, R2.ingresos_totales_v, R2.ingresos_totales_vp) +
       filaSub('Ingresos por contratos (MM$)', R2.ingresos_contratos, R2.ingresos_contratos_p, R2.ingresos_contratos_v, R2.ingresos_contratos_vp) +
       filaSub('Ingresos por otras actividades (MM$)', R2.ingresos_otras, R2.ingresos_otras_p, R2.ingresos_otras_v, R2.ingresos_otras_vp) +
-      fila('(−) Costo de ventas (MM$)', R2.costo_ventas, R2.costo_ventas_p, R2.costo_ventas_v, R2.costo_ventas_vp, true) +
-      (hay(R2.costo_tecnicos)  ? filaReal('Costo Técnicos y Personal (MM$, sólo Real)', R2.costo_tecnicos) : '') +
-      (hay(R2.costo_repuestos) ? filaReal('Costo Repuestos y Otros (MM$, sólo Real)', R2.costo_repuestos) : '') +
-      filaCel('= Margen del Producto (MM$)', R2.margen_mm, R2.margen_mm_p, R2.margen_mm_v, R2.margen_mm_vp) +
-      filaPct('Margen %', R2.margen_mm, R2.margen_mm_p, IT, ITP) +
+      fila('(−) Costo de ventas (MM$)', _vL('costo_ventas'), R2.costo_ventas_p, R2.costo_ventas_v, R2.costo_ventas_vp, true) +
+      (!_limpio && hay(R2.costo_tecnicos)  ? filaReal('Costo Técnicos y Personal (MM$, sólo Real)', R2.costo_tecnicos) : '') +
+      (!_limpio && hay(R2.costo_repuestos) ? filaReal('Costo Repuestos y Otros (MM$, sólo Real)', R2.costo_repuestos) : '') +
+      filaCel('= Margen del Producto (MM$)', _vL('margen_mm'), R2.margen_mm_p, R2.margen_mm_v, R2.margen_mm_vp) +
+      filaPct('Margen %', _vL('margen_mm'), R2.margen_mm_p, IT, ITP) +
       sep('Gastos Operacionales Directos') +
       fila('(−) Gasto beneficios empleados Directos (MM$)', R2.gastos_empleados, R2.gastos_empleados_p, R2.gastos_empleados_v, R2.gastos_empleados_vp, true) +
       (hay(R2.otros_gastos) || hay(R2.otros_gastos_p)
         ? fila('(−) Otros gastos por naturaleza Directos (MM$)', R2.otros_gastos, R2.otros_gastos_p, R2.otros_gastos_v, R2.otros_gastos_vp, true) : '') +
-      filaCel('= EBITDA Directo (MM$)', R2.ebitda_directo, R2.ebitda_directo_p, R2.ebitda_directo_v, R2.ebitda_directo_vp) +
-      filaPct('%  EBITDA Directo', R2.ebitda_directo, R2.ebitda_directo_p, IT, ITP) +
+      filaCel('= EBITDA Directo (MM$)', _vL('ebitda_directo'), R2.ebitda_directo_p, R2.ebitda_directo_v, R2.ebitda_directo_vp) +
+      filaPct('%  EBITDA Directo', _vL('ebitda_directo'), R2.ebitda_directo_p, IT, ITP) +
       sep('GAV Indirecto') +
       fila('(−) GAV Indirecto (MM$)', R2.gav_indirecto, R2.gav_indirecto_p, R2.gav_indirecto_v, R2.gav_indirecto_vp, true) +
-      filaCel('= EBITDA Indirecto (MM$)', R2.ebitda_indirecto, R2.ebitda_indirecto_p, R2.ebitda_indirecto_v, R2.ebitda_indirecto_vp) +
+      filaCel('= EBITDA Indirecto (MM$)', _vL('ebitda_indirecto'), R2.ebitda_indirecto_p, R2.ebitda_indirecto_v, R2.ebitda_indirecto_vp) +
       (hasGaAd ? sep('Gastos Adicionales') +
         fila('Finiquitos (MM$)', R2.finiquitos, R2.finiquitos_p, R2.finiquitos_v, R2.finiquitos_vp, true) +
         fila('Multas (MM$)', R2.multas, R2.multas_p, R2.multas_v, R2.multas_vp, true) +
@@ -529,11 +707,18 @@ async function eerrExportResumenPDF() {
         fila('Prov. Incobrables (MM$)', R2.prov_incobrables, R2.prov_incobrables_p, R2.prov_incobrables_v, R2.prov_incobrables_vp, true) +
         fila('Prov. Habilitación Oficinas (MM$)', R2.prov_habilitacion, R2.prov_habilitacion_p, R2.prov_habilitacion_v, R2.prov_habilitacion_vp, true) +
         fila('Total Gastos Adicionales (MM$)', R2.total_gastos_adicionales, R2.total_gastos_adicionales_p, R2.total_gastos_adicionales_v, R2.total_gastos_adicionales_vp, true) : '') +
-      filaAzul('= EBITDA Empresa (MM$)', R2.ebitda_empresa, R2.ebitda_empresa_p, R2.ebitda_empresa_v, R2.ebitda_empresa_vp) +
-      filaPct('%  EBITDA Empresa', R2.ebitda_empresa, R2.ebitda_empresa_p, IT, ITP) +
+      filaAzul('= ' + (_limpio ? 'EBITDAR Empresa · antes de arriendo' : 'EBITDA Empresa') + ' (MM$)', _vL('ebitda_empresa'), R2.ebitda_empresa_p, R2.ebitda_empresa_v, R2.ebitda_empresa_vp) +
+      filaPct('%  ' + (_limpio ? 'EBITDAR Empresa' : 'EBITDA Empresa'), _vL('ebitda_empresa'), R2.ebitda_empresa_p, IT, ITP) +
+      (_limpio ? sep('Arriendo') +
+        filaReal('(−) Arriendo Bodega 50% (MM$, sólo Real)', R2.dep_arr_bodega) +
+        filaCel('= EBITDA Empresa · con arriendo (MM$)', _LIM.ebitda_arr, R2.ebitda_empresa_p, R2.ebitda_empresa_v, R2.ebitda_empresa_vp) +
+        filaPct('%  EBITDA Empresa', _LIM.ebitda_arr, R2.ebitda_empresa_p, IT, ITP) : '') +
       sep('Resultado Operacional') +
-      fila('(−) Depreciación y amortización (MM$)', R2.depreciacion, R2.depreciacion_p, R2.depreciacion_v, R2.depreciacion_vp, true) +
-      filaCel('= Resultado Operacional (MM$)', R2.resultado_operacional, R2.resultado_operacional_p, R2.resultado_operacional_v, R2.resultado_operacional_vp) +
+      fila('(−) Depreciación y amortización' + (_limpio ? ' S&S' : '') + ' (MM$)', _vL('depreciacion'), R2.depreciacion_p, R2.depreciacion_v, R2.depreciacion_vp, true) +
+      (!_limpio && hay(R2.dep_ss)         ? filaReal('Depreciación y amortización S&S (MM$, sólo Real)', R2.dep_ss) : '') +
+      (!_limpio && hay(R2.dep_arr_piso)   ? filaReal('Arriendo Piso 1 (MM$, sólo Real)', R2.dep_arr_piso) : '') +
+      (!_limpio && hay(R2.dep_arr_bodega) ? filaReal('Arriendo Bodega 50% (MM$, sólo Real)', R2.dep_arr_bodega) : '') +
+      filaCel('= Resultado Operacional (MM$)', _vL('resultado_operacional'), R2.resultado_operacional_p, R2.resultado_operacional_v, R2.resultado_operacional_vp) +
       sep('Resultado No Operacional') +
       fila('Otros ingresos por función (MM$)', R2.otros_ingresos_funcion, R2.otros_ingresos_funcion_p, R2.otros_ingresos_funcion_v, R2.otros_ingresos_funcion_vp) +
       fila('Ingreso financiero (MM$)', R2.ingreso_financiero, R2.ingreso_financiero_p, R2.ingreso_financiero_v, R2.ingreso_financiero_vp) +
@@ -542,9 +727,9 @@ async function eerrExportResumenPDF() {
       fila('Diferencia de cambio (MM$)', R2.diferencia_cambio, R2.diferencia_cambio_p, R2.diferencia_cambio_v, R2.diferencia_cambio_vp) +
       filaCel('= Resultado no operacional (MM$)', R2.resultado_no_operacional, R2.resultado_no_operacional_p, R2.resultado_no_operacional_v, R2.resultado_no_operacional_vp) +
       sep('Resultado Final') +
-      filaCel('= Resultado antes de impuestos (MM$)', R2.resultado_antes_imp, R2.resultado_antes_imp_p, R2.resultado_antes_imp_v, R2.resultado_antes_imp_vp) +
-      fila('(−) Impuesto a la renta (MM$)', R2.impuesto_renta, R2.impuesto_renta_p, R2.impuesto_renta_v, R2.impuesto_renta_vp, true) +
-      filaAzul('= Resultado del ejercicio (MM$)', R2.resultado_ejercicio, R2.resultado_ejercicio_p, R2.resultado_ejercicio_v, R2.resultado_ejercicio_vp);
+      filaCel('= Resultado antes de impuestos (MM$)', _vL('resultado_antes_imp'), R2.resultado_antes_imp_p, R2.resultado_antes_imp_v, R2.resultado_antes_imp_vp) +
+      fila('(−) Impuesto a la renta (MM$)' + (_limpio ? ' · 27%' : ''), _vL('impuesto_renta'), R2.impuesto_renta_p, R2.impuesto_renta_v, R2.impuesto_renta_vp, true) +
+      filaAzul('= Resultado del ejercicio (MM$)', _vL('resultado_ejercicio'), R2.resultado_ejercicio_p, R2.resultado_ejercicio_v, R2.resultado_ejercicio_vp);
 
     const thG = (t2, span) => '<th colspan="' + span + '" style="background:#002D73;color:#fff;font-size:9px;' +
       'padding:4px 7px;letter-spacing:.05em;border-right:1px solid rgba(255,255,255,.25)">' + t2 + '</th>';
@@ -558,7 +743,8 @@ async function eerrExportResumenPDF() {
       'padding:18px 24px 22px;font-family:Arial,sans-serif;color:#111;box-sizing:border-box';
     wrap.innerHTML =
       '<div style="border-bottom:2.5px solid #002D73;padding-bottom:7px;margin-bottom:12px">' +
-        '<span style="font-size:15px;font-weight:700;color:#002D73">TECSERVICE — Estado de Resultado · Servicio Técnico S&amp;S</span>' +
+        '<span style="font-size:15px;font-weight:700;color:#002D73">TECSERVICE — ' +
+      (_limpio ? 'EERR Limpio · Servicio Técnico S&amp;S' : 'Estado de Resultado · Servicio Técnico S&amp;S') + '</span>' +
         '&emsp;<span style="font-size:10px;color:#555">' + M[ult] + ' y acumulado del año' +
         (hoy ? ' &nbsp;·&nbsp; Datos al ' + hoy : '') + '</span></div>' +
       '<table style="border-collapse:collapse;width:100%">' +
@@ -574,8 +760,14 @@ async function eerrExportResumenPDF() {
         'Cifras en MM$. El acumulado suma los ' + n + ' meses cerrados del año (' + M[0] + '–' + M[ult] + ') y ' +
         'se compara contra el presupuesto acumulado del mismo período. La variación es real − presupuesto en ' +
         'ambos bloques, así que positivo y verde es siempre favorable —más ingreso o menos costo que lo ' +
-        'presupuestado— y negativo y rojo, desfavorable. El costo de ventas se abre en técnicos/personal y ' +
-        'repuestos, apertura que el Excel sólo trae en Real, por eso sus columnas de presupuesto van en «—».</div>';
+        'presupuestado— y negativo y rojo, desfavorable. ' +
+        (_limpio
+          ? 'El costo de ventas va en una sola línea, ya neto del costo de garantías.'
+          : 'El costo de ventas se abre en técnicos/personal y repuestos, apertura que el Excel sólo trae en ' +
+            'Real, por eso sus columnas de presupuesto van en «—».') + '</div>' +
+      (_limpio && window._eerrNotaLimpio
+        ? '<div style="margin-top:9px;border-top:1px solid #E6EAF2;padding-top:7px;color:#444">' +
+          window._eerrNotaLimpio(true) + '</div>' : '');
 
     document.body.appendChild(wrap);
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -587,7 +779,7 @@ async function eerrExportResumenPDF() {
       width: realW, height: realH, windowWidth: realW, windowHeight: realH,
     });
     const MM_PX = 25.4 / 96;
-    await hdEntregar(canvas, 'EERR_Resumen_TS_' + (hoy || '').replace(/[\s/]+/g, '-'),
+    await hdEntregar(canvas, (_limpio ? 'EERR_Limpio_Resumen_' : 'EERR_Resumen_TS_') + (hoy || '').replace(/[\s/]+/g, '-'),
                      realW * MM_PX, realH * MM_PX);
   } catch (err) {
     console.error('eerrExportResumenPDF:', err);
@@ -598,18 +790,21 @@ async function eerrExportResumenPDF() {
   }
 }
 
-async function eerrExportPDF() {
+// Exporta a PDF el EERR de arriba con sus ratios, o el EERR Limpio solo. Es
+// la misma rutina: cambian las tablas, el título y el nombre del archivo.
+async function eerrExportPDF(cual) {
   // Verificar librerías antes de todo
   if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
     alert('Librerías PDF no cargadas. Verifique conexión a internet e intente de nuevo.');
     return;
   }
 
-  const eerrTbl  = document.getElementById('eerr-table');
-  const ratioTbl = document.getElementById('eerr-ratio-table');
+  const limpio   = cual === 'limpio';
+  const eerrTbl  = document.getElementById(limpio ? 'eerr-limpio-table' : 'eerr-table');
+  const ratioTbl = limpio ? null : document.getElementById('eerr-ratio-table');
   if (!eerrTbl && !ratioTbl) { alert('No hay datos EERR para exportar.'); return; }
 
-  const btn = document.getElementById('eerr-pdf-btn');
+  const btn = document.getElementById(limpio ? 'eerr-limpio-pdf-btn' : 'eerr-pdf-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
 
   const mesLbl = (document.getElementById('eerr-mes-lbl') || {}).textContent || '';
@@ -645,7 +840,8 @@ async function eerrExportPDF() {
 
     const hdr = document.createElement('div');
     hdr.style.cssText = 'margin-bottom:10px;border-bottom:2.5px solid #002D73;padding-bottom:6px';
-    hdr.innerHTML = '<span style="font-size:13px;font-weight:700;color:#002D73">TECSERVICE — Estado de Resultado y Análisis de Ratios</span>' +
+    hdr.innerHTML = '<span style="font-size:13px;font-weight:700;color:#002D73">TECSERVICE — ' +
+      (limpio ? 'EERR Limpio' : 'Estado de Resultado y Análisis de Ratios') + '</span>' +
       '&emsp;<span style="font-size:10px;color:#555">Período: ' + mesLbl + ' &nbsp;·&nbsp; Cifras en MM$</span>';
     wrap.appendChild(hdr);
 
@@ -660,15 +856,17 @@ async function eerrExportPDF() {
       return sec;
     }
 
-    if (eerrTbl)  wrap.appendChild(makeSection('Estado de Resultado', eerrTbl));
+    if (eerrTbl)  wrap.appendChild(makeSection(limpio ? 'EERR Limpio' : 'Estado de Resultado', eerrTbl));
     if (ratioTbl) wrap.appendChild(makeSection('Análisis de Ratios',  ratioTbl));
 
     // Misma nota que va al pie de la tabla en pantalla
     const nota = document.createElement('div');
     nota.style.cssText = 'font-size:8px;color:#555;line-height:1.5;margin-top:2px';
-    nota.innerHTML = 'El <strong>Costo de Ventas</strong> se abre en <strong>Costo Técnicos y Personal</strong> ' +
-                     '(gasto por beneficios a los empleados técnicos) y <strong>Costo Repuestos y Otros</strong> ' +
-                     '(el resto, por diferencia). Esa apertura sólo existe en Real: el presupuesto no la distingue.';
+    nota.innerHTML = limpio
+      ? (window._eerrNotaLimpio ? window._eerrNotaLimpio(true) : '')
+      : 'El <strong>Costo de Ventas</strong> se abre en <strong>Costo Técnicos y Personal</strong> ' +
+        '(gasto por beneficios a los empleados técnicos) y <strong>Costo Repuestos y Otros</strong> ' +
+        '(el resto, por diferencia). Esa apertura sólo existe en Real: el presupuesto no la distingue.';
     wrap.appendChild(nota);
 
     document.body.appendChild(wrap);
@@ -698,7 +896,7 @@ async function eerrExportPDF() {
     });
 
     const MM = 25.4 / 96;
-    await hdEntregar(canvas, 'EERR_TS_' + mesLbl.replace(/[\s/]+/g, '_') + '_' + ANO,
+    await hdEntregar(canvas, (limpio ? 'EERR_Limpio_' : 'EERR_TS_') + mesLbl.replace(/[\s/]+/g, '_') + '_' + ANO,
                      realW * MM, realH * MM);
 
   } catch (err) {

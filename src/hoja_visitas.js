@@ -1148,6 +1148,9 @@ const VP_ALIAS = {
   'CLINICA UNIVERSIDAD DE DESARROLLO': 'UNIVERSIDAD DEL DESARROLLO',
   // Excluidos del plan por contrato, escritos distinto en VISITAS.
   'POSTA CENTRAL': 'HOSPITAL DE URGENCIA ASISTENCIA PUBLICA DR. ALEJANDRO DEL RIO',
+  // Escritos distinto en VISITAS que en Base Instalada (revisado el 16-10-2026).
+  'CLINICA ESTETICA ESTORIL': 'CLINICA ESTORIL',
+  'CORPORACION DE SALUD PDI O CORPSALUD': 'CORPORACION DE SALUD PDI',
 };
 // Cliente de VISITAS que calza con dos cuentas posibles —DIPRECA, del plan, y
 // HOSPITAL DIPRECA, con contrato—. Sin confirmar va a «Otras regiones», junto
@@ -1345,6 +1348,14 @@ let VP_PROG_IDX = null;
 // Superintendencia de Salud, registro de prestadores: Clínica Vespucio, Serafín Zamora 190.
 const VP_COMUNA_WEB = {
   'CLINICA VESPUCIO SPA': 'La Florida',
+  'CORPORACION MUNICIPAL DESARROLLO CERRO NAVIA': 'Cerro Navia',
+  'ILUSTRE MUNICIPALIDAD DE CERRO NAVIA': 'Cerro Navia',
+};
+// Región de clientes que no están en ninguna hoja del Excel (clave: nombre normalizado). La comuna
+// sale de VP_COMUNA_WEB, así que acá sólo van los que ahí tienen su comuna.
+const VP_REGION_MANUAL = {
+  'CORPORACION MUNICIPAL DESARROLLO CERRO NAVIA': 'Metropolitana',
+  'ILUSTRE MUNICIPALIDAD DE CERRO NAVIA': 'Metropolitana',
 };
 
 function vpProgDatosCliente(nombre) {
@@ -1372,6 +1383,7 @@ function vpProgDatosCliente(nombre) {
   if (!region && m && m.region && m.region !== 'Sin región') region = m.region;
   if (!region && b && b.region && b.region !== 'Sin región') region = b.region;
   if (!region) region = vxRegionPorNombre(nombre) || '';
+  if (!region) region = VP_REGION_MANUAL[vxNorm(nombre)] || '';
   // Comuna: plan > Mapa Clientes > búsqueda en internet.
   if (!com && m && m.comuna) com = m.comuna;
   if (!com) com = VP_COMUNA_WEB[vxNorm(nombre)] || '';

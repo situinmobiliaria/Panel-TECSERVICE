@@ -69,6 +69,13 @@ OUT   = os.path.join(DIR, "dashboard_contratos_v16.2.html")
 PPTO_ANUAL_TOTAL = 2_724_000_000   # Presupuesto anual total del área (CLP)
 
 EJECUTIVOS_VISITAS = ["Eglys Ramirez", "Cristian Perez"]
+# La hoja VISITAS no siempre escribe el nombre igual: desde la base del 14-10-2026
+# Cristián viene como «Cristian Perez Farias». Se reconoce por el nombre y el primer
+# apellido, sin mirar tildes ni lo que venga después.
+def _ejecutivo_visitas(nombre):
+    k = _norm_cli(nombre)
+    return next((e for e in EJECUTIVOS_VISITAS
+                 if k == _norm_cli(e) or k.startswith(_norm_cli(e) + " ")), None)
 
 # IMPORTANTE: esta lista debe estar sincronizada con $jsFiles en build.ps1.
 # Si un archivo falta aquí, esa hoja simplemente no existe en el standalone
@@ -643,8 +650,8 @@ def read_visitas(wb, mes_corte):
     det            = defaultdict(int)
 
     for row in ws.iter_rows(min_row=2, values_only=True):
-        asignado = safe_str(row[0])
-        if asignado not in EJECUTIVOS_VISITAS:
+        asignado = _ejecutivo_visitas(safe_str(row[0]))
+        if asignado is None:
             continue
 
         tipo_act = safe_str(row[6])
@@ -1657,6 +1664,10 @@ def read_base_instalada(wb, contratos=None):
             "otros_no":          otros_no,
             "region":            region_cli,
             "region_manual":     any(n in cli_reg_manual for n in [nombre] + alias_bi.get(nombre, [])),
+            # Equipos por línea tal como vienen en la hoja: los usa _bi_region_desde_cartera
+            # para mover al cliente de región en el resumen y se quitan al terminar.
+            "_lin":              dict(ls),
+            "_lin_si":           dict(ls_si),
             "estado":            estado_cli,
             "con_contrato":      estado_cli in ("Contrato", "Garantia"),
             "cv":                any(con_contrato_vigente(n) for n in [nombre] + alias_bi.get(nombre, [])),
@@ -1708,6 +1719,57 @@ def read_base_instalada(wb, contratos=None):
             for r, d in sorted(reg_map_todos.items(), key=lambda x: -x[1]["total"])
         },
     }
+
+
+def _bi_region_desde_cartera(bi, cartera):
+    """Completa la región de los clientes que BASE INSTALADA trae vacía con la que
+    la Cartera ST dedujo (mapa de clientes, Direcciones, nombre, establecimiento del
+    DEIS o comuna), y los pasa de «Sin región» a su región en los resúmenes por región.
+    Una región que viene de la hoja o de BI_clientes_sin_region.xlsx no se toca."""
+    out = []
+    if not bi or not cartera:
+        return out
+    idx = {}
+    for x in cartera.get("clientes") or []:
+        if x.get("r") and x["r"] != "Sin región":
+            for n in [x["n"]] + list(x.get("alias") or []):
+                idx.setdefault(_norm_cli(n), x["r"])
+    tablas = [bi.get("por_region") or {}, bi.get("por_region_todos") or {}]
+
+    def mover(tabla, c, desde, hacia):
+        d = tabla.get(desde)
+        if not d:
+            return
+        h = tabla.setdefault(hacia, {"total": 0, "total_si": 0, "n_clientes": 0, "lineas": {}, "lineas_si": {}})
+        d["total"] -= c["total"]; h["total"] += c["total"]
+        d["total_si"] -= c["total_si"]; h["total_si"] += c["total_si"]
+        d["n_clientes"] -= 1; h["n_clientes"] += 1
+        for campo, lin in (("lineas", c.get("_lin") or {}), ("lineas_si", c.get("_lin_si") or {})):
+            for k, v in lin.items():
+                d[campo][k] = d[campo].get(k, 0) - v
+                if d[campo][k] <= 0:
+                    d[campo].pop(k, None)
+                h[campo][k] = h[campo].get(k, 0) + v
+
+    for c in bi.get("clientes") or []:
+        if (c.get("region") or "Sin región") != "Sin región":
+            continue
+        reg = idx.get(_norm_cli(c["nombre"])) or next(
+            (idx[_norm_cli(a)] for a in c.get("alias") or [] if _norm_cli(a) in idx), None)
+        if not reg:
+            continue
+        # por_region deja fuera a los clientes con contrato vigente; por_region_todos no.
+        mover(tablas[1], c, "Sin región", reg)
+        if not c.get("cv"):
+            mover(tablas[0], c, "Sin región", reg)
+        c["region"] = reg
+        out.append((c["nombre"], reg))
+    for t in tablas:                      # una región que quedó sin clientes sale de la tabla
+        for r in [r for r, d in t.items() if r == "Sin región" and d["n_clientes"] <= 0 and d["total"] <= 0]:
+            del t[r]
+    for c in bi.get("clientes") or []:
+        c.pop("_lin", None); c.pop("_lin_si", None)
+    return out
 
 
 # Nombres de región de BASE INSTALADA normalizados a los que usa el resto del
@@ -5118,6 +5180,22 @@ def read_ratios2(wb):
             if clave not in idx_fila and frag in etq:
                 idx_fila[clave] = ri
                 break
+    # Apertura de la depreciación: las tres líneas que la componen están
+    # inmediatamente debajo de ella. La suma de las tres es la línea total, así
+    # que el resultado del EERR no cambia: es sólo apertura.
+    _ri_dep = idx_fila.get("depreciacion")
+    if _ri_dep is not None:
+        _APERTURA = [("dep_ss", "S&S"), ("dep_arr_piso", "ARRIENDO PISO"),
+                     ("dep_arr_bodega", "ARRIENDO BODEGA")]
+        for ri in range(_ri_dep + 1, min(_ri_dep + 6, len(rows))):
+            etq = _norm_cli(rows[ri][1]) if len(rows[ri]) > 1 and rows[ri][1] is not None else ""
+            if not etq:
+                continue
+            for clave, frag in _APERTURA:
+                if clave not in idx_fila and frag in etq:
+                    idx_fila[clave] = ri
+                    break
+
     faltan = [c for c, _ in ETIQUETAS if c not in idx_fila]
     if faltan:
         print(f"  ADVERTENCIA: filas no encontradas en Ratio Costos 2: {', '.join(faltan)}")
@@ -5146,6 +5224,9 @@ def read_ratios2(wb):
         return pct(ri), pctp(ri), pctv(ri), pctvp(ri)
 
     D = {}
+    for clave in ("dep_ss", "dep_arr_piso", "dep_arr_bodega"):
+        ri = idx_fila.get(clave)
+        D[clave] = row4(ri) if ri is not None else ([0.0] * n, [0.0] * n, [0.0] * n, [0.0] * n)
     for clave, _ in ETIQUETAS:
         ri = idx_fila.get(clave)
         if ri is None:
@@ -5172,6 +5253,15 @@ def read_ratios2(wb):
         "costo_tecnicos":  costo_tecnicos,
         "costo_repuestos": costo_repuestos,
     }
+    for clave in ("dep_ss", "dep_arr_piso", "dep_arr_bodega"):
+        salida[clave] = D[clave][0]
+        salida[clave + "_p"] = D[clave][1]
+        salida[clave + "_v"] = D[clave][2]
+        salida[clave + "_vp"] = D[clave][3]
+    _dsum = [round(D["dep_ss"][0][i] + D["dep_arr_piso"][0][i] + D["dep_arr_bodega"][0][i], 2) for i in range(n)]
+    _dtot = [round(v, 2) for v in col("depreciacion")]
+    if any(abs(_dsum[i] - _dtot[i]) > 0.05 for i in range(n)):
+        print(f"       ADVERTENCIA: la apertura de depreciación no suma la línea total: {_dsum} vs {_dtot}")
     for clave, _ in ETIQUETAS:
         if clave in ("costo_tecnicos", "costo_repuestos"):
             continue
@@ -6457,6 +6547,11 @@ def main():
     app_data["plan_rm"] = build_plan_rm(app_data, contratos, direcciones, mapa_data)
     # Va después del plan: reutiliza las comunas y ubicaciones que éste resolvió.
     app_data["cartera_st"] = build_cartera_st(app_data, contratos, direcciones, mapa_data)
+    # La Cartera ST resuelve la región de más clientes que la hoja BASE INSTALADA: lo que
+    # dedujo se traslada a Base Instalada para que las dos hojas no se contradigan.
+    _movidos = _bi_region_desde_cartera(app_data.get("base_instalada"), app_data["cartera_st"])
+    print(f"       Base Instalada: {len(_movidos)} clientes sin región toman la de la Cartera ST"
+          + (": " + ", ".join(f"{n} → {r}" for n, r in _movidos) if _movidos else ""))
     print(f"       CASOS: {len(casos_data['casos'])} casos relevantes | {len(casos_data['equipos'])} equipos detenidos")
 
     # ── Parchear template.html (fuente de build.ps1) ─────────────────────────

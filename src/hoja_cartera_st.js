@@ -121,7 +121,7 @@
     </div>
 
     <div style="display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:.75rem;margin-bottom:.85rem">
-      <div class="card">
+      <div class="card mapa-fijo">
         <div class="ch"><span class="ct">Mapa de la cartera</span>
           <span id="cst-map-lbl" style="font-size:.57rem;color:var(--mut)">—</span>
           <button class="btn" onclick="window._cstFit()" style="margin-left:auto;font-size:.56rem">Centrar</button></div>
