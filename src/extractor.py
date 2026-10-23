@@ -144,6 +144,13 @@ def to_float(val, default=0.0):
             return default
         if isinstance(val, float) and math.isnan(val):
             return default
+        # Montos que Salesforce/Excel entrega como texto: «CLP 343.081» o
+        # «CLP 364.980,00» (punto = miles, coma = decimales). Desde la base del
+        # 23-10-2026 las hojas de Brecha vienen así y quedaban en 0.
+        if isinstance(val, str) and ("CLP" in val.upper() or "$" in val):
+            t = re.sub(r"[^0-9,.\-]", "", val)
+            t = t.replace(".", "").replace(",", ".")
+            return float(t) if t not in ("", "-", ".") else default
         return float(val)
     except Exception:
         return default

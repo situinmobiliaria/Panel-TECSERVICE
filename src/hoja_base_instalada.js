@@ -1407,7 +1407,431 @@ function _biRenderCurva2() {
   cv.style.cursor = 'grab';
 }
 
-// El exportable es un Excel con una hoja por región, cada una con sus diez
+// ── PLAN DE VISITAS: hojas «Consolidado» y «Carta Gantt» ────────
+// Salen del Excel «Plan_Visitas_BI_TS_2026-09-22 Corregido». Las cifras (clientes,
+// equipos y potencial por región) se calculan con los mismos datos que las hojas
+// regionales del exportable; lo escrito a mano en ese plan (período, estado,
+// acciones clave, observaciones y el cronograma de la Gantt) está acá, por región.
+// Una región que no figura en el plan sale igual, con esos campos en blanco.
+const _BI_PLAN = {
+ "Metropolitana": {
+  "periodo": "Sep–Oct 2026 (inmediato) + continuo",
+  "estado": "Planificado",
+  "acciones": "Reunión / Visita gerencial · Levantamiento técnico · Auditoría técnica · Contrato preventivo · Oferta comercial · Programa preventivo · Evaluación de renovación",
+  "obs": "Prioridad máxima. Inicio inmediato.",
+  "margen": 0.55,
+  "prioG": 1,
+  "gantt": [
+   {
+    "c0": 0,
+    "c1": 0,
+    "t": "EN EJECUCIÓN",
+    "f": "006B3C"
+   },
+   {
+    "c0": 1,
+    "c1": 1,
+    "t": "SEGUIMIENTO",
+    "f": "2E5D9F"
+   }
+  ]
+ },
+ "Bío Bío": {
+  "periodo": "Sep 2026 – EN EJECUCIÓN",
+  "estado": "En ejecución",
+  "acciones": "Levantamiento técnico · Auditoría técnica · Contrato preventivo · Convenio institucional · Oferta comercial · Programa preventivo · Evaluación de renovación",
+  "obs": "Campaña en curso.",
+  "margen": 0.5,
+  "prioG": 2,
+  "gantt": [
+   {
+    "c0": 0,
+    "c1": 0,
+    "t": "EN EJECUCIÓN",
+    "f": "006B3C"
+   }
+  ]
+ },
+ "Araucanía": {
+  "periodo": "Sep 2026 – EN EJECUCIÓN",
+  "estado": "En ejecución",
+  "acciones": "Levantamiento técnico · Contrato preventivo · Convenio institucional · Oferta comercial · Programa preventivo · Evaluación de renovación",
+  "obs": "Campaña en curso.",
+  "margen": 0.5,
+  "prioG": 3,
+  "gantt": [
+   {
+    "c0": 0,
+    "c1": 0,
+    "t": "EN EJECUCIÓN",
+    "f": "006B3C"
+   }
+  ]
+ },
+ "Valparaíso": {
+  "periodo": "Oct–Nov 2026",
+  "estado": "Planificado",
+  "acciones": "Levantamiento técnico · Auditoría técnica · Contrato preventivo · Convenio institucional · Programa preventivo",
+  "obs": "Inicio oct con foco Zona Naval.",
+  "margen": 0.5,
+  "prioG": 5,
+  "gantt": [
+   {
+    "c0": 1,
+    "c1": 3,
+    "t": "CAMPAÑA",
+    "f": "7030A0"
+   }
+  ]
+ },
+ "Maule": {
+  "periodo": "Sep 2026 – EN EJECUCIÓN",
+  "estado": "En ejecución",
+  "acciones": "Levantamiento técnico · Auditoría técnica · Contrato preventivo · Convenio institucional · Programa preventivo",
+  "obs": "Campaña en curso.",
+  "margen": 0.5,
+  "prioG": 6,
+  "gantt": [
+   {
+    "c0": 0,
+    "c1": 0,
+    "t": "EN EJECUCIÓN",
+    "f": "006B3C"
+   }
+  ]
+ },
+ "Los Lagos": {
+  "periodo": "Sep 2026 – EN EJECUCIÓN",
+  "estado": "En ejecución",
+  "acciones": "Reunión / Visita gerencial · Contrato preventivo · Programa preventivo",
+  "obs": "Campaña en curso.",
+  "margen": 0.5,
+  "prioG": 4,
+  "gantt": [
+   {
+    "c0": 0,
+    "c1": 0,
+    "t": "EN EJECUCIÓN",
+    "f": "006B3C"
+   }
+  ]
+ },
+ "O'Higgins": {
+  "periodo": "Nov–Dic 2026",
+  "estado": "Planificado",
+  "acciones": "Levantamiento técnico · Auditoría técnica · Convenio institucional · Programa preventivo",
+  "obs": "Campaña nov–dic, post RM.",
+  "margen": 0.5,
+  "prioG": 7,
+  "gantt": [
+   {
+    "c0": 2,
+    "c1": 4,
+    "t": "CAMPAÑA",
+    "f": "7030A0"
+   }
+  ]
+ },
+ "Antofagasta": {
+  "periodo": "Ene 2027 (Zona Norte)",
+  "estado": "Planificado",
+  "acciones": "Levantamiento técnico · Auditoría técnica · Programa preventivo",
+  "obs": "Coordinar con técnico norte.",
+  "margen": 0.5,
+  "prioG": 8,
+  "gantt": [
+   {
+    "c0": 4,
+    "c1": 4,
+    "t": "ZONA NORTE",
+    "f": "ED7D31"
+   }
+  ]
+ },
+ "Coquimbo": {
+  "periodo": "Ene 2027 (Téc. Norte)",
+  "estado": "Planificado",
+  "acciones": "Levantamiento técnico · Programa preventivo",
+  "obs": "★ Base del técnico norte. Foco H. La Serena.",
+  "margen": 0.5,
+  "prioG": 9,
+  "gantt": [
+   {
+    "c0": 4,
+    "c1": 4,
+    "t": "TÉC. NORTE",
+    "f": "C00000"
+   }
+  ]
+ },
+ "Magallanes": {
+  "periodo": "Oct–Nov 2026 (Téc. Sur)",
+  "estado": "Planificado",
+  "acciones": "Levantamiento técnico · Auditoría técnica · Convenio institucional · Programa preventivo · Evaluación de renovación",
+  "obs": "Apoya técnico sur.",
+  "margen": 0.5,
+  "prioG": 10,
+  "gantt": [
+   {
+    "c0": 1,
+    "c1": 3,
+    "t": "TÉC. SUR",
+    "f": "00B0F0"
+   }
+  ]
+ },
+ "Tarapacá": {
+  "periodo": "Ene 2027 (Zona Norte)",
+  "estado": "Planificado",
+  "acciones": "Levantamiento técnico · Auditoría técnica · Contrato preventivo · Convenio institucional · Programa preventivo · Evaluación de renovación",
+  "obs": "Ronda zona norte.",
+  "margen": 0.5,
+  "prioG": 11,
+  "gantt": [
+   {
+    "c0": 4,
+    "c1": 4,
+    "t": "ZONA NORTE",
+    "f": "ED7D31"
+   }
+  ]
+ },
+ "Ñuble": {
+  "periodo": "Sep 2026 – EN EJECUCIÓN",
+  "estado": "En ejecución",
+  "acciones": "Levantamiento técnico · Auditoría técnica · Contrato preventivo · Programa preventivo · Evaluación de renovación",
+  "obs": "Campaña en curso.",
+  "margen": 0.5,
+  "prioG": 12,
+  "gantt": [
+   {
+    "c0": 0,
+    "c1": 0,
+    "t": "EN EJECUCIÓN",
+    "f": "006B3C"
+   }
+  ]
+ },
+ "Los Ríos": {
+  "periodo": "Sep 2026 – EN EJECUCIÓN",
+  "estado": "En ejecución",
+  "acciones": "Auditoría técnica · Convenio institucional · Programa preventivo · Evaluación de renovación",
+  "obs": "Campaña en curso.",
+  "margen": 0.5,
+  "prioG": 13,
+  "gantt": [
+   {
+    "c0": 0,
+    "c1": 0,
+    "t": "EN EJECUCIÓN",
+    "f": "006B3C"
+   }
+  ]
+ },
+ "Arica y Parinacota": {
+  "periodo": "Feb 2027 (Zona Norte)",
+  "estado": "Planificado",
+  "acciones": "Auditoría técnica · Convenio institucional · Programa preventivo",
+  "obs": "Ronda zona norte.",
+  "margen": 0.5,
+  "prioG": 14,
+  "gantt": [
+   {
+    "c0": 5,
+    "c1": 5,
+    "t": "ZONA NORTE",
+    "f": "ED7D31"
+   }
+  ]
+ },
+ "Aysén": {
+  "periodo": "Oct–Nov 2026 (Téc. Sur)",
+  "estado": "Planificado",
+  "acciones": "Programa preventivo · Evaluación de renovación",
+  "obs": "Apoya técnico sur.",
+  "margen": 0.5,
+  "prioG": 16,
+  "gantt": [
+   {
+    "c0": 1,
+    "c1": 3,
+    "t": "TÉC. SUR",
+    "f": "00B0F0"
+   }
+  ]
+ },
+ "Atacama": {
+  "periodo": "Feb 2027 (Zona Norte)",
+  "estado": "Planificado",
+  "acciones": "Levantamiento técnico · Auditoría técnica · Programa preventivo · Evaluación de renovación",
+  "obs": "Ronda zona norte.",
+  "margen": 0.5,
+  "prioG": 15,
+  "gantt": [
+   {
+    "c0": 5,
+    "c1": 5,
+    "t": "ZONA NORTE",
+    "f": "ED7D31"
+   }
+  ]
+ }
+};
+const _BI_PLAN_ORDEN_C = ["Metropolitana", "Bío Bío", "Araucanía", "Valparaíso", "Maule", "Los Lagos", "O'Higgins", "Antofagasta", "Coquimbo", "Magallanes", "Tarapacá", "Ñuble", "Los Ríos", "Arica y Parinacota", "Aysén", "Atacama"];
+const _BI_PLAN_ORDEN_G = ["Metropolitana", "Bío Bío", "Araucanía", "Los Lagos", "Maule", "Ñuble", "Los Ríos", "Valparaíso", "Magallanes", "Aysén", "O'Higgins", "Antofagasta", "Coquimbo", "Tarapacá", "Arica y Parinacota", "Atacama"];
+const _BI_PLAN_MESES = ['Sep 2026', 'Oct 2026', 'Nov 2026', 'Dic 2026', 'Ene 2027', 'Feb 2027'];
+
+function _biPlanNorm(s) {
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+const _BI_PLAN_IDX = {};
+Object.keys(_BI_PLAN).forEach(k => { _BI_PLAN_IDX[_biPlanNorm(k)] = k; });
+function _biPlanDe(reg) { return _BI_PLAN[_BI_PLAN_IDX[_biPlanNorm(reg)]] || {}; }
+function _biPlanPos(orden, reg) {
+  const i = orden.findIndex(r => _biPlanNorm(r) === _biPlanNorm(reg));
+  return i < 0 ? 1e6 : i;
+}
+
+// res: [{ reg, n, eq, foco, tot }] — foco y tot ya en MM$ con un decimal.
+function _biPlanHojas(wb, res) {
+  const BORDE = { style: 'thin', color: { rgb: 'BFBFBF' } };
+  const bordes = { top: BORDE, bottom: BORDE, left: BORDE, right: BORDE };
+  const sCab = sz => ({
+    font: { bold: true, sz: sz, color: { rgb: 'FFFFFF' } },
+    fill: { patternType: 'solid', fgColor: { rgb: '1F3864' } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: bordes });
+  const sTit = sz => ({ font: { bold: true, sz: sz, color: { rgb: 'FFFFFF' } },
+    fill: { patternType: 'solid', fgColor: { rgb: '1F3864' } }, alignment: { vertical: 'center' } });
+  const bg = i => (i % 2 ? 'F0F7FE' : 'FFFFFF');
+  const cel = (i, extra) => Object.assign({ font: { sz: 9, color: { rgb: '1F1F1F' } },
+    fill: { patternType: 'solid', fgColor: { rgb: bg(i) } }, border: bordes,
+    alignment: { vertical: 'center', wrapText: true } }, extra || {});
+  const AMAR = { fill: { patternType: 'solid', fgColor: { rgb: 'FFFF00' } } };
+  const ESTADO = {
+    'En ejecución': { font: { bold: true, sz: 9, color: { rgb: 'FFFFFF' } },
+                      fill: { patternType: 'solid', fgColor: { rgb: '006B3C' } } },
+    'Planificado':  { font: { sz: 9, color: { rgb: '7F6000' } },
+                      fill: { patternType: 'solid', fgColor: { rgb: 'FFE699' } } } };
+  const L = XLSX.utils.encode_cell;
+  const poner = (ws, r, c, v, s, z, f) => {
+    const cell = { v: v === undefined || v === null ? '' : v };
+    cell.t = typeof cell.v === 'number' ? 'n' : 's';
+    if (f) cell.f = f;
+    if (s) cell.s = s;
+    if (z) cell.z = z;
+    ws[L({ r: r, c: c })] = cell;
+  };
+  const redo = v => Math.round(v * 10) / 10;
+
+  // ── Consolidado ──
+  const ordC = res.slice().sort((a, b) =>
+    (_biPlanPos(_BI_PLAN_ORDEN_C, a.reg) - _biPlanPos(_BI_PLAN_ORDEN_C, b.reg)) || (b.foco - a.foco));
+  const wc = {};
+  const cab = ['Prior.', 'Región', 'N° Clientes\nFoco', 'Equipos\nFoco', 'Pot. Foco\nMM$', 'Margen (MM$)',
+               'Pot. Total\nRegión MM$', '% Plan Atacado', 'Ticket Promedio por Cliente',
+               'Período\nCampaña', 'Estado', 'Acciones Clave', 'Obs.'];
+  poner(wc, 0, 0, 'PLAN DE VISITAS TECSERVICE — RESUMEN CONSOLIDADO POR REGIÓN', sTit(11));
+  for (let c = 1; c < 13; c++) poner(wc, 0, c, '', sTit(11));
+  cab.forEach((t, c) => poner(wc, 2, c, t, sCab(9)));
+  let sN = 0, sD = 0, sE = 0, sF = 0, sG = 0;
+  ordC.forEach((x, i) => {
+    const r = 3 + i, R = r + 1, p = _biPlanDe(x.reg);        // R = fila en Excel
+    const mg = p.margen || 0.5, mgv = redo(x.foco * mg);
+    sN += x.n; sD += x.eq; sE += x.foco; sF += mgv; sG += x.tot;
+    poner(wc, r, 0, i + 1, i === 0
+      ? cel(i, { font: { bold: true, sz: 9, color: { rgb: 'FFFFFF' } }, alignment: { horizontal: 'center', vertical: 'center' },
+                 fill: { patternType: 'solid', fgColor: { rgb: 'C00000' } } })
+      : cel(i, { alignment: { horizontal: 'center', vertical: 'center' } }));
+    poner(wc, r, 1, x.reg, cel(i, { font: { bold: i === 0, sz: 9, color: { rgb: '1F1F1F' } } }));
+    poner(wc, r, 2, x.n, cel(i), '#,##0');
+    poner(wc, r, 3, x.eq, cel(i), '#,##0');
+    poner(wc, r, 4, x.foco, cel(i, AMAR), '#,##0.0');
+    poner(wc, r, 5, mgv, cel(i, AMAR), '#,##0.0', 'E' + R + '*' + mg);
+    poner(wc, r, 6, x.tot, cel(i, { font: { bold: true, sz: 9, color: { rgb: '1F1F1F' } } }), '#,##0.0');
+    poner(wc, r, 7, x.tot ? x.foco / x.tot : 0, cel(i, { font: { bold: true, sz: 9, color: { rgb: '1F1F1F' } } }),
+          '0.0%', 'IF(G' + R + '=0,0,E' + R + '/G' + R + ')');
+    poner(wc, r, 8, x.eq ? x.tot / x.eq : 0,
+          cel(i, Object.assign({ font: { bold: true, sz: 9, color: { rgb: '1F1F1F' } } }, AMAR)),
+          '#,##0.0', 'IF(D' + R + '=0,0,G' + R + '/D' + R + ')');
+    poner(wc, r, 9, p.periodo || '', cel(i));
+    poner(wc, r, 10, p.estado || '', cel(i, ESTADO[p.estado] || {}));
+    poner(wc, r, 11, p.acciones || '', cel(i));
+    poner(wc, r, 12, p.obs || '', cel(i));
+  });
+  const rt = 3 + ordC.length, RT = rt + 1;                    // fila de total
+  const sT = Object.assign(sCab(9), { alignment: { horizontal: 'left', vertical: 'center' } });
+  for (let c = 0; c < 13; c++) poner(wc, rt, c, '', sT);
+  poner(wc, rt, 1, 'TOTAL', sT);
+  const suma = col => 'SUM(' + col + '4:' + col + rt + ')';
+  poner(wc, rt, 2, sN, sT, '#,##0', suma('C'));
+  poner(wc, rt, 3, sD, sT, '#,##0', suma('D'));
+  poner(wc, rt, 4, redo(sE), sT, '#,##0', suma('E'));
+  poner(wc, rt, 5, redo(sF), sT, '#,##0', suma('F'));
+  poner(wc, rt, 6, redo(sG), sT, '#,##0', suma('G'));
+  poner(wc, rt, 7, sG ? sE / sG : 0, sT, '0.0%', 'IF(G' + RT + '=0,0,E' + RT + '/G' + RT + ')');
+  poner(wc, rt, 8, sD ? sG / sD : 0, sT, '#,##0', 'IF(D' + RT + '=0,0,G' + RT + '/D' + RT + ')');
+  wc['!ref'] = 'A1:' + L({ r: rt, c: 12 });
+  wc['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 12 } }];
+  wc['!cols'] = [{ wch: 7 }, { wch: 22 }, { wch: 11 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+                 { wch: 11 }, { wch: 14 }, { wch: 24 }, { wch: 13 }, { wch: 64 }, { wch: 30 }];
+  wc['!rows'] = [{ hpt: 20 }, { hpt: 8 }, { hpt: 36 }].concat(ordC.map(() => ({ hpt: 30 })));
+  wc['!freeze'] = { xSplit: 2, ySplit: 3 };
+
+  // ── Carta Gantt ──
+  const ordG = res.slice().sort((a, b) =>
+    (_biPlanPos(_BI_PLAN_ORDEN_G, a.reg) - _biPlanPos(_BI_PLAN_ORDEN_G, b.reg)) || (b.foco - a.foco));
+  const posC = {}; ordC.forEach((x, i) => { posC[x.reg] = i; });
+  const wg = {}, mg = [];
+  poner(wg, 0, 0, 'CARTA GANTT — PLAN TEMPORAL DE VISITAS TECSERVICE (SEP 2026 – FEB 2027)', sTit(13));
+  for (let c = 1; c < 11; c++) poner(wg, 0, c, '', sTit(13));
+  ['Prior.', 'Región', 'Eq.', 'Pot.\nMM$', 'Acciones Clave'].concat(_BI_PLAN_MESES)
+    .forEach((t, c) => poner(wg, 2, c, t, sCab(8)));
+  const ult = 3 + ordC.length;                                // última fila de datos del Consolidado
+  ordG.forEach((x, i) => {
+    const r = 3 + i, R = r + 1, p = _biPlanDe(x.reg);
+    const ref = col => 'INDEX(Consolidado!' + col + '$4:' + col + '$' + ult +
+                       ',MATCH(B' + R + ',Consolidado!B$4:B$' + ult + ',0))';
+    const base = extra => cel(i, Object.assign({ font: { sz: 8, color: { rgb: '1F1F1F' } } }, extra || {}));
+    poner(wg, r, 0, p.prioG || (posC[x.reg] + 1), i === 0
+      ? base({ font: { bold: true, sz: 8, color: { rgb: 'FFFFFF' } }, alignment: { horizontal: 'center', vertical: 'center' },
+               fill: { patternType: 'solid', fgColor: { rgb: 'C00000' } } })
+      : base({ alignment: { horizontal: 'center', vertical: 'center' } }));
+    poner(wg, r, 1, x.reg, base({ font: { bold: i === 0, sz: 8, color: { rgb: '1F1F1F' } } }));
+    poner(wg, r, 2, x.eq, base(), '#,##0', ref('D'));
+    poner(wg, r, 3, x.foco, base(), '#,##0.0', ref('E'));
+    poner(wg, r, 4, p.acciones || '', base());
+    for (let m = 0; m < 6; m++) poner(wg, r, 5 + m, '', base());
+    (p.gantt || []).forEach(g => {
+      const st = { font: { bold: true, sz: 7, color: { rgb: 'FFFFFF' } },
+        fill: { patternType: 'solid', fgColor: { rgb: g.f } }, border: bordes,
+        alignment: { horizontal: 'center', vertical: 'center' } };
+      for (let m = g.c0; m <= g.c1; m++) poner(wg, r, 5 + m, m === g.c0 ? g.t : '', st);
+      if (g.c1 > g.c0) mg.push({ s: { r: r, c: 5 + g.c0 }, e: { r: r, c: 5 + g.c1 } });
+    });
+  });
+  const rl = 3 + ordG.length + 1;                             // leyenda, dos filas
+  const LEY = [['006B3C', 'EN EJECUCIÓN: Campaña ya iniciada'], ['2E5D9F', 'SEGUIMIENTO: Región Metropolitana – continuo'],
+               ['7030A0', 'CAMPAÑA: Campaña programada'], ['00B0F0', 'TÉC. SUR: Apoya técnico de la zona sur'],
+               ['C00000', 'TÉC. NORTE: Propuesta: técnico norte (base La Serena)'], ['ED7D31', 'ZONA NORTE: Ronda zona norte coordinada']];
+  LEY.forEach((l, i) => {
+    const r = rl + (i % 2), col = [0, 3, 6][Math.floor(i / 2)];
+    poner(wg, r, col, '■', { font: { bold: true, sz: 14, color: { rgb: l[0] } } });
+    poner(wg, r, col + 1, l[1], { font: { sz: 8, color: { rgb: '1F1F1F' } } });
+  });
+  wg['!ref'] = 'A1:' + L({ r: rl + 1, c: 10 });
+  mg.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 10 } });
+  wg['!merges'] = mg;
+  wg['!cols'] = [{ wch: 7 }, { wch: 20 }, { wch: 8 }, { wch: 9 }, { wch: 40 }, { wch: 13 }, { wch: 13 },
+                 { wch: 13 }, { wch: 13 }, { wch: 13 }, { wch: 13 }];
+  wg['!rows'] = [{ hpt: 20 }, { hpt: 8 }, { hpt: 24 }].concat(ordG.map(() => ({ hpt: 30 })));
+  wg['!freeze'] = { xSplit: 2, ySplit: 3 };
+
+  XLSX.utils.book_append_sheet(wb, wc, 'Consolidado');
+  XLSX.utils.book_append_sheet(wb, wg, 'Carta Gantt');
+}
+
+// El exportable es un Excel con las hojas «Consolidado» y «Carta Gantt» del plan y
+// una hoja por región, cada una con sus diez
 // clientes a visitar y una columna en blanco para escribir el plan de acción:
 // la lista no es para mirarla sino para repartirla y que vuelva completada.
 // Los clientes sin región quedan fuera — no hay a quién asignárselos.
@@ -1467,6 +1891,14 @@ window._biMxExport = function () {
 
     const wb = XLSX.utils.book_new();
     const usados = {};
+    // Las dos hojas del plan van primero; su resumen sale de los mismos diez
+    // clientes por región que llevan las hojas regionales.
+    _biPlanHojas(wb, regs.map(r => {
+      const top = porReg[r].slice().sort((a, b) => b.mant - a.mant).slice(0, 10);
+      return { reg: r, n: top.length, eq: top.reduce((s, p) => s + p.equipos, 0),
+               foco: M(top.reduce((s, p) => s + p.mant, 0)),
+               tot: M(porReg[r].reduce((s, p) => s + p.mant, 0)) };
+    }));
     regs.forEach(r => {
       const top = porReg[r].slice().sort((a, b) => b.mant - a.mant).slice(0, 10);
       // Sólo las líneas que la región efectivamente tiene: una columna de ceros
