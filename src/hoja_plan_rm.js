@@ -108,6 +108,8 @@
 
     <div class="g5" id="prm-kpi" style="grid-template-columns:repeat(5,1fr);margin-bottom:.9rem"></div>
 
+    ${slidesMarkup()}
+
     <div class="card" id="prm-como">
       <div class="ch" style="flex-wrap:wrap;gap:.5rem"><span class="ct">Cómo se arma el plan</span>
         ${btnExp('prm-como-pdf', "exportarPanel({ids:['prm-como'],titulo:'Plan RM y Valparaíso · Cómo se arma',archivo:'Plan_RM_como_se_arma',btn:'prm-como-pdf',ancho:1500})", 'Exportar')}
@@ -192,6 +194,469 @@
       <div class="cb" style="padding:.75rem .9rem"><div id="prm-gantt"></div></div>
     </div>`;
   }
+
+  // ── Slides de avance ─────────────────────────────────────────
+  // Las dos láminas que se presentaban a mano cada semana, armadas con los
+  // datos del panel: el avance sobre el top 10 de cada región y la agenda de
+  // un grupo con su mapa. Lo que no está en ningún Excel —el resultado de cada
+  // cliente y los textos de la lámina— se escribe aquí y se guarda en este
+  // navegador, como los planes de entrada.
+  const AV_KEY = 'planrm_avance_v1';
+  let av = {};
+  try { av = JSON.parse(localStorage.getItem(AV_KEY) || '{}') || {}; } catch (e) { av = {}; }
+  ['res', 'extra', 'nota', 'bul'].forEach(k => { if (!av[k] || typeof av[k] !== 'object') av[k] = {}; });
+  const avGuardar = () => { try { localStorage.setItem(AV_KEY, JSON.stringify(av)); } catch (e) { /* sin almacenamiento */ } };
+
+  const RES = {
+    neg: { t: 'Negociación',  col: '#2B2FE0', pos: true },
+    ren: { t: 'Renovado',     col: '#1FC7B6', pos: true },
+    dep: { t: 'Dependiente',  col: '#FF8A1F', pos: true },
+    sin: { t: 'Sin convenio', col: '#D0021B', pos: false },
+  };
+  const RES_ORD = ['', 'neg', 'ren', 'dep', 'sin'];
+  const POS_COL = '#2B2FE0', SINPOS_COL = '#1FC7B6', SINRES_COL = '#9AA6C8';
+  const regCorto = r => r === 'Metropolitana' ? 'Metropolitana' : 'Valparaíso';
+  const pad2 = v => String(v).padStart(2, '0');
+  const fDMA = iso => { const p = String(iso).split('-'); return p[2] + '-' + p[1] + '-' + p[0]; };
+  const diamante = (col, tam) => '<span style="display:inline-block;width:' + (tam || 9) + 'px;height:' + (tam || 9) +
+    'px;background:' + col + ';transform:rotate(45deg);flex:none"></span>';
+
+  let _avReg = 'Valparaíso', _avVer = 'abordados', _avSem = null;
+  let _gsReg = 'Metropolitana', _gsG = 3, _gsSem = null, _gsDia = 'todos';
+  let _gsMap = null, _gsCapa = null;
+
+  // Semana que contiene la fecha de los datos; si ya pasó el plan, la última.
+  const semDeHoy = () => {
+    const h = A.hoy || '';
+    const w = SEM.find(x => x.desde <= h && h <= x.hasta) || SEM.filter(x => x.desde <= h).pop() || SEM[0];
+    return w ? w.s : null;
+  };
+
+  // Visitas realizadas a cada cliente del plan, con el mismo cruce de nombres
+  // que usa la hoja Visitas Ejecutivos (vpCruce). Sin esa hoja, no hay visitas.
+  let _visPlan = null;
+  function visPlan() {
+    if (_visPlan) return _visPlan;
+    _visPlan = C.map(() => []);
+    const det = (A.visitas || {}).det;
+    if (!det || typeof vpCruce !== 'function' || typeof VP === 'undefined') return _visPlan;
+    vpCruce();
+    const inv = {};
+    VP.cruce.forEach((h, j) => { if (h >= 0) (inv[h] || (inv[h] = [])).push(j); });
+    det.filas.forEach(f => {
+      const js = inv[f[1]];
+      if (!js) return;
+      const iso = f[3] + '-' + pad2(f[4]) + '-' + pad2(f[6] || 1);
+      js.forEach(j => _visPlan[j].push({ f: iso, e: det.ejecutivos[f[0]], n: f[5] }));
+    });
+    _visPlan.forEach(l => l.sort((a, b) => a.f.localeCompare(b.f)));
+    return _visPlan;
+  }
+
+  // Posición de cada cliente por potencial ST dentro de su región.
+  const _rkReg = {};
+  REGS.forEach(r => C.map((u, j) => ({ u: u, j: j })).filter(x => x.u.r === r)
+    .sort((a, b) => (b.u.pot || 0) - (a.u.pot || 0)).forEach((x, i) => { _rkReg[x.j] = i + 1; }));
+
+  function slidesMarkup() {
+    const sel = (id, fn) => '<select id="' + id + '" onchange="' + fn + '(this.value)" style="font-size:.6rem;padding:.2rem .4rem;' +
+      'border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt)"></select>';
+    const lbl = t => '<span style="font-size:.55rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-left:.3rem">' + t + '</span>';
+    return `
+    <style>
+      .prm-ed{outline:none;border-radius:3px;min-height:1.1em;cursor:text}
+      .prm-ed:hover,.prm-ed:focus{background:rgba(43,47,224,.06);box-shadow:inset 0 0 0 1px rgba(43,47,224,.25)}
+      .prm-ed[data-ph]:empty:before{content:attr(data-ph);color:var(--mut);font-style:italic}
+    </style>
+    <div class="sh"><h2>Slides de avance</h2><div class="sh-line"></div>
+      <span class="sh-tag">Se arman solas con el plan, la agenda y las visitas realizadas · clic en el ◆ para marcar el resultado y en los textos para editarlos</span></div>
+
+    <div class="card" id="prm-av-card">
+      <div class="ch" style="flex-wrap:wrap;gap:.5rem">
+        <span class="ct">Avance clientes Top ${P.top_pot}</span>
+        ${lbl('Región')}<div id="prm-av-reg" style="display:flex;gap:.25rem"></div>
+        ${lbl('Semana')}${sel('prm-av-sem', 'window._prmAvSem')}
+        ${lbl('Mostrar')}<div id="prm-av-ver" style="display:flex;gap:.25rem"></div>
+        ${lbl('Agregar')}${sel('prm-av-add', 'window._prmAvAdd')}
+        <div style="margin-left:auto;display:flex;gap:.4rem">
+          ${btnExp('prm-av-xls', 'window._prmAvExcel()', 'Excel', true).replace('margin-left:auto;', '')}
+          ${btnExp('prm-av-exp', "window._prmAvExportar()", 'Exportar').replace('margin-left:auto;', '')}
+        </div>
+      </div>
+      <div class="cb" style="padding:.8rem .9rem"><div id="prm-av-box" style="background:var(--bg);padding:.4rem .5rem"></div></div>
+    </div>
+
+    <div class="card" style="margin-top:.9rem" id="prm-gs-card">
+      <div class="ch" style="flex-wrap:wrap;gap:.5rem">
+        <span class="ct">Clientes por grupo · agenda de la semana</span>
+        ${lbl('Región')}<div id="prm-gs-reg" style="display:flex;gap:.25rem"></div>
+        ${lbl('Grupo')}<div id="prm-gs-g" style="display:flex;gap:.25rem"></div>
+        ${lbl('Semana')}${sel('prm-gs-sem', 'window._prmGsSem')}
+        ${lbl('Días')}<div id="prm-gs-dia" style="display:flex;gap:.25rem"></div>
+        <div style="margin-left:auto;display:flex;gap:.4rem">
+          ${btnExp('prm-gs-xls', 'window._prmGsExcel()', 'Excel', true).replace('margin-left:auto;', '')}
+          ${btnExp('prm-gs-exp', "window._prmGsExportar()", 'Exportar').replace('margin-left:auto;', '')}
+        </div>
+      </div>
+      <div class="cb" style="padding:.8rem .9rem">
+        <div id="prm-gs-box" style="background:var(--bg);padding:.4rem .5rem">
+          <div id="prm-gs-tit"></div>
+          <div style="display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:1rem;align-items:start;margin-top:.7rem">
+            <div><div id="prm-gs-map" style="height:470px;border-radius:6px;overflow:hidden;border:1px solid var(--brd)"></div>
+              <div id="prm-gs-leg" style="font-size:.56rem;color:var(--mut);margin-top:.35rem"></div></div>
+            <div id="prm-gs-tab"></div>
+          </div>
+          <div id="prm-gs-bul" style="margin-top:.8rem"></div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Encabezado con forma de lámina: título grande, la línea turquesa y la semana.
+  const tituloSlide = (t, der) =>
+    '<div style="display:flex;align-items:flex-end;gap:1rem;border-bottom:4px solid #1FC7B6;padding-bottom:.4rem">' +
+    '<div style="font-size:1.35rem;font-weight:800;color:var(--az1);line-height:1.15">' + esc(t) + '</div>' +
+    '<div style="margin-left:auto;font-size:.72rem;color:var(--mut);white-space:nowrap">' + esc(der || '') + '</div></div>';
+
+  // Recuadro de comentarios de la lámina. Mientras nadie lo edite muestra el
+  // texto que arma el panel con los números del momento; si se edita, queda
+  // el texto escrito hasta que se pida volver al automático.
+  function cajaNotas(clave, grupo, lineas, col) {
+    const propio = av[grupo][clave];
+    const html = propio != null ? propio : '<ul style="margin:0;padding-left:1.1rem">' +
+      lineas.map(l => '<li>' + l + '</li>').join('') + '</ul>';
+    return '<div style="border:2px solid ' + col + ';border-radius:3px;padding:.55rem .8rem;position:relative">' +
+      '<div class="prm-ed" contenteditable="true" data-g="' + grupo + '" data-k="' + esc(clave) + '" ' +
+      'onblur="window._prmNota(this)" style="font-size:.7rem;line-height:1.6;color:var(--txt)">' + html + '</div>' +
+      (propio != null ? '<button class="exp-oculto" onclick="window._prmNotaAuto(\'' + grupo + '\',\'' + esc(clave).replace(/'/g, "\\'") + '\')" ' +
+        'style="position:absolute;top:.3rem;right:.4rem;font-size:.52rem;padding:.1rem .4rem;border:1px solid var(--brd);' +
+        'border-radius:3px;background:var(--bg2);color:var(--mut);cursor:pointer">↺ texto automático</button>' : '') + '</div>';
+  }
+  window._prmNota = function (el) {
+    const g = el.dataset.g, k = el.dataset.k;
+    if (!av[g]) return;
+    const auto = el.dataset.auto;
+    if (auto != null && el.innerHTML === auto) return;
+    av[g][k] = el.innerHTML;
+    avGuardar();
+    if (g === 'nota') avance(); else gsRender();
+  };
+  window._prmNotaAuto = function (g, k) {
+    delete av[g][k]; avGuardar();
+    if (g === 'nota') avance(); else gsRender();
+  };
+
+  // ── Lámina 1: avance sobre el top 10 de la región ──
+  window._prmAvReg = function (r) { _avReg = r; avance(); };
+  window._prmAvVer = function (v) { _avVer = v; avance(); };
+  window._prmAvSem = function (v) { _avSem = +v; avance(); };
+  window._prmAvAdd = function (v) {
+    if (v === '') return;
+    const n = C[+v].n, lst = av.extra[_avReg] || (av.extra[_avReg] = []);
+    if (lst.indexOf(n) < 0) lst.push(n);
+    avGuardar(); avance();
+  };
+  window._prmAvQuitar = function (j) {
+    const n = C[j].n;
+    av.extra[_avReg] = (av.extra[_avReg] || []).filter(x => x !== n);
+    avGuardar(); avance();
+  };
+  window._prmAvRes = function (j) {
+    const n = C[j].n, r = av.res[n] || (av.res[n] = { st: '', txt: '' });
+    r.st = RES_ORD[(RES_ORD.indexOf(r.st || '') + 1) % RES_ORD.length];
+    avGuardar(); avance();
+  };
+  window._prmAvTxt = function (el) {
+    const n = C[+el.dataset.j].n, r = av.res[n] || (av.res[n] = { st: '', txt: '' });
+    const t = el.innerText.replace(/\s+/g, ' ').trim();
+    if (t === (r.txt || '')) return;
+    r.txt = t; avGuardar();
+  };
+
+  function avFilas() {
+    if (_avSem == null) _avSem = semDeHoy();
+    const w = SEM.find(x => x.s === _avSem) || SEM[SEM.length - 1] || { hasta: A.hoy, desde: A.hoy };
+    const V = visPlan(), ini = P.inicio || '0000';
+    const extra = av.extra[_avReg] || [];
+    const top = C.map((u, j) => ({ u: u, j: j })).filter(x => x.u.r === _avReg && x.u.g === 1);
+    const ext = C.map((u, j) => ({ u: u, j: j, extra: true }))
+      .filter(x => x.u.r === _avReg && x.u.g !== 1 && extra.indexOf(x.u.n) >= 0);
+    const filas = top.concat(ext).map(x => {
+      const vs = V[x.j].filter(v => v.f >= ini && v.f <= w.hasta);
+      const r = av.res[x.u.n] || {};
+      const ejes = [...new Set(vs.map(v => ejeCorto(v.e)))];
+      return Object.assign(x, {
+        rk: _rkReg[x.j], vs: vs, ult: vs.length ? vs[vs.length - 1].f : null,
+        st: r.st || '', txt: r.txt || '', resp: ejes.length ? ejes.join(' / ') : ejeCorto(x.u.resp),
+        ab: vs.length > 0 || !!r.st,
+      });
+    }).sort((a, b) => a.rk - b.rk);
+    return { w: w, filas: filas, top: filas.filter(f => !f.extra) };
+  }
+
+  function avance() {
+    const box = document.getElementById('prm-av-box');
+    if (!box) return;
+    botones('prm-av-reg', REGS.map(r => [r, r === 'Metropolitana' ? 'RM' : 'Valparaíso']), _avReg, 'window._prmAvReg');
+    botones('prm-av-ver', [['abordados', 'Abordados'], ['todos', 'Top ' + P.top_pot + ' completo']], _avVer, 'window._prmAvVer');
+    const { w, filas, top } = avFilas();
+    const sel = document.getElementById('prm-av-sem');
+    if (sel) sel.innerHTML = SEM.map(s => '<option value="' + s.s + '"' + (s.s === _avSem ? ' selected' : '') + '>' +
+      esc(semLbl(s.s)) + '</option>').join('');
+    const add = document.getElementById('prm-av-add');
+    if (add) {
+      const ya = new Set(filas.map(f => f.j));
+      add.innerHTML = '<option value="">+ otro cliente de la región…</option>' +
+        C.map((u, j) => ({ u: u, j: j })).filter(x => x.u.r === _avReg && !ya.has(x.j))
+          .sort((a, b) => (b.u.pot || 0) - (a.u.pot || 0))
+          .map(x => '<option value="' + x.j + '">' + esc(x.u.n) + ' · G' + x.u.g + ' · ' + mm(x.u.pot) + '</option>').join('');
+    }
+
+    const M = v => n1((v || 0) / 1e6);
+    const ab = filas.filter(f => f.ab);
+    const potTop = top.reduce((a, f) => a + (f.u.pot || 0), 0);
+    const potAb = ab.reduce((a, f) => a + (f.u.pot || 0), 0);
+    const potPos = ab.filter(f => RES[f.st] && RES[f.st].pos).reduce((a, f) => a + (f.u.pot || 0), 0);
+    const potSin = ab.filter(f => f.st === 'sin').reduce((a, f) => a + (f.u.pot || 0), 0);
+    const potNoRes = potAb - potPos - potSin;
+    const pc = v => potTop ? n1(v / potTop * 100) + '%' : '—';
+    const escala = Math.max(potTop, potAb) || 1;
+    const seg = (v, col) => v > 0 ? '<div style="width:' + (v / escala * 100) + '%;background:' + col + '"></div>' : '';
+    const ley = (col, t) => '<span style="display:inline-flex;align-items:center;gap:.3rem;margin-right:.9rem">' +
+      '<span style="width:10px;height:10px;background:' + col + ';display:inline-block"></span>' + t + '</span>';
+    const kpi = (lbl, big, col, sub) => '<div style="padding:.2rem 1rem .2rem 0;border-right:1px solid var(--brd)">' +
+      '<div style="font-size:.72rem;font-weight:700;color:var(--txt)">' + lbl + '</div>' +
+      '<div style="display:flex;align-items:baseline;gap:.6rem"><span style="font-size:2.3rem;font-weight:800;line-height:1.05;color:' + col + '">' +
+      big + '</span><span style="font-size:.78rem;color:var(--txt)">' + sub + '</span></div></div>';
+
+    let h = tituloSlide('Avance Clientes TOP ' + P.top_pot + ' · Región ' + (_avReg === 'Metropolitana' ? 'Metropolitana' : 'de Valparaíso'),
+      'Semana del ' + fDMA(w.desde)) +
+      '<div style="display:grid;grid-template-columns:1fr 1fr .8fr 1.3fr;gap:1rem;margin:.9rem 0 .8rem;align-items:start">' +
+      kpi('Potencial abordado', pc(potAb), POS_COL, 'MM$ ' + M(potAb)) +
+      kpi('Con posibilidad / renovación', pc(potPos), 'var(--txt)', 'MM$ ' + M(potPos)) +
+      kpi('Clientes abordados', ab.length, 'var(--txt)', 'visitados') +
+      '<div><div style="display:flex;font-size:.72rem;font-weight:700"><span>Potencial Top ' + P.top_pot + ' Región</span>' +
+      '<span style="margin-left:auto">MM$ ' + M(potTop) + '</span></div>' +
+      '<div style="display:flex;height:22px;background:#E4E6EE;margin:.45rem 0 .4rem">' +
+      seg(potPos, POS_COL) + seg(potSin, SINPOS_COL) + seg(potNoRes, SINRES_COL) + '</div>' +
+      '<div style="font-size:.66rem;color:var(--txt);line-height:1.7">' + ley(POS_COL, 'Con posibilidad') + ley(SINPOS_COL, 'Sin posibilidad') +
+      (potNoRes > 0 ? ley(SINRES_COL, 'Abordado sin resultado') : '') + ley('#E4E6EE', 'Por abordar') + '</div></div></div>';
+
+    const vista = _avVer === 'todos' ? filas : ab;
+    const TH = 'padding:.35rem .4rem;font-size:.7rem;font-weight:700;color:' + POS_COL + ';border-bottom:1.5px solid ' + POS_COL + ';vertical-align:bottom';
+    const th = (t, al) => '<th style="' + TH + ';text-align:' + (al || 'left') + '">' + t + '</th>';
+    const td = (v, al, st) => '<td style="padding:.42rem .4rem;font-size:.7rem;text-align:' + (al || 'left') + ';vertical-align:middle;' + (st || '') + '">' + v + '</td>';
+    h += '<table style="width:100%;border-collapse:collapse"><colgroup><col style="width:3%"><col style="width:22%"><col style="width:9%">' +
+      '<col style="width:11%"><col style="width:6%"><col style="width:6%"><col style="width:5%"><col style="width:5%"><col style="width:5%"><col style="width:28%"></colgroup>' +
+      '<thead><tr>' + th('#') + th('Cliente') + th('Comuna') + th('Responsable') + th('Pot. ST<br>MM$', 'right') +
+      th('Equipos', 'right') + th('Dental', 'right') + th('Esteril.', 'right') + th('Endosc.', 'right') + th('Resultado') + '</tr></thead><tbody>';
+    vista.forEach(f => {
+      const u = f.u, e = u.eq || {}, R = RES[f.st];
+      const gris = f.ab ? '' : 'color:var(--mut);';
+      const visTip = f.vs.length ? f.vs.map(v => fDMA(v.f) + ' ' + ejeCorto(v.e)).join(' · ') : 'sin visitas registradas desde el ' + fDMA(P.inicio || '');
+      h += '<tr style="border-bottom:1px solid var(--brd)">' +
+        td(f.rk, 'left', gris) +
+        td('<div style="font-weight:800;text-transform:uppercase;line-height:1.2;' + gris + '">' + esc(u.n) + '</div>' +
+          (f.extra ? '<button class="exp-oculto" onclick="window._prmAvQuitar(' + f.j + ')" title="Quitar de la lámina" style="font-size:.5rem;' +
+            'padding:0 .3rem;border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--mut);cursor:pointer;margin-top:.15rem">× quitar</button>' : '')) +
+        td(esc(vsNombreSeguro(u.com) || '—'), 'left', gris) +
+        td('<div title="' + esc(visTip) + '">' + esc(f.resp) + '</div>' +
+          '<div style="font-size:.55rem;color:var(--mut)">' + (f.vs.length ? f.vs.length + (f.vs.length === 1 ? ' visita' : ' visitas') + ' · últ. ' + fDMA(f.ult).slice(0, 5)
+            : (f.st ? 'sin visita registrada' : 'por abordar')) + '</div>', 'left', gris) +
+        td(M(u.pot), 'right', 'font-weight:800;' + gris) + td(n0(e.total), 'right', gris) + td(n0(e.dental), 'right', gris) +
+        td(n0(e.esterilizacion), 'right', gris) + td(n0(e.endoscopia), 'right', gris) +
+        td('<div style="display:flex;align-items:flex-start;gap:.45rem">' +
+          '<span' + (R ? '' : ' class="exp-oculto"') + ' onclick="window._prmAvRes(' + f.j + ')" title="' + (R ? R.t : 'Sin resultado') + ' · clic para cambiar" style="cursor:pointer;' +
+          'padding:.25rem .15rem;display:inline-flex">' + diamante(R ? R.col : 'transparent', 10).replace('background:transparent', 'background:transparent;border:1.5px dashed #9AA6C8;box-sizing:border-box') + '</span>' +
+          '<div class="prm-ed" contenteditable="true" data-j="' + f.j + '" data-ph="' + (R ? R.t : 'clic para escribir el resultado') + '" ' +
+          'onblur="window._prmAvTxt(this)" style="flex:1;line-height:1.3">' + esc(f.txt) + '</div></div>') +
+        '</tr>';
+    });
+    if (!vista.length) h += '<tr><td colspan="10" style="padding:1rem;text-align:center;color:var(--mut);font-size:.7rem">' +
+      'Aún no hay clientes del top ' + P.top_pot + ' abordados a esta semana.</td></tr>';
+    const sum = k => vista.reduce((a, f) => a + ((f.u.eq || {})[k] || 0), 0);
+    h += '<tr>' + td('') + td('<strong>Total clientes ' + (_avVer === 'todos' ? 'top ' + P.top_pot : 'abordados') + '</strong>') + td('') + td('') +
+      td('<strong>' + M(vista.reduce((a, f) => a + (f.u.pot || 0), 0)) + '</strong>', 'right') +
+      td('<strong>' + n0(sum('total')) + '</strong>', 'right') + td('<strong>' + n0(sum('dental')) + '</strong>', 'right') +
+      td('<strong>' + n0(sum('esterilizacion')) + '</strong>', 'right') + td('<strong>' + n0(sum('endoscopia')) + '</strong>', 'right') +
+      td('<div style="display:grid;grid-template-columns:auto auto;gap:.1rem .9rem;font-size:.66rem;justify-content:start">' +
+        ['ren', 'neg', 'dep', 'sin'].map(k => '<span style="display:inline-flex;align-items:center;gap:.35rem">' + diamante(RES[k].col, 8) + RES[k].t + '</span>').join('') +
+        '</div>') + '</tr></tbody></table>';
+
+    const clave = _avReg;
+    h += '<div style="margin-top:.7rem">' + cajaNotas(clave, 'nota',
+      ['De esto se estima un ingreso adicional de MM$' + M(potPos) + ' anuales'], 'var(--az1)') + '</div>';
+    box.innerHTML = h;
+    const nota = box.querySelector('[data-g="nota"]');
+    if (nota && av.nota[clave] == null) nota.dataset.auto = nota.innerHTML;
+  }
+  // Las comunas vienen en mayúsculas desde algunas fuentes.
+  const vsNombreSeguro = s => {
+    const t = String(s || '');
+    return t === t.toUpperCase() ? t.toLowerCase().replace(/(^|[\s-])(\S)/g, (m, a, b) => a + b.toUpperCase()) : t;
+  };
+
+  window._prmAvExportar = function () {
+    exportarPanel({ ids: ['prm-av-box'], titulo: 'Avance clientes Top ' + P.top_pot + ' · ' + regCorto(_avReg),
+      archivo: 'Avance_Top' + P.top_pot + '_' + (_avReg === 'Metropolitana' ? 'RM' : 'Valparaiso'), btn: 'prm-av-exp',
+      ancho: 1600, sinEncabezado: true });
+  };
+
+  window._prmAvExcel = function () {
+    if (typeof XLSX === 'undefined') { alert('Librería Excel no cargada.'); return; }
+    const { w, filas } = avFilas();
+    const M = v => Math.round((v || 0) / 1e5) / 10;
+    const cab = ['#', 'Cliente', 'Grupo', 'Comuna', 'Responsable', 'Abordado', 'Visitas', 'Última visita', 'Fechas de visita',
+      'Pot. ST MM$', 'Equipos', 'Dental', 'Esteril.', 'Endosc.', 'Estado', 'Resultado'];
+    const filasX = filas.map(f => ({ g: f.u.g, fmt: [null, null, null, null, null, null, '#,##0', null, null, '#,##0.0', '#,##0', '#,##0', '#,##0', '#,##0', null, null],
+      v: [f.rk, f.u.n, 'G' + f.u.g + (f.extra ? ' (agregado)' : ''), f.u.com || '', f.resp, f.ab ? 'Sí' : 'No', f.vs.length,
+        f.ult ? fDMA(f.ult) : '', f.vs.map(v => fDMA(v.f) + ' ' + ejeCorto(v.e)).join(' · '), M(f.u.pot), (f.u.eq || {}).total || 0,
+        (f.u.eq || {}).dental || 0, (f.u.eq || {}).esterilizacion || 0, (f.u.eq || {}).endoscopia || 0,
+        RES[f.st] ? RES[f.st].t : '', f.txt] }));
+    const ws = hojaDesdeFilas(cab, filasX, [5, 46, 13, 18, 18, 10, 8, 13, 40, 11, 9, 8, 9, 9, 14, 60]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, ('Top ' + P.top_pot + ' ' + regCorto(_avReg)).slice(0, 31));
+    XLSX.writeFile(wb, 'Avance_Top' + P.top_pot + '_' + (_avReg === 'Metropolitana' ? 'RM' : 'Valparaiso') + '_semana_' + w.desde + '.xlsx');
+  };
+
+  // ── Lámina 2: agenda de un grupo con su mapa ──
+  window._prmGsReg = function (r) { _gsReg = r; gsRender(); };
+  window._prmGsG = function (g) { _gsG = +g; gsRender(); };
+  window._prmGsSem = function (v) { _gsSem = +v; _gsDia = 'todos'; gsRender(); };
+  window._prmGsDia = function (d) { _gsDia = d; gsRender(); };
+
+  function gsVisitas() {
+    if (_gsSem == null) _gsSem = semDeHoy();
+    const delGrupo = AG.filter(a => C[a.c].r === _gsReg && C[a.c].g === _gsG);
+    const sem = delGrupo.filter(a => a.s === _gsSem);
+    const dias = [...new Set(sem.map(a => a.f))].sort();
+    const vis = sem.filter(a => _gsDia === 'todos' || a.f === _gsDia)
+      .sort((a, b) => a.f.localeCompare(b.f) || a.k.localeCompare(b.k) || a.o - b.o);
+    return { delGrupo: delGrupo, dias: dias, vis: vis };
+  }
+
+  function gsRender() {
+    if (!document.getElementById('prm-gs-box')) return;
+    botones('prm-gs-reg', REGS.map(r => [r, r === 'Metropolitana' ? 'RM' : 'Valparaíso']), _gsReg, 'window._prmGsReg');
+    botones('prm-gs-g', [1, 2, 3].map(g => [g, 'Grupo ' + g, GRUPO[g].col]), _gsG, 'window._prmGsG');
+    const { delGrupo, dias, vis } = gsVisitas();
+    const semConVis = new Set(delGrupo.map(a => a.s));
+    const sel = document.getElementById('prm-gs-sem');
+    if (sel) sel.innerHTML = SEM.map(s => '<option value="' + s.s + '"' + (s.s === _gsSem ? ' selected' : '') + '>' +
+      esc(semLbl(s.s)) + (semConVis.has(s.s) ? '' : ' · sin visitas del grupo') + '</option>').join('');
+    botones('prm-gs-dia', [['todos', 'Todos']].concat(dias.map(f => [f, fCorta(f).replace(/ \w+$/, '')])), _gsDia, 'window._prmGsDia');
+
+    const w = SEM.find(x => x.s === _gsSem);
+    document.getElementById('prm-gs-tit').innerHTML = tituloSlide(regCorto(_gsReg) + ' Grupo ' + _gsG + ' – Clientes',
+      w ? semLbl(w.s) : '');
+
+    // Tabla del día a día, con la forma de la agenda.
+    const TH = 'background:var(--az1);color:#fff;padding:.32rem .45rem;font-size:.55rem;letter-spacing:.03em;text-align:left;white-space:nowrap';
+    let h = '';
+    if (!vis.length) {
+      h = '<div style="padding:1.5rem;text-align:center;color:var(--mut);font-size:.68rem;border:1px dashed var(--brd);border-radius:5px">' +
+        'El grupo ' + _gsG + ' de ' + regCorto(_gsReg) + ' no tiene visitas agendadas esta semana.' +
+        (semConVis.size ? ' Las tiene en: ' + [...semConVis].sort((a, b) => a - b).map(s => 'S' + s).join(', ') + '.' : '') + '</div>';
+    } else {
+      h = '<table style="width:100%;border-collapse:collapse"><thead><tr>' +
+        ['HORA', 'EJECUTIVO', 'CLIENTE', 'GRUPO', 'CAMAS', 'POT. ST'].map((t, i) =>
+          '<th style="' + TH + (i >= 4 ? ';text-align:right' : '') + '">' + t + '</th>').join('') + '</tr></thead><tbody>';
+      let dAnt = null;
+      vis.forEach(a => {
+        const u = C[a.c], G = GRUPO[u.g];
+        if (a.f !== dAnt) {
+          h += '<tr><td colspan="6" style="padding:.32rem .5rem;background:var(--gy);font-size:.6rem;font-weight:800;color:var(--az1)">' +
+            fLarga(a.f) + '</td></tr>';
+          dAnt = a.f;
+        }
+        h += '<tr style="border-bottom:1px solid var(--brd);border-left:3px solid ' + G.col + '">' +
+          '<td style="padding:.28rem .45rem;font-size:.58rem;white-space:nowrap">' + a.h + '</td>' +
+          '<td style="padding:.28rem .45rem;font-size:.58rem;font-weight:800;color:' + EJECOL[a.k] + '">' + esc(ejeCorto(a.k)) + '</td>' +
+          '<td style="padding:.28rem .45rem;font-size:.6rem"><div style="font-weight:700">' + esc(u.n) + '</div>' +
+            '<div style="font-size:.52rem;color:var(--mut)">' + esc(u.com || 'comuna sin dato') + ' · ' + (u.r === 'Metropolitana' ? 'RM' : 'Valparaíso') +
+            (u.dir ? ' · ' + esc(u.dir) : '') + '</div></td>' +
+          '<td style="padding:.28rem .45rem"><span style="color:#fff;background:' + G.col + ';border-radius:3px;padding:.05rem .3rem;' +
+            'font-size:.53rem;font-weight:700">G' + u.g + '</span></td>' +
+          '<td style="padding:.28rem .45rem;font-size:.58rem;text-align:right">' + (u.camF === 'Sin internación' ? '—' : n0(u.cam) + (u.camF === 'Estimado' ? '*' : '')) + '</td>' +
+          '<td style="padding:.28rem .45rem;font-size:.58rem;text-align:right;white-space:nowrap">' + (u.pot ? mm(u.pot) : '—') + '</td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+    document.getElementById('prm-gs-tab').innerHTML = h;
+
+    // Comentarios: cuánto toma cubrir la cartera del grupo y con cuántos KAM.
+    const cliG = C.filter(u => u.r === _gsReg && u.g === _gsG);
+    const cliAg = new Set(delGrupo.map(a => a.c));
+    const semG = new Set(delGrupo.map(a => a.s));
+    const kams = new Set(delGrupo.map(a => a.k));
+    const prom = cliAg.size ? delGrupo.length / cliAg.size : 0;
+    const otros = _gsG === 3 ? C.filter(u => u.r === _gsReg && u.g === 2).length : 0;
+    const lineas = [
+      'En ' + semG.size + (semG.size === 1 ? ' semana' : ' semanas') + ' la cartera es cubierta con un promedio de ' +
+        n1(prom).replace(/,0$/, '') + (prom === 1 ? ' visita' : ' visitas') + ' por cliente',
+      'En total son ' + n0(cliG.length) + ' clientes del grupo ' + _gsG + ' a visitar' + (otros ? ', más ' + otros + ' del Grupo 2' : '') +
+        (cliAg.size < cliG.length ? ' (' + n0(cliAg.size) + ' ya en la agenda)' : ''),
+      '<strong>Esto supone una estructura con ' + (kams.size || EJES.length) + ' KAM, es un número ESTIMATIVO</strong>',
+    ];
+    const clave = _gsReg + '|' + _gsG;
+    const bul = document.getElementById('prm-gs-bul');
+    bul.innerHTML = cajaNotas(clave, 'bul', lineas, '#1F5E52');
+    const ed = bul.querySelector('[data-g="bul"]');
+    if (ed && av.bul[clave] == null) ed.dataset.auto = ed.innerHTML;
+
+    gsMapa(vis);
+  }
+
+  function gsMapa(vis) {
+    const el = document.getElementById('prm-gs-map');
+    if (!el || typeof L === 'undefined') return;
+    if (!_gsMap) {
+      _gsMap = L.map('prm-gs-map', { zoomControl: true, scrollWheelZoom: false }).setView([-33.45, -70.66], 9);
+      if (window.mapaTiles) window.mapaTiles(_gsMap);
+      _gsCapa = L.layerGroup().addTo(_gsMap);
+    }
+    _gsCapa.clearLayers();
+    const pts = [];
+    vis.forEach(a => {
+      const u = C[a.c], col = EJECOL[a.k];
+      if (u.lat == null) return;
+      const icono = L.divIcon({ className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+        html: '<div style="width:22px;height:22px;border-radius:50%;background:' + col + ';color:#fff;border:2px solid #fff;' +
+          'display:flex;align-items:center;justify-content:center;font:700 10px Roboto,sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.35)">' + a.o + '</div>' });
+      L.marker([u.lat, u.lon], { icon: icono })
+        .bindPopup('<div style="font-family:Roboto,sans-serif"><strong style="color:' + col + '">' + esc(u.n) + '</strong><br>' +
+          '<span style="font-size:.7rem">' + fLarga(a.f) + ' · ' + a.h + ' · ' + esc(a.k) + '</span></div>')
+        .addTo(_gsCapa);
+      pts.push([u.lat, u.lon]);
+    });
+    if (pts.length) _gsMap.fitBounds(L.latLngBounds(pts), { padding: [30, 30], maxZoom: 13 });
+    setTimeout(() => _gsMap && _gsMap.invalidateSize(), 60);
+    const leg = document.getElementById('prm-gs-leg');
+    if (leg) leg.innerHTML = EJES.map(e => '<span style="display:inline-flex;align-items:center;gap:.25rem;margin-right:.8rem">' +
+      '<span style="width:11px;height:11px;border-radius:50%;background:' + EJECOL[e] + ';display:inline-block"></span>' + esc(ejeCorto(e)) + '</span>').join('') +
+      'El número es el orden de la visita en el día.';
+  }
+
+  window._prmGsExportar = function () {
+    exportarPanel({ ids: ['prm-gs-box'], titulo: regCorto(_gsReg) + ' Grupo ' + _gsG + ' – Clientes',
+      archivo: 'Plan_' + (_gsReg === 'Metropolitana' ? 'RM' : 'Valparaiso') + '_Grupo' + _gsG + '_S' + _gsSem, btn: 'prm-gs-exp',
+      ancho: 1600, sinEncabezado: true });
+  };
+
+  window._prmGsExcel = function () {
+    if (typeof XLSX === 'undefined') { alert('Librería Excel no cargada.'); return; }
+    const { vis } = gsVisitas();
+    const M = v => Math.round((v || 0) / 1e5) / 10;
+    const cab = ['Fecha', 'Hora', 'Orden', 'Ejecutivo', 'Cliente', 'Grupo', 'Región', 'Comuna', 'Dirección', 'Camas', 'Pot. ST MM$', 'Equipos ST'];
+    const fmt = [null, null, null, null, null, null, null, null, null, '#,##0', '#,##0.0', '#,##0'];
+    const filas = vis.map(a => { const u = C[a.c];
+      return { g: u.g, fmt: fmt, v: [fLarga(a.f), a.h, a.o, a.k, u.n, 'G' + u.g, u.r, u.com || '', u.dir || '',
+        u.camF === 'Sin internación' ? '' : u.cam, M(u.pot), (u.eq || {}).total || 0] }; });
+    const ws = hojaDesdeFilas(cab, filas, [24, 7, 6, 16, 46, 7, 14, 18, 36, 8, 11, 10]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, (regCorto(_gsReg) + ' G' + _gsG + ' S' + _gsSem).slice(0, 31));
+    XLSX.writeFile(wb, 'Agenda_' + (_gsReg === 'Metropolitana' ? 'RM' : 'Valparaiso') + '_Grupo' + _gsG + '_S' + _gsSem + '.xlsx');
+  };
 
   // ── Segmentadores ────────────────────────────────────────────
   function botones(id, opts, activo, fn) {
@@ -912,6 +1377,8 @@
     flujo();
     const cnt = document.getElementById('prm-planes-cnt');
     if (cnt) cnt.textContent = contarPlanes();
+    avance();
+    gsRender();
     REGS.forEach(tabla);
     agenda();   // pinta también el calendario, que sigue sus filtros
     gantt();    // la Gantt es del plan completo: no depende de los filtros
@@ -921,7 +1388,7 @@
     const w = document.getElementById('view-planrm');
     if (!w) return;
     if (!w.dataset.listo) { w.innerHTML = markup(); w.dataset.listo = '1'; render(); }
-    else if (_map) setTimeout(() => _map.invalidateSize(), 60);
+    else setTimeout(() => { if (_map) _map.invalidateSize(); if (_gsMap) _gsMap.invalidateSize(); }, 60);
   };
 
   // Se engancha a la navegación como Prospectos BI: la vista se arma la

@@ -456,7 +456,8 @@ window.exportarPanel = async function (o) {
     t2.style.cssText = 'font-size:10px;color:#555;margin-left:14px';
     t2.textContent = [o.sub, hoy ? 'datos al ' + hoy : ''].filter(Boolean).join(' · ');
     enc.appendChild(t2);
-    wrap.appendChild(enc);
+    // Las láminas traen su propio título y no llevan el encabezado del panel.
+    if (!o.sinEncabezado) wrap.appendChild(enc);
 
     // Un mapa de Leaflet no sobrevive al clon: se arma con mosaicos y
     // marcadores posicionados en absoluto, y el clon los aplana (más abajo
@@ -480,6 +481,10 @@ window.exportarPanel = async function (o) {
     const clones = [];
     bloques.forEach((b, i) => {
       const cl = b.cloneNode(true);
+      // Posición de cada nodo en pantalla, leída antes de tocar el clon (los
+      // dos árboles todavía son idénticos y se recorren en el mismo orden).
+      const posO = Array.from(b.querySelectorAll('*')).map(n => getComputedStyle(n).position);
+      Array.from(cl.querySelectorAll('*')).forEach((n, k) => { n.dataset.expPos = posO[k] || 'static'; });
       const mO = b.querySelectorAll('.leaflet-container');
       cl.querySelectorAll('.leaflet-container').forEach((m, k) => {
         const src = fotosMapa[i][k];
@@ -500,8 +505,13 @@ window.exportarPanel = async function (o) {
       //    derecha por el retardo. Apagada la animación, nace en su estado
       //    final. Ningún color se toca: el clon vive en el mismo documento y
       //    lo pinta el mismo CSS que a la pantalla.
+      // La posición sólo se anula en lo que flota sobre el scroll (encabezados
+      // sticky, capas fixed): un gráfico armado con piezas absolute —meses y
+      // barras de la Carta Gantt— necesita la suya o sale todo apilado a la
+      // izquierda.
       cl.querySelectorAll('*').forEach(n => {
-        n.style.position = 'static'; n.style.maxHeight = 'none';
+        if (n.dataset.expPos === 'sticky' || n.dataset.expPos === 'fixed') n.style.position = 'static';
+        n.style.maxHeight = 'none';
         n.style.overflow = 'visible'; n.style.overflowY = 'visible'; n.style.overflowX = 'visible';
         n.style.animation = 'none'; n.style.transition = 'none';
       });
@@ -526,6 +536,11 @@ window.exportarPanel = async function (o) {
         const oc = b.getAttribute('onclick') || '';
         if (oc.indexOf('exportarPanel') >= 0 || oc.indexOf('ExportPDF') >= 0) b.remove();
       });
+      // Lo que sólo sirve para editar en pantalla (botones de quitar, textos
+      // de ayuda de los campos vacíos) no va al papel.
+      cl.querySelectorAll('.exp-oculto').forEach(n => n.remove());
+      cl.querySelectorAll('[data-ph]').forEach(n => n.removeAttribute('data-ph'));
+      cl.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
       if (i) cl.style.marginTop = '16px';
       // Los anchos de columna de la pantalla no siempre sirven en el papel: en
       // una tabla con una columna de texto largo, ese texto se parte en muchas
@@ -577,6 +592,34 @@ window.exportarPanel = async function (o) {
     const PAD = 48;   // el padding lateral del wrap
     if (necesario + PAD > anchoBase) {
       wrap.style.width = Math.min(necesario + PAD, 4000) + 'px';
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    }
+
+    // En pantalla un nombre largo se recorta con «…» dentro de su celda; en el
+    // clon todo quedó con overflow visible y ese texto se montaba sobre la
+    // columna de al lado. Al texto que no cabe se le permite bajar de línea,
+    // así sale completo. Una caja muy angosta (una barra del Gantt) no aguanta
+    // eso: ahí se deja recortada, como en pantalla. Se repite porque partir
+    // una celda puede cambiar el ancho de las demás.
+    for (let vuelta = 0; vuelta < 3; vuelta++) {
+      let cambios = 0;
+      clones.forEach(cl => cl.querySelectorAll('td,th,div,span,p,a,strong,b').forEach(n => {
+        if (n.clientWidth <= 0 || n.scrollWidth <= n.clientWidth + 1) return;
+        const cs = getComputedStyle(n);
+        if (cs.display.indexOf('inline') === 0 && cs.display !== 'inline-block') return;
+        if (n.querySelector('table,canvas,img,svg')) return;
+        const propio = Array.from(n.childNodes).some(c => c.nodeType === 3 && c.textContent.trim()) ||
+          Array.from(n.children).some(c => getComputedStyle(c).display === 'inline');
+        if (!propio || n.dataset.expAjuste) return;
+        n.dataset.expAjuste = '1';
+        if (n.clientWidth < 60) {
+          n.style.overflow = 'hidden'; n.style.textOverflow = 'ellipsis'; n.style.whiteSpace = 'nowrap';
+        } else {
+          n.style.whiteSpace = 'normal'; n.style.overflowWrap = 'break-word'; n.style.textOverflow = 'clip';
+        }
+        cambios++;
+      }));
+      if (!cambios) break;
       await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     }
 

@@ -94,8 +94,11 @@ JS_FILES = [
     "hoja_citas.js", "hoja_cli_rel.js", "hoja_pipeline.js", "hoja_brechas.js",
 ]
 
-ANO   = date.today().year
-TODAY = date.today()
+# PANEL_HOY=AAAA-MM-DD reprocesa un Excel con la fecha de corte en que se cargó
+# (por ejemplo, para regenerar el panel días después sin que la agenda cargada
+# hasta ese día pase a contar como visitas hechas).
+TODAY = date.fromisoformat(os.environ["PANEL_HOY"]) if os.environ.get("PANEL_HOY") else date.today()
+ANO   = TODAY.year
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Clasificación de contratos por línea de negocio (Esterilización = base/default).
@@ -638,11 +641,15 @@ def _fecha_visita(v):
     return None
 
 
+COMENT_MAX = 3000  # tope de seguridad del comentario de cada visita; el más largo de la hoja tiene ~2.500
+
+
 def read_visitas(wb, mes_corte):
     ws = wb["VISITAS"]
     # Visitas con fecha posterior a la de esta corrida: están agendadas, no hechas.
     # No entran en ningún conteo; van aparte, a la tarjeta «Visitas Programadas».
     programadas = []
+    realizadas  = []
 
     mensual        = {e: {str(ANO - 1): [0] * 12, str(ANO): [0] * 12} for e in EJECUTIVOS_VISITAS}
     tipo_acts      = {e: defaultdict(int) for e in EJECUTIVOS_VISITAS}
@@ -668,13 +675,20 @@ def read_visitas(wb, mes_corte):
         ano      = to_int(row[10], 0)
 
         fecha = _fecha_visita(row[2])
+        coment = re.sub(r"\s+", " ", safe_str(row[7])).strip()[:COMENT_MAX]
         if fecha and fecha > TODAY and cliente:
             programadas.append({"e": asignado, "f": fecha.isoformat(), "c": cliente, "t": tipo_act,
-                                "a": safe_str(row[1]), "k": safe_str(row[4])})
+                                "a": safe_str(row[1]), "k": safe_str(row[4]), "m": coment})
             continue
 
         if not (1 <= mes <= 12) or not ano:
             continue
+
+        # Una por una, con fecha y comentario, para la tabla de visitas de la
+        # semana. Sólo el año en curso: para lo anterior bastan los conteos.
+        if fecha and fecha.year == ANO and cliente:
+            realizadas.append({"e": asignado, "f": fecha.isoformat(), "c": cliente, "t": tipo_act,
+                               "a": safe_str(row[1]), "k": safe_str(row[4]), "m": coment, "n": conteo})
 
         ano_str = str(ano)
         if ano_str in mensual[asignado]:
@@ -683,7 +697,9 @@ def read_visitas(wb, mes_corte):
 
         tipo_acts[asignado][tipo_act] += conteo
         cli_count_all[asignado][cliente] += conteo
-        det[(asignado, cliente, tipo_act or "Sin tipo", ano, mes)] += conteo
+        # El día va al final (0 sin fecha): permite filtrar por rango de fechas.
+        dia = fecha.day if fecha and fecha.year == ano and fecha.month == mes else 0
+        det[(asignado, cliente, tipo_act or "Sin tipo", ano, mes, dia)] += conteo
 
         if ano == ANO and mes <= mes_corte:
             cli_count_ytd[asignado][cliente] += conteo
@@ -733,8 +749,8 @@ def read_visitas(wb, mes_corte):
             lista.append(valor)
         return indice[valor]
 
-    filas_det = [[ejes_l.index(e), _ref(clis_l, i_cli, c), _ref(tipos_l, i_tipo, t), a, m, n]
-                 for (e, c, t, a, m), n in sorted(det.items())]
+    filas_det = [[ejes_l.index(e), _ref(clis_l, i_cli, c), _ref(tipos_l, i_tipo, t), a, m, n, d]
+                 for (e, c, t, a, m, d), n in sorted(det.items())]
     print(f"       VISITAS: {len(filas_det)} filas de detalle | {len(clis_l)} clientes | {len(tipos_l)} tipos")
 
     return {
@@ -745,6 +761,7 @@ def read_visitas(wb, mes_corte):
         "cli_mensual": cli_mensual_out,
         "det":         {"ejecutivos": ejes_l, "clientes": clis_l, "tipos": tipos_l, "filas": filas_det},
         "programadas": sorted(programadas, key=lambda p: (p["f"], p["e"], p["c"])),
+        "realizadas":  sorted(realizadas, key=lambda p: (p["f"], p["e"], p["c"])),
     }
 
 
@@ -6522,6 +6539,10 @@ def main():
         _ahora = datetime.now(ZoneInfo("America/Santiago"))
     except Exception:
         _ahora = datetime.now()
+    # Reproceso con fecha de corte fija: el sello es el de la carga del Excel.
+    if os.environ.get("PANEL_HOY"):
+        _fuente = XLSB if os.path.exists(XLSB) else XLSX
+        _ahora = datetime.fromtimestamp(os.path.getmtime(_fuente), _ahora.tzinfo)
     app_data["actualizado_label"] = formato_actualizacion(_ahora)
     app_data["actualizado_iso"] = _ahora.isoformat()
     print(f"       {app_data['actualizado_label']}")

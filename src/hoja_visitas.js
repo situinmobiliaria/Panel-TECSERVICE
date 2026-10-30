@@ -1103,6 +1103,7 @@ function vxRender(recentrar) {
 }
 
 function vxInit() {
+  vsRender();        // seguimiento semanal: realizadas y programadas
   vpProgramadas();   // la tarjeta de arriba no depende de los filtros ni del plan
   if (!((APP_DATA.visitas || {}).det || {}).filas) return;
   vxRender(true);
@@ -1132,7 +1133,38 @@ const VP = {
   cruce: null,        // por cliente del plan: índice del cliente en visitas.det, o -1
   detPlan: null,      // por cliente de visitas.det: índices de clientes del plan
   chEvo: null,
+  abG: {},            // filas abiertas de «Cobertura por grupo y región»
+  abD: {},            // filas abiertas de «A dónde van las visitas»
 };
+
+// Detalle de una fila abierta: los clientes visitados, de más a menos visitas.
+// it: [{ n, sub, v, eje: {ejecutivo: visitas}, ult, pot }]
+function vpDetalle(it, nCol, col, pie) {
+  const ejes = APP_DATA.visitas.det.ejecutivos;
+  const conPot = it.some(x => x.pot != null), conUlt = it.some(x => x.ult != null);
+  const th = (t, al) => '<th style="padding:.2rem .4rem;font-size:.52rem;color:var(--mut);text-align:' + al +
+    ';border-bottom:1px solid var(--brd);white-space:nowrap">' + t + '</th>';
+  const td = (v, al, ex) => '<td style="padding:.16rem .4rem;font-size:.58rem;text-align:' + al +
+    ';font-variant-numeric:tabular-nums;border-bottom:1px dotted var(--brd);' + (ex || '') + '">' + v + '</td>';
+  const mesTxt = idx => { if (!idx) return '—'; const a = Math.floor((idx - 1) / 12), m = (idx - 1) % 12;
+    return MESES_ABR[m] + " '" + String(a).slice(2); };
+  it = it.slice().sort((a, b) => b.v - a.v || a.n.localeCompare(b.n, 'es'));
+  const cuerpo = it.length ? it.map((x, i) => '<tr>' +
+      td('<span style="color:var(--mut)">' + (i + 1) + '</span>', 'right') +
+      td('<strong>' + vxEsc(x.n) + '</strong>' + (x.sub ? ' <span style="color:var(--mut);font-size:.53rem">· ' + vxEsc(x.sub) + '</span>' : ''), 'left') +
+      td('<strong style="color:' + col + '">' + x.v + '</strong>', 'right') +
+      ejes.map(e => td(x.eje[e] || '—', 'right', 'color:' + (VX.COL[e] || 'var(--txt)') + ';')).join('') +
+      (conUlt ? td(mesTxt(x.ult), 'right', 'color:var(--mut);') : '') +
+      (conPot ? td(x.pot ? vxMM(x.pot) : '—', 'right', 'color:var(--am);') : '') + '</tr>').join('')
+    : '<tr><td colspan="9" style="padding:.4rem;font-size:.58rem;color:var(--mut);font-style:italic">Sin clientes visitados en el período</td></tr>';
+  return '<tr class="vp-det"><td colspan="' + nCol + '" style="padding:.3rem .6rem .5rem 1.4rem;background:var(--bg);border-left:3px solid ' + col + '">' +
+    '<table style="border-collapse:collapse;min-width:520px"><thead><tr>' + th('#', 'right') + th('CLIENTE VISITADO', 'left') + th('VISITAS', 'right') +
+    ejes.map(e => th(vxEsc((VX.NOM[e] || e).split(' ')[0]).toUpperCase(), 'right')).join('') +
+    (conUlt ? th('ÚLTIMA', 'right') : '') + (conPot ? th('POT. ST', 'right') : '') + '</tr></thead><tbody>' + cuerpo + '</tbody></table>' +
+    (pie ? '<div style="font-size:.53rem;color:var(--mut);margin-top:.25rem">' + pie + '</div>' : '') + '</td></tr>';
+}
+function vpAbreG(k) { VP.abG[k] = !VP.abG[k]; vpGrupos(vpAgg()); }
+function vpAbreD(k) { VP.abD[k] = !VP.abD[k]; vpDestinos(); }
 const VP_GCOL = { 1: '#002D73', 2: '#B86E00', 3: '#2E7D4F' };   // los de la hoja Plan RM
 const VP_GNOM = { 1: 'Grupo 1 · Top potencial ST', 2: 'Grupo 2 · Top camas', 3: 'Grupo 3 · Clientes retail' };
 
@@ -1146,6 +1178,9 @@ const VP_ALIAS = {
   'UNIVERSIDAD SAN SEBASTIAN SEDE BELLAVISTA': 'UNIVERSIDAD SAN SEBASTIAN',
   'CLINICA MEDS LA DEHESA SPA': 'CLINICA MEDS LTDA',
   'CLINICA UNIVERSIDAD DE DESARROLLO': 'UNIVERSIDAD DEL DESARROLLO',
+  // Top 10 del plan escritos con su razón social en VISITAS (revisado el 30-10-2026).
+  'ACHS': 'ASOCIACION CHILENA DE SEGURIDAD',
+  'HOSPITAL CLINICO IST VINA DEL MAR': 'INSTITUTO DE SEGURIDAD DEL TRABAJO',
   // Excluidos del plan por contrato, escritos distinto en VISITAS.
   'POSTA CENTRAL': 'HOSPITAL DE URGENCIA ASISTENCIA PUBLICA DR. ALEJANDRO DEL RIO',
   // Escritos distinto en VISITAS que en Base Instalada (revisado el 16-10-2026).
@@ -1220,7 +1255,7 @@ function vpAgg() {
     if (VP.f.eje !== 'todos' && eje !== VP.f.eje) return;
     const esAct = ano === ANO_ACTUAL && mes <= MES_CORTE;
     const esAnt = ano === ANO_ACTUAL - 1 && mes <= MES_CORTE;
-    const cuenta = VP.f.per === 'todo' ? true : (VP.f.per === String(ANO_ACTUAL) ? esAct : esAnt);
+    const cuenta = vpEnPeriodo(ano, mes, f[6]);
     // Visitas del período en las dos regiones del plan, sean o no del plan:
     // dicen qué parte del trabajo en la zona se va a la cartera del plan.
     const c = base[f[1]];
@@ -1261,7 +1296,7 @@ function vpPintaFiltros(A) {
   const det = APP_DATA.visitas.det;
   vpBotones('vp-f-per', [{ k: String(ANO_ACTUAL), t: ANO_ACTUAL + ' · Ene–' + MES_CORTE_NOMBRE },
     { k: String(ANO_ACTUAL - 1), t: (ANO_ACTUAL - 1) + ' · Ene–' + MES_CORTE_NOMBRE },
-    { k: 'todo', t: 'Todo el histórico' }], VP.f.per, 'vpSet.bind(null,\'per\')');
+    { k: 'todo', t: 'Todo el histórico' }, { k: 'rango', t: 'Rango de fechas' }], VP.f.per, 'vpSet.bind(null,\'per\')');
   vpBotones('vp-f-eje', [{ k: 'todos', t: 'Ambos' }].concat(det.ejecutivos.map(e =>
     ({ k: e, t: VX.NOM[e] || e, col: VX.COL[e] }))), VP.f.eje, 'vpSet.bind(null,\'eje\')');
   vpBotones('vp-f-reg', [{ k: 'todas', t: 'Ambas' }].concat(A.REGS.map(r =>
@@ -1664,12 +1699,19 @@ function vpGrupos(A) {
     'text-align:' + al + ';white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)">' + t + '</th>';
   const td = (v, extra) => '<td style="padding:.24rem .45rem;text-align:right;font-size:.6rem;font-variant-numeric:tabular-nums;' +
     (extra || '') + SEP + '">' + v + '</td>';
-  const fila = (lbl, ds, col, fuerte) => {
+  // Clic en una fila: se abre debajo la lista de sus clientes visitados.
+  const fila = (lbl, ds, col, fuerte, k) => {
     const n = ds.length, vis = ds.filter(d => d.v > 0), v = vis.reduce((s, d) => s + d.v, 0);
     const pot = ds.reduce((s, d) => s + (d.u.pot || 0), 0), pv = vis.reduce((s, d) => s + (d.u.pot || 0), 0);
     const pc = n ? vis.length / n * 100 : 0;
-    return '<tr style="' + (fuerte ? 'background:var(--bg2);font-weight:700;' : '') + 'border-left:3px solid ' + col + '">' +
-      '<td style="padding:.24rem .45rem;font-size:.6rem;white-space:nowrap;' + (fuerte ? 'font-weight:800;color:' + col + ';' : '') + SEP + '">' + lbl + '</td>' +
+    const ab = !!VP.abG[k];
+    const det = ab ? vpDetalle(vis.map(d => ({ n: d.u.n, sub: (d.u.com || '') + (k.indexOf('|') < 0 ? ' · ' + (d.u.r === 'Metropolitana' ? 'RM' : d.u.r) : ''),
+      v: d.v, eje: d.eje, ult: d.ult, pot: d.u.pot || 0 })), 9, col,
+      (n - vis.length) + ' de ' + n + ' clientes sin visita en el período') : '';
+    return '<tr onclick="vpAbreG(\'' + k + '\')" title="Clic para ' + (ab ? 'cerrar' : 'ver') + ' los clientes visitados" style="cursor:pointer;' +
+      (fuerte ? 'background:var(--bg2);font-weight:700;' : '') + 'border-left:3px solid ' + col + '">' +
+      '<td style="padding:.24rem .45rem;font-size:.6rem;white-space:nowrap;' + (fuerte ? 'font-weight:800;color:' + col + ';' : '') + SEP + '">' +
+      '<span style="display:inline-block;width:.7rem;font-size:.5rem;color:var(--mut)">' + (ab ? '▾' : '▸') + '</span>' + lbl + '</td>' +
       td(n) + td(vis.length, 'font-weight:700;color:' + col + ';') +
       '<td style="padding:.24rem .45rem;min-width:120px;' + SEP + '"><div style="display:flex;align-items:center;gap:.35rem">' +
         '<div style="flex:1;height:6px;background:var(--gy);border-radius:3px;overflow:hidden"><div style="height:100%;width:' +
@@ -1677,23 +1719,23 @@ function vpGrupos(A) {
         pc.toFixed(0) + '%</span></div></td>' +
       td(v || '—') + td(vis.length ? vxN1(v / vis.length) : '—', 'color:var(--mut);') +
       td(pot ? vxMM(pot) : '—', 'color:var(--mut);') + td(pv ? vxMM(pv) : '—', 'color:var(--am);font-weight:700;') +
-      td(pot ? (pv / pot * 100).toFixed(0) + '%' : '—') + '</tr>';
+      td(pot ? (pv / pot * 100).toFixed(0) + '%' : '—') + '</tr>' + det;
   };
   let filas = '';
   [1, 2, 3].forEach(g => {
     const dg = A.cli.filter(d => d.u.g === g);
     if (!dg.length) return;
-    filas += fila(VP_GNOM[g], dg, VP_GCOL[g], true);
+    filas += fila(VP_GNOM[g], dg, VP_GCOL[g], true, String(g));
     A.REGS.forEach(r => {
       const dr = dg.filter(d => d.u.r === r);
-      if (dr.length) filas += fila('&nbsp;&nbsp;' + (r === 'Metropolitana' ? 'Región Metropolitana' : 'Región de ' + r), dr, VP_GCOL[g]);
+      if (dr.length) filas += fila('&nbsp;&nbsp;' + (r === 'Metropolitana' ? 'Región Metropolitana' : 'Región de ' + r), dr, VP_GCOL[g], false, g + '|' + r);
     });
   });
   box.innerHTML = '<table style="width:100%;border-collapse:collapse;min-width:760px"><thead><tr>' +
     th('GRUPO / REGIÓN', 'left') + th('CLIENTES', 'right') + th('VISITADOS', 'right') + th('COBERTURA', 'left') +
     th('VISITAS', 'right') + th('VIS./VISITADO', 'right') + th('POT. ST', 'right') + th('POT. VISITADO', 'right') +
     th('% POT.', 'right') + '</tr></thead><tbody>' + filas + '</tbody><tfoot>' +
-    fila('TOTAL', A.cli, 'var(--az3)', true).replace('<tr style="', '<tr style="border-top:2px solid var(--az3);') +
+    fila('TOTAL', A.cli, 'var(--az3)', true, 'T').replace('style="cursor:pointer;', 'style="cursor:pointer;border-top:2px solid var(--az3);') +
     '</tfoot></table>';
 }
 
@@ -1845,19 +1887,23 @@ function vpDestinos() {
     ['otras', 'Otras regiones', '#8A93AB'],
   ];
   const agg = {};
-  CATS.forEach(c => { agg[c[0]] = { cli: new Set(), v: 0, tipo: {}, eje: {}, top: {} }; });
+  CATS.forEach(c => { agg[c[0]] = { cli: new Set(), v: 0, tipo: {}, eje: {}, top: {}, cEje: {}, ult: {} }; });
   det.filas.forEach(f => {
     const eje = det.ejecutivos[f[0]], ano = f[3], mes = f[4], n = f[5];
     if (VP.f.eje !== 'todos' && eje !== VP.f.eje) return;
-    const esAct = ano === ANO_ACTUAL && mes <= MES_CORTE, esAnt = ano === ANO_ACTUAL - 1 && mes <= MES_CORTE;
-    if (!(VP.f.per === 'todo' || (VP.f.per === String(ANO_ACTUAL) ? esAct : esAnt))) return;
+    if (!vpEnPeriodo(ano, mes, f[6])) return;
     const a = agg[VP.destino[f[1]]];
     const t = det.tipos[f[2]];
     a.cli.add(f[1]); a.v += n;
     a.tipo[t] = (a.tipo[t] || 0) + n;
     a.eje[eje] = (a.eje[eje] || 0) + n;
     a.top[f[1]] = (a.top[f[1]] || 0) + n;
+    const ce = a.cEje[f[1]] || (a.cEje[f[1]] = {});
+    ce[eje] = (ce[eje] || 0) + n;
+    if (!(a.ult[f[1]] >= ano * 12 + mes)) a.ult[f[1]] = ano * 12 + mes;
   });
+  const base = vxBase();
+  const reg = i => { const r = VP_REG[vxNorm(det.clientes[i])] || (base[i] && base[i].region) || ''; return r === 'Metropolitana' ? 'RM' : r; };
   const tot = CATS.reduce((s, c) => s + agg[c[0]].v, 0);
   const nCli = CATS.reduce((s, c) => s + agg[c[0]].cli.size, 0);
   const SEP = 'border-right:1px solid var(--brd)';
@@ -1866,11 +1912,18 @@ function vpDestinos() {
   const td = (v, extra) => '<td style="padding:.24rem .45rem;text-align:right;font-size:.6rem;font-variant-numeric:tabular-nums;' +
     (extra || '') + SEP + '">' + v + '</td>';
   const maxV = Math.max.apply(null, CATS.map(c => agg[c[0]].v).concat([1]));
-  const fila = (lbl, a, col, estilo) => {
+  const nCol = 5 + det.tipos.length + det.ejecutivos.length;
+  // Clic en una fila (menos el total): se abre debajo la lista de sus clientes.
+  const fila = (lbl, a, col, estilo, k) => {
     const top = Object.keys(a.top).sort((x, y) => a.top[y] - a.top[x]).slice(0, 3)
       .map(i => vxEsc(det.clientes[i]) + ' (' + a.top[i] + ')').join(' · ');
-    return '<tr style="border-left:3px solid ' + col + ';' + (estilo || '') + '">' +
-      '<td style="padding:.24rem .45rem;font-size:.6rem;white-space:nowrap;' + SEP + '">' + lbl + '</td>' +
+    const ab = k && !!VP.abD[k];
+    const dt = ab ? vpDetalle(Object.keys(a.top).map(i => ({ n: det.clientes[i], sub: reg(i), v: a.top[i], eje: a.cEje[i], ult: a.ult[i] })),
+      nCol, col) : '';
+    return '<tr style="border-left:3px solid ' + col + ';' + (estilo || '') + (k ? 'cursor:pointer;' : '') + '"' +
+      (k ? ' onclick="vpAbreD(\'' + k + '\')" title="Clic para ' + (ab ? 'cerrar' : 'ver') + ' los clientes visitados"' : '') + '>' +
+      '<td style="padding:.24rem .45rem;font-size:.6rem;white-space:nowrap;' + SEP + '">' +
+      (k ? '<span style="display:inline-block;width:.7rem;font-size:.5rem;color:var(--mut)">' + (ab ? '▾' : '▸') + '</span>' : '') + lbl + '</td>' +
       td(a.cli.size) + td('<strong>' + a.v + '</strong>') +
       '<td style="padding:.24rem .45rem;min-width:110px;' + SEP + '"><div style="display:flex;align-items:center;gap:.35rem">' +
         '<div style="flex:1;height:6px;background:var(--gy);border-radius:3px;overflow:hidden"><div style="height:100%;width:' +
@@ -1879,19 +1932,20 @@ function vpDestinos() {
       det.tipos.map(t => td(a.tipo[t] || '—', 'color:var(--mut);')).join('') +
       det.ejecutivos.map(e => td(a.eje[e] || '—', 'color:' + (VX.COL[e] || 'var(--txt)') + ';')).join('') +
       '<td style="padding:.24rem .45rem;font-size:.55rem;color:var(--mut);max-width:360px;overflow:hidden;text-overflow:ellipsis;' +
-        'white-space:nowrap" title="' + top.replace(/"/g, '&quot;') + '">' + (top || '—') + '</td></tr>';
+        'white-space:nowrap" title="' + top.replace(/"/g, '&quot;') + '">' + (top || '—') + '</td></tr>' + dt;
   };
   const suma = keys => {
-    const r = { cli: new Set(), v: 0, tipo: {}, eje: {}, top: {} };
+    const r = { cli: new Set(), v: 0, tipo: {}, eje: {}, top: {}, cEje: {}, ult: {} };
     keys.forEach(k => { const a = agg[k]; a.cli.forEach(i => r.cli.add(i)); r.v += a.v;
       Object.keys(a.tipo).forEach(t => { r.tipo[t] = (r.tipo[t] || 0) + a.tipo[t]; });
       Object.keys(a.eje).forEach(e => { r.eje[e] = (r.eje[e] || 0) + a.eje[e]; });
-      Object.keys(a.top).forEach(i => { r.top[i] = (r.top[i] || 0) + a.top[i]; }); });
+      Object.keys(a.top).forEach(i => { r.top[i] = (r.top[i] || 0) + a.top[i];
+        r.cEje[i] = Object.assign({}, a.cEje[i]); r.ult[i] = a.ult[i]; }); });
     return r;
   };
-  let filas = fila('<strong>Clientes del plan</strong>', suma(['g1', 'g2', 'g3']), 'var(--az3)', 'background:var(--bg2);font-weight:700;');
+  let filas = fila('<strong>Clientes del plan</strong>', suma(['g1', 'g2', 'g3']), 'var(--az3)', 'background:var(--bg2);font-weight:700;', 'plan');
   CATS.forEach(c => {
-    filas += fila((c[3] ? '&nbsp;&nbsp;' : '') + c[1], agg[c[0]], c[2]);
+    filas += fila((c[3] ? '&nbsp;&nbsp;' : '') + c[1], agg[c[0]], c[2], '', c[0]);
   });
   const total = suma(CATS.map(c => c[0]));
   box.innerHTML = '<table style="width:100%;border-collapse:collapse;min-width:1100px"><thead><tr>' +
@@ -1901,15 +1955,58 @@ function vpDestinos() {
     th('CLIENTES CON MÁS VISITAS', 'left') + '</tr></thead><tbody>' + filas + '</tbody><tfoot>' +
     fila('<strong>TOTAL</strong>', total, 'var(--az3)', 'border-top:2px solid var(--az3);font-weight:700;') + '</tfoot></table>';
   const lbl = document.getElementById('vp-dest-lbl');
-  if (lbl) lbl.textContent = vxN0(tot) + ' visitas a ' + nCli + ' clientes · ' +
-    (VP.f.per === 'todo' ? 'todo el histórico' : 'Ene–' + MES_CORTE_NOMBRE + ' ' + VP.f.per) +
+  if (lbl) lbl.textContent = vxN0(tot) + ' visitas a ' + nCli + ' clientes · ' + vpPerTxt() +
     (VP.f.eje === 'todos' ? '' : ' · ' + (VX.NOM[VP.f.eje] || VP.f.eje));
+}
+
+// ── Período: año a la fecha, histórico o un rango de fechas ──
+// El rango usa el día de cada fila de VISITAS (f[6]); las filas sin fecha
+// (día 0) sólo cuentan en los períodos por año.
+function vpEnPeriodo(ano, mes, dia) {
+  if (VP.f.per === 'todo') return true;
+  if (VP.f.per === 'rango') {
+    if (!dia) return false;
+    const iso = ano + '-' + String(mes).padStart(2, '0') + '-' + String(dia).padStart(2, '0');
+    return iso >= VP.f.d0 && iso <= VP.f.d1;
+  }
+  return ano === +VP.f.per && mes <= MES_CORTE;
+}
+function vpPerTxt() {
+  if (VP.f.per === 'todo') return 'todo el histórico';
+  if (VP.f.per === 'rango') return vpFmtF(VP.f.d0) + ' al ' + vpFmtF(VP.f.d1);
+  return 'Ene–' + MES_CORTE_NOMBRE + ' ' + VP.f.per;
+}
+function vpRangoIni() {
+  if (VP.f.d0) return;
+  const P = vpPlan() || {};
+  VP.f.d1 = APP_DATA.hoy || (ANO_ACTUAL + '-12-31');
+  VP.f.d0 = (P.inicio && P.inicio <= VP.f.d1) ? P.inicio : ANO_ACTUAL + '-01-01';
+}
+function vpRango() {
+  const a = document.getElementById('vp-f-d0'), b = document.getElementById('vp-f-d1');
+  if (!a || !b || !a.value || !b.value) return;
+  VP.f.d0 = a.value < b.value ? a.value : b.value;
+  VP.f.d1 = a.value < b.value ? b.value : a.value;
+  VP.f.per = 'rango';
+  vpRender();
+}
+function vpPintaRango() {
+  vpRangoIni();
+  const a = document.getElementById('vp-f-d0'), b = document.getElementById('vp-f-d1');
+  const box = document.getElementById('vp-f-rango');
+  if (!a || !b) return;
+  a.value = VP.f.d0; b.value = VP.f.d1;
+  a.min = b.min = (ANO_ACTUAL - 1) + '-01-01';
+  a.max = b.max = APP_DATA.hoy || '';
+  if (box) box.style.opacity = VP.f.per === 'rango' ? 1 : .6;
 }
 
 function vpRender() {
   const P = vpPlan(), sec = document.getElementById('vp-sec');
   if (!P || !((APP_DATA.visitas || {}).det || {}).filas) { if (sec) sec.style.display = 'none'; return; }
+  vpRangoIni();
   const A = vpAgg();
+  vpPintaRango();
   vpPintaFiltros(A);
   vpKpis(A);
   vpGrupos(A);
@@ -1918,3 +2015,400 @@ function vpRender() {
   vpTabla(A);
   vpDestinos();
 }
+
+// ═══════════════════════════════════════════════════════════════
+// SEGUIMIENTO SEMANAL · VISITAS REALIZADAS Y PROGRAMADAS
+//
+// Una fila por visita de la hoja VISITAS (APP_DATA.visitas.realizadas y
+// .programadas) con lo que el panel sabe del cliente: equipos ST, contrato
+// (DATA), potencial ST, parque ya capturado y facturación del año (Cartera
+// ST). Es la tabla que se armaba a mano para el comité de cada semana.
+// ═══════════════════════════════════════════════════════════════
+const VS = { vista: 'real', sem: { real: 0, prog: 1 }, eje: 'todas', idx: null, memo: {} };
+const VS_MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const VS_DSEM = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
+const VS_DSEM_L = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes'];
+const vsIso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const vsDia = iso => +iso.slice(8) + '-' + VS_MES[+iso.slice(5, 7) - 1];          // 19-oct
+const vsDiaA = iso => vsDia(iso) + '-' + iso.slice(2, 4);                           // 19-oct-26
+const vsM1 = v => ((v || 0) / 1e6).toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const vsHoy = () => APP_DATA.hoy || vsIso(new Date());
+// Comentarios que cuentan un reclamo o un cliente molesto: llevan ⚠ y van a las alertas.
+const VS_RECLAMO = /molest|reclam|insatisf|descontent|decepci|disconform|mal servicio|malas experiencias|devolver el equipo/i;
+// Temas de cobranza (factura rechazada, pago pendiente): no son molestia, van en su propia alerta con $.
+const VS_COBRO = /factura\w*\s+rechazad|rechaz\w*\s+(de\s+)?(la\s+|una\s+)?factura|destrabar el pago|pago pendiente|pagos? atrasad|no han pagado|orden(es)? de compra pendiente/i;
+const VS_SIGLAS = new Set(['UC', 'PDI', 'ACHS', 'HUAP', 'UDD', 'FACH', 'ISM', 'II', 'III', 'IV', 'CESFAM', 'SS', 'RM', 'UST', 'DIPRECA', 'CRS', 'SAR', 'SAPU']);
+const VS_MIN = new Set(['de', 'del', 'la', 'las', 'los', 'el', 'y', 'e', 'en', 'al']);
+
+// «CLINICA LAS CONDES S.A.» → «Clinica Las Condes S.A.». Los nombres que ya
+// vienen con mayúsculas y minúsculas quedan como los escribió el ejecutivo.
+function vsNombre(n) {
+  n = String(n || '').trim();
+  if (n !== n.toUpperCase()) return n;
+  const ws = n.toLowerCase().split(/\s+/);
+  return ws.map((w, i) => {
+    const letras = w.toUpperCase().replace(/[^A-ZÑÁÉÍÓÚ]/g, '');
+    if (VS_SIGLAS.has(letras) || /^([a-zñ]\.)+[a-zñ]?\.?$/.test(w)) return w.toUpperCase();
+    if (letras === 'SPA') return w.replace(/spa/, 'SpA');
+    // «de», «y»… van en minúscula; «la», «los», «el» sólo después de «de» o «del»
+    // («Universidad de los Andes», pero «Clínica Las Condes» y «Hospital El Pino»).
+    if (i > 0 && VS_MIN.has(w) && (!/^(la|las|los|el)$/.test(w) || /^(de|del)$/.test(ws[i - 1]))) return w;
+    return w.replace(/(^|[-(/.])([a-zñáéíóú])/g, (m, a, b) => a + b.toUpperCase());
+  }).join(' ');
+}
+
+// Semana n contada desde la de la fecha de corte (0 = esa semana), de lunes a domingo.
+function vsSemana(n) {
+  const lun = new Date(vsHoy() + 'T12:00:00');
+  lun.setDate(lun.getDate() - ((lun.getDay() + 6) % 7) + 7 * n);
+  const vie = new Date(lun), dom = new Date(lun);
+  vie.setDate(vie.getDate() + 4); dom.setDate(dom.getDate() + 6);
+  return { d0: vsIso(lun), d1: vsIso(dom), vie: vsIso(vie), n: n };
+}
+function vsSemTxt(w) {   // «19–23 oct 2026», de lunes a viernes
+  const ma = VS_MES[+w.d0.slice(5, 7) - 1], mb = VS_MES[+w.vie.slice(5, 7) - 1];
+  return +w.d0.slice(8) + (ma === mb ? '' : ' ' + ma) + '–' + +w.vie.slice(8) + ' ' + mb + ' ' + w.vie.slice(0, 4);
+}
+function vsTitulo(tipo) {
+  return (tipo === 'real' ? 'Visitas realizadas' : 'Visitas programadas') + ' · semana ' + vsSemTxt(vsSemana(VS.sem[tipo]));
+}
+
+// ── Cruce con Cartera ST, contratos y clientes perdidos ──
+// A diferencia de vxIndice, un mismo cliente puede entrar con varios nombres
+// (sus alias en Cartera ST) sin quedar ambiguo, y una búsqueda de contratos
+// devuelve todos los del cliente.
+function vsIdx() {
+  if (VS.idx) return VS.idx;
+  vpProgDatosCliente('—');   // arma VP_PROG_IDX: plan, Base Instalada y Mapa Clientes
+  const mk = () => ({ ex: {}, cl: {} });
+  const pon = (ix, nombre, o) => {
+    if (!nombre) return;
+    const k = vxNorm(nombre), c = vxClave(nombre);
+    (ix.ex[k] || (ix.ex[k] = new Set())).add(o);
+    (ix.cl[c] || (ix.cl[c] = new Set())).add(o);
+  };
+  const car = mk(), ctr = mk(), perd = mk();
+  (((APP_DATA.cartera_st || {}).clientes) || []).forEach(c => {
+    if (c.sin_nombre) return;
+    pon(car, c.n, c); (c.alias || []).forEach(a => pon(car, a, c));
+  });
+  (typeof DATA !== 'undefined' && Array.isArray(DATA) ? DATA : []).forEach(k => pon(ctr, k.cliente, k));
+  (typeof PERDIDOS_VG !== 'undefined' && Array.isArray(PERDIDOS_VG) ? PERDIDOS_VG : []).forEach(p => pon(perd, p.cliente, p));
+  VS.idx = { car: car, ctr: ctr, perd: perd, vis: vxIndice(vxBase(), b => b.n) };
+  return VS.idx;
+}
+function vsUno(ix, nombre) {
+  const e = ix.ex[vxNorm(nombre)];
+  if (e && e.size === 1) return e.values().next().value;
+  const c = ix.cl[vxAlias(nombre)];
+  return c && c.size === 1 ? c.values().next().value : null;
+}
+function vsTodos(ix, nombre) {
+  const e = ix.ex[vxNorm(nombre)] || ix.cl[vxAlias(nombre)];
+  return e ? Array.from(e) : [];
+}
+
+// Clientes de VISITAS que Cartera ST escribe de otra forma (revisados a mano, 28-10-2026).
+// Las visitas a la Universidad del Desarrollo registradas hasta ahora son a la sede Concepción.
+const VS_ALIAS = {
+  'HOSPITAL DE URGENCIA ASISTENCIA PUBLICA DR. ALEJANDRO DEL RIO': 'POSTA CENTRAL',
+  'CENTRAL ODONTOLOGICA II ZONA NAVAL': 'CENTRAL ODONTOLGICA II ZONA NAVAL TALCAHUANO',
+  'UNIVERSIDAD DEL DESARROLLO': 'UNIVERSIDAD DEL DESARROLLO CONCEPCION',
+  'UNIVERSIDAD DE CONCEPCION- EDUCACION SUPERIOR': 'UNIVERSIDAD DE CONCEPCION',
+  'HOSPITAL DE NINOS ROBERTO DEL RIO': 'HOSPITAL ROBERTO DEL RIO',
+  'BRADFORD HILL SPA': 'CLÍNICA BRADFORD HILL',
+  'HOSPITAL CLINICO METROPOLITANO LA FLORIDA DOCTORA ELOISA DIAZ': 'HOSPITAL DE LA FLORIDA',
+  'CORPORACION MUNICIPAL DESARROLLO CERRO NAVIA': 'CESFAM CERRO NAVIA',
+};
+
+const VS_LIN = [['esterilizacion', 'Est'], ['dental', 'Dent'], ['endoscopia', 'Endo'], ['incardia', 'Incardia'],
+  ['mmq_reas', 'MMQ/REAS'], ['mobiliario', 'Mob.'], ['otros', 'Otros']];
+
+function vsCliente(nombre) {
+  if (VS.memo[nombre]) return VS.memo[nombre];
+  const ix = vsIdx();
+  const alias = VS_ALIAS[vxNorm(nombre)] || VP_ALIAS[vxNorm(nombre)];
+  const c = vsUno(ix.car, nombre) || (alias ? vsUno(ix.car, alias) : null);
+  const pd = vpProgDatosCliente(nombre);
+  const nombres = [nombre, alias].concat(c ? [c.n].concat(c.alias || []) : []).filter(Boolean);
+  const cts = [];
+  nombres.forEach(n => vsTodos(ix.ctr, n).forEach(k => { if (cts.indexOf(k) < 0) cts.push(k); }));
+  // Contrato que se muestra: el vigente que vence antes (comerciales primero);
+  // si no hay vigentes, el último vencido. Los demás van como «+ #n».
+  const vig = cts.filter(k => k.dias_vence >= 0)
+    .sort((a, b) => (a.tipo === 'Garantia') - (b.tipo === 'Garantia') || a.dias_vence - b.dias_vence);
+  const ven = cts.filter(k => k.dias_vence < 0).sort((a, b) => b.dias_vence - a.dias_vence);
+  const pri = vig[0] || ven[0] || null;
+  // Perdido: estuvo bajo contrato y hoy no tiene ninguno (si tiene uno vencido, se muestra ese).
+  let perdido = null;
+  if (!cts.length) nombres.some(n => !!(perdido = vsUno(ix.perd, n)));
+  // Equipos: Cartera ST; si el cliente no está ahí, Base Instalada.
+  let eq = c ? c.eq : null;
+  if (!eq) {
+    const b = vxBuscar(VP_PROG_IDX.bi, nombre) || (alias ? vxBuscar(VP_PROG_IDX.bi, alias) : null);
+    if (b) eq = { esterilizacion: b.esterilizacion, dental: b.dental, endoscopia: b.endoscopia, incardia: b.incardia,
+                  mmq_reas: b.mmq_reas, mobiliario: b.mobiliario, otros: b.otros };
+  }
+  const tot = eq ? VS_LIN.reduce((s, l) => s + (eq[l[0]] || 0), 0) : null;
+  const capt = !!(c && c.cc) || cts.length > 0 || pd.contrato;
+  const d = {
+    key: c ? 'c:' + c.n : 'v:' + vxNorm(nombre), n: nombre, cart: c ? c.n : '',
+    region: c && c.r ? vxRegNom(c.r) : pd.region, com: (c && c.com) || pd.com || '',
+    eq: eq, tot: tot,
+    est: !pri ? 'sin' : pri.dias_vence < 0 ? 'vencido' : pri.dias_vence <= 30 ? 'pronto' : 'vigente',
+    pri: pri, otros: cts.filter(k => k !== pri), perdido: perdido, capt: capt,
+    pot: capt ? 0 : (c ? (c.pot || 0) : pd.pot), parque: c ? (c.pot_bruto || 0) : null,
+    // Cartera ST puede tener al cliente con otro nombre y sin facturación (HUAP = Posta Central):
+    // entonces vale la del nombre con que se visitó.
+    fac: (c && c.f26) || ((vxBuscar(ix.vis, nombre) || {}).fac || 0),
+  };
+  VS.memo[nombre] = d;
+  return d;
+}
+
+function vsLista(tipo) {
+  const V = APP_DATA.visitas || {}, w = vsSemana(VS.sem[tipo]);
+  const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+  return ((tipo === 'real' ? V.realizadas : V.programadas) || [])
+    .filter(v => v.f >= w.d0 && v.f <= w.d1 && (VS.eje === 'todas' || v.e === VS.eje))
+    .map(v => ({ v: v, d: vsCliente(v.c) }))
+    .sort((a, b) => cmp(a.v.f, b.v.f) || cmp(a.v.e, b.v.e) || cmp(a.v.c, b.v.c));
+}
+function vsResumen(L) {
+  const uni = {}, porEje = {};
+  L.forEach(x => { uni[x.d.key] = x.d; porEje[x.v.e] = (porEje[x.v.e] || 0) + 1; });
+  const cs = Object.keys(uni).map(k => uni[k]);
+  return { cs: cs, porEje: porEje, conC: cs.filter(d => d.capt).length,
+           pot: cs.reduce((s, d) => s + (d.pot || 0), 0), fac: cs.reduce((s, d) => s + (d.fac || 0), 0) };
+}
+const vsEjeCorto = e => (VX.NOM[e] || e).split(' ')[0];
+const vsLista2 = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' y ' + a[a.length - 1];
+// Días de lunes a viernes con visitas: «lun–mié» si son seguidos.
+function vsDiasTxt(L, w) {
+  const idx = Array.from(new Set(L.map(x => (new Date(x.v.f + 'T12:00:00').getDay() + 6) % 7))).filter(i => i < 5).sort();
+  if (!idx.length || idx.length === 5) return '';
+  const seguidos = idx[idx.length - 1] - idx[0] === idx.length - 1;
+  return seguidos && idx.length > 1 ? VS_DSEM[idx[0]] + '–' + VS_DSEM[idx[idx.length - 1]] : idx.map(i => VS_DSEM[i]).join(', ');
+}
+
+// ── Alertas y próximos pasos: se arman con los datos, no a mano ──
+function vsAlertas(tipo, L, R, w) {
+  const out = [];
+  const nom = d => '<strong style="color:var(--az1)">' + vxEsc(vsNombre(d.n)) + '</strong>';
+  const ctr = k => '#' + vxEsc(k.n) + (k.tipo === 'Garantia' ? ' (garantía)' : '');
+  R.cs.filter(d => d.est === 'pronto').forEach(d => out.push(nom(d) + ': el contrato ' + ctr(d.pri) + ' vence el ' + vsDiaA(d.pri.fin) +
+    ' (en ' + d.pri.dias_vence + ' días); gestionar la renovación' + (tipo === 'prog' ? ' en la visita.' : '.')));
+  R.cs.filter(d => d.est === 'vencido').forEach(d => out.push(nom(d) + ': el contrato ' + ctr(d.pri) + ' venció el ' + vsDiaA(d.pri.fin) +
+    (d.pri.tipo === 'Garantia' ? '; ofrecer contrato de mantención.' : '; renovar.')));
+  R.cs.filter(d => d.perdido).forEach(d => out.push(nom(d) + ': cliente perdido' +
+    (d.pot ? '; potencial ST de MM$' + vsM1(d.pot) + ' por recuperar.' : '.')));
+  R.cs.filter(d => !d.capt && d.fac >= 10e6).sort((a, b) => b.fac - a.fac).forEach(d => out.push(nom(d) + ': factura MM$' +
+    vsM1(d.fac) + ' en ' + ANO_ACTUAL + ' sin contrato; oportunidad de formalizar un convenio de MP.'));
+  // Gira fuera de RM y Valparaíso: tres visitas o más a una región.
+  const porReg = {};
+  L.forEach(x => { const r = x.d.region; if (r && r !== 'Metropolitana' && r !== 'Valparaíso' && r !== 'Sin región') (porReg[r] || (porReg[r] = [])).push(x); });
+  Object.keys(porReg).filter(r => porReg[r].length >= 3).forEach(r => {
+    const xs = porReg[r], ejes = Array.from(new Set(xs.map(x => vsEjeCorto(x.v.e))));
+    const sin = Array.from(new Set(xs.filter(x => !x.d.capt && x.d.pot).map(x => x.d.key))).map(k => xs.find(x => x.d.key === k).d);
+    out.push('<strong style="color:var(--az1)">Gira ' + vxEsc(r) + ':</strong> ' + xs.length + ' visitas de ' + vsLista2(ejes) +
+      (sin.length ? '; ' + sin.length + (sin.length === 1 ? ' cliente sin contrato con ' : ' clientes sin contrato que suman ') + 'MM$' +
+        vsM1(sin.reduce((s, d) => s + d.pot, 0)) + ' de potencial' : '') + '.');
+  });
+  if (tipo === 'real') {
+    const rec = Array.from(new Set(L.filter(x => VS_RECLAMO.test(x.v.m || '')).map(x => vsNombre(x.v.c))));
+    if (rec.length) out.push('<strong style="color:var(--az1)">Clientes molestos o con reclamos:</strong> ' + vxEsc(vsLista2(rec)) + '.');
+    const cob = Array.from(new Set(L.filter(x => VS_COBRO.test(x.v.m || '')).map(x => vsNombre(x.v.c))));
+    if (cob.length) out.push('<strong style="color:var(--az1)">Facturas o pagos pendientes:</strong> ' + vxEsc(vsLista2(cob)) +
+      '; revisar con cobranza lo que pide el cliente para liberar el pago.');
+  } else {
+    const dias = new Set(L.map(x => (new Date(x.v.f + 'T12:00:00').getDay() + 6) % 7));
+    const libres = [0, 1, 2, 3, 4].filter(i => !dias.has(i)).map(i => VS_DSEM_L[i]);
+    if (L.length && libres.length) out.push('<strong style="color:var(--az1)">Agenda:</strong> ' + vsLista2(libres) + ' sin visitas agendadas.');
+  }
+  Object.keys(R.porEje).forEach(e => {
+    const xs = L.filter(x => x.v.e === e), sin = xs.filter(x => !(x.v.m || '').trim()).length;
+    if (sin && sin === xs.length) out.push('<strong style="color:var(--az1)">' + vxEsc(vsEjeCorto(e)) + '</strong> no cargó comentarios en ninguna de sus visitas.');
+    else if (sin) out.push('<strong style="color:var(--az1)">' + vxEsc(vsEjeCorto(e)) + ':</strong> ' + sin + (sin === 1 ? ' visita' : ' visitas') + ' sin comentario.');
+  });
+  const top = R.cs.filter(d => d.pot > 0).sort((a, b) => b.pot - a.pot).slice(0, 3);
+  if (top.length) out.push('<strong style="color:var(--az1)">Mayor potencial por capturar:</strong> ' + vxEsc(vsLista2(top.map(d => vsNombre(d.n)))) +
+    (top.length > 1 ? ', que suman' : ',') + ' MM$' + vsM1(top.reduce((s, d) => s + d.pot, 0)) + '.');
+  return out;
+}
+
+function vsTabla(tipo, L) {
+  const th = (t, al) => '<th style="padding:.3rem .4rem;font-size:.52rem;font-weight:700;letter-spacing:.04em;color:var(--az1);text-align:' +
+    (al || 'left') + ';border-bottom:2px solid var(--az1);white-space:nowrap">' + t + '</th>';
+  const td = (v, ex) => '<td style="padding:.28rem .4rem;font-size:.6rem;vertical-align:middle;border-bottom:1px solid var(--brd);' + (ex || '') + '">' + v + '</td>';
+  const chip = (t, bg, col) => '<span style="display:inline-block;padding:.05rem .35rem;border-radius:3px;font-size:.52rem;font-weight:700;background:' +
+    bg + ';color:' + (col || '#fff') + '">' + t + '</span>';
+  const ESTADO = { vigente: ['Vigente', '#1E8E3E'], pronto: ['Vence pronto', '#E07B00'], vencido: ['Vencido', '#C62828'] };
+  const mut = t => '<div style="font-size:.5rem;color:var(--mut);line-height:1.25">' + t + '</div>';
+  const filas = L.map((x, i) => {
+    const v = x.v, d = x.d, k = d.pri;
+    const eqTxt = d.eq ? VS_LIN.filter(l => d.eq[l[0]]).map(l => d.eq[l[0]] + ' ' + l[1]).join(' · ') : '';
+    const contrato = !k
+      ? chip('Sin contrato', 'var(--gy)', 'var(--txt)') + (d.perdido ? ' <strong style="font-size:.57rem">cliente perdido</strong>' : '')
+      : chip(ESTADO[d.est][0], ESTADO[d.est][1]) + ' <strong>#' + vxEsc(k.n) + '</strong>' + (k.tipo === 'Garantia' ? ' (garantía)' : '') +
+        mut((d.est === 'vencido' ? 'venció ' : 'vence ') + vsDiaA(k.fin) + (k.val ? ' · MM$' + vsM1(k.val) : '') +
+          (d.otros.length ? ' · + ' + d.otros.map(o => '#' + vxEsc(o.n) + (o.dias_vence < 0 ? ' vencido' : '')).join(', ') : ''));
+    const pot = d.capt
+      ? '<div style="font-size:.53rem;font-weight:700;color:var(--teal)">Capturado</div>' + (d.parque ? mut('(' + vsM1(d.parque) + ')') : '')
+      : d.pot == null ? '<span style="color:var(--mut)">—</span>'
+      : d.pot ? chip(vsM1(d.pot), '#FFC000', '#000') : '<span style="color:var(--mut)">0,0</span>';
+    const m = (v.m || '').trim() || (tipo === 'prog' && v.t && v.t !== 'Visita Cobertura' ? v.t : '');
+    const alerta = ((VS_RECLAMO.test(v.m || '') || (tipo === 'prog' && d.est === 'pronto')) ? '<span style="color:#C62828">⚠</span> ' : '') +
+      (VS_COBRO.test(v.m || '') ? '<span title="Factura o pago pendiente" style="color:#B86E00;font-weight:800">$</span> ' : '');
+    return '<tr style="background:' + (i % 2 ? 'var(--bg2)' : 'transparent') + '">' +
+      td('<strong style="color:var(--az1)">' + vsDia(v.f) + '</strong>', 'white-space:nowrap') +
+      td('<span title="' + vxEsc(VX.NOM[v.e] || v.e) + '" style="display:inline-block;width:.55rem;height:.55rem;border-radius:50%;background:' +
+        (VX.COL[v.e] || '#003F7F') + '"></span>', 'text-align:center;padding:.28rem .15rem') +
+      td('<strong>' + vxEsc(vsNombre(v.c)) + '</strong>' + (v.k ? mut(vxEsc(v.k)) : ''), 'min-width:150px;max-width:220px') +
+      td('<span style="color:var(--az2)">' + vxEsc(d.region === 'Metropolitana' ? 'RM' : d.region) + '</span>', 'white-space:nowrap') +
+      td(d.tot == null ? '<span style="color:var(--mut)">s/i</span>' : '<strong>' + d.tot + '</strong>' + (eqTxt ? mut(eqTxt) : ''), 'white-space:nowrap') +
+      td(contrato, 'min-width:150px') +
+      td(pot, 'text-align:right;white-space:nowrap') +
+      td(d.fac ? '<strong style="color:#1E8E3E">' + vsM1(d.fac) + '</strong>' : '<span style="color:var(--mut)">0,0</span>', 'text-align:right;white-space:nowrap') +
+      td(m ? '<span style="line-height:1.3">' + alerta + vxEsc(m) + '</span>' : alerta + '<span style="color:var(--mut)">' + (tipo === 'prog' ? 'Prospección' : 'Sin comentario') + '</span>',
+        'min-width:260px;font-size:.57rem') + '</tr>';
+  }).join('');
+  return '<table style="width:100%;border-collapse:collapse"><thead><tr>' + th('FECHA') + th('') + th('CLIENTE') + th('REGIÓN') + th('EQUIPOS ST') +
+    th('CONTRATO') + th('POT. ST MM$', 'right') + th('FACT. ' + String(ANO_ACTUAL).slice(2), 'right') +
+    th(tipo === 'real' ? 'COMENTARIO / PRÓXIMO PASO' : 'COMENTARIO / OBJETIVO') + '</tr></thead><tbody>' + filas + '</tbody></table>';
+}
+
+function vsCaja(tipo) {
+  const box = document.getElementById('vs-' + tipo + '-box');
+  if (!box) return;
+  const w = vsSemana(VS.sem[tipo]), L = vsLista(tipo), R = vsResumen(L), real = tipo === 'real';
+  const tit = document.getElementById('vs-' + tipo + '-tit');
+  if (tit) tit.textContent = vsTitulo(tipo);
+  const nav = document.getElementById('vs-' + tipo + '-nav');
+  const b = (t, fn, on, ttl) => '<button class="btn' + (on ? ' on' : '') + '" onclick="' + fn + '" title="' + ttl + '" style="font-size:.57rem;padding:.16rem .5rem">' + t + '</button>';
+  const base = real ? 0 : 1;
+  if (nav) nav.innerHTML = b('‹', 'vsSem(\'' + tipo + '\',-1)', false, 'Semana anterior') +
+    b(real ? 'Esta semana' : 'Próxima semana', 'vsSem(\'' + tipo + '\',0)', VS.sem[tipo] === base, 'Volver a la semana ' + (real ? 'de la fecha de corte' : 'siguiente')) +
+    b('›', 'vsSem(\'' + tipo + '\',1)', false, 'Semana siguiente');
+  const hoy = vsHoy();
+  if (!L.length) {
+    box.innerHTML = '<div style="padding:1.2rem;text-align:center;color:var(--mut);font-size:.65rem;line-height:1.6">' +
+      (real ? 'No hay visitas registradas' : 'No hay visitas programadas') + ' entre el ' + vsDiaA(w.d0) + ' y el ' + vsDiaA(w.d1) +
+      (VS.eje === 'todas' ? '' : ' para ' + vxEsc(VX.NOM[VS.eje] || VS.eje)) + '.' +
+      (!real && w.d1 <= hoy ? '<br>Las programadas son las visitas con fecha posterior al corte de datos (' + vsDiaA(hoy) + ').' : '') +
+      (real && w.d0 > hoy ? '<br>La semana es posterior al corte de datos (' + vsDiaA(hoy) + ').' : '') + '</div>';
+    return;
+  }
+  // Responsables, como en la lámina del comité
+  const ejes = Object.keys(R.porEje).sort();
+  const cab = '<div style="display:flex;gap:.45rem;flex-wrap:wrap;margin-bottom:.6rem">' + ejes.map(e =>
+    '<span style="display:inline-flex;align-items:center;gap:.4rem;padding:.25rem .75rem;border-radius:14px;background:' + (VX.COL[e] || '#003F7F') +
+    ';color:#fff;font-size:.62rem"><span style="width:.45rem;height:.45rem;border-radius:50%;background:#fff"></span><strong>' +
+    vxEsc(VX.NOM[e] || e) + '</strong><strong style="font-size:.75rem;margin-left:.3rem">' + R.porEje[e] + '</strong> ' +
+    (R.porEje[e] === 1 ? 'visita' : 'visitas') + '</span>').join('') + '</div>';
+  const dias = vsDiasTxt(L, w);
+  const k = (col, val, lbl, sub, fondo) => '<div class="kpi" style="--kc:' + col + (fondo ? ';background:' + fondo + ';border-color:' + fondo : '') + '">' +
+    '<div class="kpi-lbl"' + (fondo ? ' style="color:inherit"' : '') + '>' + lbl + '</div><div class="kpi-val"' + (fondo ? ' style="color:inherit"' : '') + '>' + val +
+    '</div><div class="kpi-sub"' + (fondo ? ' style="color:inherit;opacity:.85"' : '') + '>' + sub + '</div></div>';
+  const kpis = '<div class="g4" style="margin-bottom:.75rem">' +
+    k('var(--az1)', L.length, 'Visitas', ejes.map(e => vxEsc(vsEjeCorto(e)) + ' ' + R.porEje[e]).join(' · ') +
+      (!real && dias ? ' · agenda cargada solo ' + dias : '')) +
+    k('var(--az2)', R.cs.length, real ? 'Clientes únicos' : 'Clientes', R.conC + ' con contrato · ' + (R.cs.length - R.conC) + ' sin contrato') +
+    '<div style="color:#000">' + k('#FFC000', 'MM$' + vsM1(R.pot), 'Potencial ST por capturar', 'Suma de clientes sin contrato', '#FFC000') + '</div>' +
+    '<div style="color:#fff">' + k('#1E8E3E', 'MM$' + vsM1(R.fac), 'Facturación ' + ANO_ACTUAL, (real ? 'Clientes visitados' : 'Clientes a visitar') +
+      ', 1-ene al ' + vsDia(hoy), '#1E8E3E') + '</div>' +
+    '</div>';
+  const al = vsAlertas(tipo, L, R, w);
+  const top = R.cs.filter(d => d.pot > 0).sort((a, b) => b.pot - a.pot).slice(0, 5);
+  const maxP = top.length ? top[0].pot : 1;
+  const lado = '<div style="background:var(--bg2);border-radius:6px;padding:.65rem .8rem;margin-bottom:.8rem">' +
+    '<div style="font-size:.66rem;font-weight:700;color:var(--az1);margin-bottom:.45rem">Alertas y próximos pasos</div>' +
+    (al.length ? al.map(t => '<div style="display:flex;gap:.45rem;font-size:.6rem;line-height:1.45;margin-bottom:.4rem">' +
+      '<span style="color:#C62828;font-size:.55rem;margin-top:.12rem">◆</span><span>' + t + '</span></div>').join('')
+      : '<div style="font-size:.6rem;color:var(--mut)">Sin alertas en la semana.</div>') + '</div>' +
+    (top.length ? '<div style="display:flex;align-items:baseline;margin-bottom:.4rem"><span style="font-size:.66rem;font-weight:700;color:var(--az1)">Top ' + top.length +
+      ' potencial ST por capturar</span><span style="margin-left:auto;font-size:.55rem;color:var(--mut)">MM$</span></div>' +
+      top.map(d => '<div style="display:flex;align-items:center;gap:.45rem;margin-bottom:.3rem">' +
+        '<span style="flex:0 0 42%;text-align:right;font-size:.57rem;font-weight:700;line-height:1.2" title="' +
+        vxEsc(vsNombre(d.n)) + '">' + vxEsc(vsNombre(d.n)) + '</span><span style="flex:1;display:flex;align-items:center;gap:.3rem">' +
+        '<span style="height:.75rem;width:' + Math.max(4, d.pot / maxP * 80) + '%;background:#FFC000;border-radius:2px"></span>' +
+        '<span style="font-size:.57rem;font-weight:700">' + vsM1(d.pot) + '</span></span></div>').join('') : '');
+  box.innerHTML = cab + kpis +
+    '<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,300px);gap:.9rem;align-items:start">' +
+    '<div style="overflow-x:auto">' + vsTabla(tipo, L) + '</div><div>' + lado + '</div></div>' +
+    '<p style="font-size:.54rem;color:var(--mut);margin:.6rem 0 0;line-height:1.5"><strong>Potencial ST por capturar:</strong> valor anual estimado de ' +
+    'mantención de los equipos con potencial ST en la base instalada del cliente que no están bajo contrato. Si el cliente tiene contrato se muestra ' +
+    'como «Capturado» y el valor del parque va entre paréntesis. <strong>Facturación ' + ANO_ACTUAL + ':</strong> facturación real del 1-ene al ' +
+    vsDiaA(hoy) + '. <strong>Vence pronto:</strong> contrato que vence en 30 días o menos. ⚠: el comentario menciona un reclamo o un cliente molesto' +
+    (real ? '' : ', o el contrato vence pronto') + '; $: factura o pago pendiente. Fuente: hoja VISITAS, Cartera ST y contratos; datos al ' + vsDiaA(hoy) + '.</p>';
+}
+
+function vsRender() {
+  if (!document.getElementById('vs-real-box')) return;
+  const V = APP_DATA.visitas || {};
+  if (!V.realizadas && !V.programadas) return;
+  // Una tarjeta a la vista: el selector elige realizadas o programadas.
+  const n = t => vsLista(t).length;
+  vpBotones('vs-vista', [{ k: 'real', t: 'Realizadas (' + n('real') + ')' }, { k: 'prog', t: 'Programadas (' + n('prog') + ')' }], VS.vista, 'vsVista');
+  vpBotones('vs-eje', [{ k: 'todas', t: 'Ambos' }].concat(Object.keys(VX.NOM).map(e => ({ k: e, t: VX.NOM[e], col: VX.COL[e] }))), VS.eje, 'vsEje');
+  ['real', 'prog'].forEach(t => {
+    const card = document.getElementById('vs-' + t + '-card');
+    if (card) card.style.display = VS.vista === t ? '' : 'none';
+  });
+  vsCaja(VS.vista);
+}
+function vsVista(t) { VS.vista = t; vsRender(); }
+function vsEje(e) { VS.eje = e; vsRender(); }
+function vsSem(tipo, d) { VS.sem[tipo] = d === 0 ? (tipo === 'real' ? 0 : 1) : VS.sem[tipo] + d; vsRender(); }
+
+function vsExportar(tipo) {
+  exportarPanel({ ids: ['vs-' + tipo + '-box'], titulo: vsTitulo(tipo), sub: VS.eje === 'todas' ? '' : VX.NOM[VS.eje],
+    archivo: (tipo === 'real' ? 'Visitas_realizadas_' : 'Visitas_programadas_') + vsSemana(VS.sem[tipo]).d0,
+    btn: 'vs-' + tipo + '-exp', ancho: 1600 });
+}
+
+window.vsExcel = function (tipo) {
+  if (typeof XLSX === 'undefined') { alert('Librería Excel no cargada.'); return; }
+  const L = vsLista(tipo), R = vsResumen(L), w = vsSemana(VS.sem[tipo]);
+  const cab = t => ({ v: t, t: 's', s: { font: { bold: true, sz: 9, color: { rgb: 'FFFFFF' } },
+    fill: { patternType: 'solid', fgColor: { rgb: '002D73' } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } } });
+  const neg = t => ({ v: t, t: 's', s: { font: { bold: true } } });
+  const EST = { sin: 'Sin contrato', vigente: 'Vigente', pronto: 'Vence pronto', vencido: 'Vencido' };
+  const aoa = [[{ v: vsTitulo(tipo), t: 's', s: { font: { bold: true, sz: 13, color: { rgb: '002D73' } } } }],
+    ['Datos al ' + vsDiaA(vsHoy()) + (VS.eje === 'todas' ? '' : ' · ' + (VX.NOM[VS.eje] || VS.eje))], [],
+    [neg('Visitas'), L.length, Object.keys(R.porEje).map(e => vsEjeCorto(e) + ' ' + R.porEje[e]).join(' · ')],
+    [neg(tipo === 'real' ? 'Clientes únicos' : 'Clientes'), R.cs.length, R.conC + ' con contrato · ' + (R.cs.length - R.conC) + ' sin contrato'],
+    [neg('Potencial ST por capturar ($)'), Math.round(R.pot), 'Suma de clientes sin contrato'],
+    [neg('Facturación ' + ANO_ACTUAL + ' ($)'), Math.round(R.fac), '1-ene al ' + vsDiaA(vsHoy())], []];
+  const fila0 = aoa.length;
+  aoa.push(['Fecha', 'Ejecutivo', 'Cliente (como se registró)', 'Cliente en Cartera ST', 'Región', 'Comuna', 'Equipos ST',
+    'Esterilización', 'Dental', 'Endoscopía', 'Otras líneas', 'Estado contrato', 'N° contrato', 'Tipo', 'Vence', 'Monto contrato ($)',
+    'Otros contratos', 'Cliente perdido', 'Potencial ST ($)', 'Parque capturado ($)', 'Facturación ' + ANO_ACTUAL + ' ($)',
+    'Actividad', 'Asunto', 'Contacto', 'Comentario'].map(cab));
+  L.forEach(x => {
+    const v = x.v, d = x.d, k = d.pri, eq = d.eq || {};
+    aoa.push([v.f.split('-').reverse().join('-'), VX.NOM[v.e] || v.e, v.c, d.cart, d.region, d.com, d.tot == null ? '' : d.tot,
+      eq.esterilizacion || 0, eq.dental || 0, eq.endoscopia || 0,
+      (eq.incardia || 0) + (eq.mmq_reas || 0) + (eq.mobiliario || 0) + (eq.otros || 0),
+      EST[d.est], k ? k.n : '', k ? (k.tipo === 'Garantia' ? 'Garantía' : k.tipo) : '', k ? k.fin.split('-').reverse().join('-') : '',
+      k ? Math.round(k.val || 0) : '', d.otros.map(o => '#' + o.n + (o.dias_vence < 0 ? ' (vencido)' : '')).join(', '),
+      d.perdido ? 'Sí' : '', d.capt ? '' : (d.pot == null ? '' : Math.round(d.pot)), d.capt && d.parque ? Math.round(d.parque) : '',
+      Math.round(d.fac || 0), v.t || '', v.a || '', v.k || '', v.m || '']);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [10, 16, 40, 40, 14, 16, 9, 9, 7, 9, 9, 13, 10, 10, 11, 15, 22, 9, 15, 15, 15, 16, 30, 26, 90].map(n => ({ wch: n }));
+  ws['!freeze'] = { xSplit: 3, ySplit: fila0 + 1 };
+  [5, 6].forEach(r => { const ref = XLSX.utils.encode_cell({ r: r, c: 1 }); if (ws[ref]) ws[ref].z = '#,##0'; });
+  for (let i = 0; i < L.length; i++) {
+    const r = fila0 + 1 + i;
+    [15, 18, 19, 20].forEach(c => { const ref = XLSX.utils.encode_cell({ r: r, c: c }); if (ws[ref]) ws[ref].z = '#,##0'; });
+    const rc = XLSX.utils.encode_cell({ r: r, c: 24 });
+    if (ws[rc]) ws[rc].s = { alignment: { wrapText: true, vertical: 'top' } };
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, tipo === 'real' ? 'Realizadas' : 'Programadas');
+  const al = vsAlertas(tipo, L, R, w).map(t => [t.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')]);
+  const ws2 = XLSX.utils.aoa_to_sheet([[cab('Alertas y próximos pasos')]].concat(al.length ? al : [['Sin alertas en la semana.']]));
+  ws2['!cols'] = [{ wch: 120 }];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Alertas');
+  XLSX.writeFile(wb, (tipo === 'real' ? 'Visitas_realizadas_' : 'Visitas_programadas_') + w.d0 + '.xlsx');
+};
