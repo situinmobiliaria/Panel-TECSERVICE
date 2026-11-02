@@ -634,7 +634,7 @@ window.exportarPanel = async function (o) {
     });
     const MM_PX = 25.4 / 96;
     await window.hdEntregar(canvas, (o.archivo || 'Exportable') + '_TS_' +
-      (hoy || '').replace(/[\s/]+/g, '-'), realW * MM_PX, realH * MM_PX);
+      (hoy || '').replace(/[\s/]+/g, '-'), realW * MM_PX, realH * MM_PX, o.soloDescarga);
   } catch (err) {
     console.error('exportarPanel:', err);
     alert('Error al generar: ' + err.message);

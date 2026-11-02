@@ -1911,7 +1911,6 @@ function vpDestinos() {
     'text-align:' + al + ';white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)">' + t + '</th>';
   const td = (v, extra) => '<td style="padding:.24rem .45rem;text-align:right;font-size:.6rem;font-variant-numeric:tabular-nums;' +
     (extra || '') + SEP + '">' + v + '</td>';
-  const maxV = Math.max.apply(null, CATS.map(c => agg[c[0]].v).concat([1]));
   const nCol = 5 + det.tipos.length + det.ejecutivos.length;
   // Clic en una fila (menos el total): se abre debajo la lista de sus clientes.
   const fila = (lbl, a, col, estilo, k) => {
@@ -1927,7 +1926,10 @@ function vpDestinos() {
       td(a.cli.size) + td('<strong>' + a.v + '</strong>') +
       '<td style="padding:.24rem .45rem;min-width:110px;' + SEP + '"><div style="display:flex;align-items:center;gap:.35rem">' +
         '<div style="flex:1;height:6px;background:var(--gy);border-radius:3px;overflow:hidden"><div style="height:100%;width:' +
-        (a.v / maxV * 100) + '%;background:' + col + '"></div></div><span style="font-size:.58rem;font-weight:700;min-width:2.3rem;' +
+        // El largo es el mismo % que se lee al lado, sobre el total de visitas:
+        // medido contra el mayor destino, el TOTAL pasaba del 100% y al exportar
+        // (donde nada recorta) se salía del riel y tapaba la cifra.
+        (tot ? Math.min(100, a.v / tot * 100) : 0) + '%;background:' + col + '"></div></div><span style="font-size:.58rem;font-weight:700;min-width:2.3rem;' +
         'text-align:right">' + (tot ? (a.v / tot * 100).toFixed(0) : 0) + '%</span></div></td>' +
       det.tipos.map(t => td(a.tipo[t] || '—', 'color:var(--mut);')).join('') +
       det.ejecutivos.map(e => td(a.eje[e] || '—', 'color:' + (VX.COL[e] || 'var(--txt)') + ';')).join('') +
@@ -2024,7 +2026,7 @@ function vpRender() {
 // (DATA), potencial ST, parque ya capturado y facturación del año (Cartera
 // ST). Es la tabla que se armaba a mano para el comité de cada semana.
 // ═══════════════════════════════════════════════════════════════
-const VS = { vista: 'real', sem: { real: 0, prog: 1 }, eje: 'todas', idx: null, memo: {} };
+const VS = { vista: 'real', sem: { real: 0, prog: null }, eje: 'todas', idx: null, memo: {} };
 const VS_MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const VS_DSEM = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
 const VS_DSEM_L = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes'];
@@ -2064,6 +2066,14 @@ function vsSemana(n) {
   const vie = new Date(lun), dom = new Date(lun);
   vie.setDate(vie.getDate() + 4); dom.setDate(dom.getDate() + 6);
   return { d0: vsIso(lun), d1: vsIso(dom), vie: vsIso(vie), n: n };
+}
+// Semana de partida de cada tabla. Las programadas arrancan en la semana en
+// curso si todavía le quedan visitas por delante (los datos llegaron a
+// comienzo de semana) y si no, en la siguiente (llegaron el viernes).
+function vsBase(tipo) {
+  if (tipo === 'real') return 0;
+  const hoy = vsHoy(), w = vsSemana(0);
+  return ((APP_DATA.visitas || {}).programadas || []).some(v => v.f > hoy && v.f <= w.d1) ? 0 : 1;
 }
 function vsSemTxt(w) {   // «19–23 oct 2026», de lunes a viernes
   const ma = VS_MES[+w.d0.slice(5, 7) - 1], mb = VS_MES[+w.vie.slice(5, 7) - 1];
@@ -2236,7 +2246,7 @@ function vsAlertas(tipo, L, R, w) {
   return out;
 }
 
-function vsTabla(tipo, L) {
+function vsTabla(tipo, L, desde) {
   const th = (t, al) => '<th style="padding:.3rem .4rem;font-size:.52rem;font-weight:700;letter-spacing:.04em;color:var(--az1);text-align:' +
     (al || 'left') + ';border-bottom:2px solid var(--az1);white-space:nowrap">' + t + '</th>';
   const td = (v, ex) => '<td style="padding:.28rem .4rem;font-size:.6rem;vertical-align:middle;border-bottom:1px solid var(--brd);' + (ex || '') + '">' + v + '</td>';
@@ -2259,7 +2269,7 @@ function vsTabla(tipo, L) {
     const m = (v.m || '').trim() || (tipo === 'prog' && v.t && v.t !== 'Visita Cobertura' ? v.t : '');
     const alerta = ((VS_RECLAMO.test(v.m || '') || (tipo === 'prog' && d.est === 'pronto')) ? '<span style="color:#C62828">⚠</span> ' : '') +
       (VS_COBRO.test(v.m || '') ? '<span title="Factura o pago pendiente" style="color:#B86E00;font-weight:800">$</span> ' : '');
-    return '<tr style="background:' + (i % 2 ? 'var(--bg2)' : 'transparent') + '">' +
+    return '<tr style="background:' + ((i + (desde || 0)) % 2 ? 'var(--bg2)' : 'transparent') + '">' +
       td('<strong style="color:var(--az1)">' + vsDia(v.f) + '</strong>', 'white-space:nowrap') +
       td('<span title="' + vxEsc(VX.NOM[v.e] || v.e) + '" style="display:inline-block;width:.55rem;height:.55rem;border-radius:50%;background:' +
         (VX.COL[v.e] || '#003F7F') + '"></span>', 'text-align:center;padding:.28rem .15rem') +
@@ -2285,9 +2295,9 @@ function vsCaja(tipo) {
   if (tit) tit.textContent = vsTitulo(tipo);
   const nav = document.getElementById('vs-' + tipo + '-nav');
   const b = (t, fn, on, ttl) => '<button class="btn' + (on ? ' on' : '') + '" onclick="' + fn + '" title="' + ttl + '" style="font-size:.57rem;padding:.16rem .5rem">' + t + '</button>';
-  const base = real ? 0 : 1;
+  const base = vsBase(tipo);
   if (nav) nav.innerHTML = b('‹', 'vsSem(\'' + tipo + '\',-1)', false, 'Semana anterior') +
-    b(real ? 'Esta semana' : 'Próxima semana', 'vsSem(\'' + tipo + '\',0)', VS.sem[tipo] === base, 'Volver a la semana ' + (real ? 'de la fecha de corte' : 'siguiente')) +
+    b(base === 0 ? 'Esta semana' : 'Próxima semana', 'vsSem(\'' + tipo + '\',0)', VS.sem[tipo] === base, 'Volver a la semana ' + (real ? 'de la fecha de corte' : base === 0 ? 'en curso' : 'siguiente')) +
     b('›', 'vsSem(\'' + tipo + '\',1)', false, 'Semana siguiente');
   const hoy = vsHoy();
   if (!L.length) {
@@ -2298,6 +2308,13 @@ function vsCaja(tipo) {
       (real && w.d0 > hoy ? '<br>La semana es posterior al corte de datos (' + vsDiaA(hoy) + ').' : '') + '</div>';
     return;
   }
+  box.innerHTML = vsArmar(tipo, L, R, w, hoy, real);
+}
+
+// Contenido de la tarjeta. P, si viene, es una parte del exportable dividido:
+// los KPIs, las alertas y el top 5 son de la semana completa y sólo la tabla
+// lleva las filas de esa parte.
+function vsArmar(tipo, L, R, w, hoy, real, P) {
   // Responsables, como en la lámina del comité
   const ejes = Object.keys(R.porEje).sort();
   const cab = '<div style="display:flex;gap:.45rem;flex-wrap:wrap;margin-bottom:.6rem">' + ejes.map(e =>
@@ -2332,9 +2349,9 @@ function vsCaja(tipo) {
         vxEsc(vsNombre(d.n)) + '">' + vxEsc(vsNombre(d.n)) + '</span><span style="flex:1;display:flex;align-items:center;gap:.3rem">' +
         '<span style="height:.75rem;width:' + Math.max(4, d.pot / maxP * 80) + '%;background:#FFC000;border-radius:2px"></span>' +
         '<span style="font-size:.57rem;font-weight:700">' + vsM1(d.pot) + '</span></span></div>').join('') : '');
-  box.innerHTML = cab + kpis +
+  return cab + kpis +
     '<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,300px);gap:.9rem;align-items:start">' +
-    '<div style="overflow-x:auto">' + vsTabla(tipo, L) + '</div><div>' + lado + '</div></div>' +
+    '<div style="overflow-x:auto">' + vsTabla(tipo, P ? P.filas : L, P ? P.desde : 0) + '</div><div>' + lado + '</div></div>' +
     '<p style="font-size:.54rem;color:var(--mut);margin:.6rem 0 0;line-height:1.5"><strong>Potencial ST por capturar:</strong> valor anual estimado de ' +
     'mantención de los equipos con potencial ST en la base instalada del cliente que no están bajo contrato. Si el cliente tiene contrato se muestra ' +
     'como «Capturado» y el valor del parque va entre paréntesis. <strong>Facturación ' + ANO_ACTUAL + ':</strong> facturación real del 1-ene al ' +
@@ -2343,6 +2360,7 @@ function vsCaja(tipo) {
 }
 
 function vsRender() {
+  if (VS.sem.prog == null) VS.sem.prog = vsBase('prog');
   if (!document.getElementById('vs-real-box')) return;
   const V = APP_DATA.visitas || {};
   if (!V.realizadas && !V.programadas) return;
@@ -2358,12 +2376,56 @@ function vsRender() {
 }
 function vsVista(t) { VS.vista = t; vsRender(); }
 function vsEje(e) { VS.eje = e; vsRender(); }
-function vsSem(tipo, d) { VS.sem[tipo] = d === 0 ? (tipo === 'real' ? 0 : 1) : VS.sem[tipo] + d; vsRender(); }
+function vsSem(tipo, d) { VS.sem[tipo] = d === 0 ? vsBase(tipo) : VS.sem[tipo] + d; vsRender(); }
 
-function vsExportar(tipo) {
-  exportarPanel({ ids: ['vs-' + tipo + '-box'], titulo: vsTitulo(tipo), sub: VS.eje === 'todas' ? '' : VX.NOM[VS.eje],
-    archivo: (tipo === 'real' ? 'Visitas_realizadas_' : 'Visitas_programadas_') + vsSemana(VS.sem[tipo]).d0,
-    btn: 'vs-' + tipo + '-exp', ancho: 1600 });
+// Una semana cargada no cabe en una lámina: la tabla se parte en el menor
+// número de partes iguales (en filas) con las que cada una entra en un 16:9.
+// Como el alto de una fila depende del largo del comentario, no se adivina
+// cuántas caben: se arma cada parte fuera de pantalla con el ancho del
+// exportable y se mide.
+const VS_EXP_ANCHO = 1600;
+const VS_EXP_ALTO = VS_EXP_ANCHO * 9 / 16 - 85;   // menos el encabezado y los márgenes del exportable
+
+async function vsExportar(tipo) {
+  const L = vsLista(tipo), R = vsResumen(L), w = vsSemana(VS.sem[tipo]), hoy = vsHoy(), real = tipo === 'real';
+  const base = {
+    titulo: vsTitulo(tipo), sub: VS.eje === 'todas' ? '' : VX.NOM[VS.eje],
+    archivo: (tipo === 'real' ? 'Visitas_realizadas_' : 'Visitas_programadas_') + w.d0,
+    btn: 'vs-' + tipo + '-exp', ancho: VS_EXP_ANCHO,
+  };
+  const box = document.getElementById('vs-' + tipo + '-box');
+  if (!L.length || !box) return exportarPanel(Object.assign({ ids: ['vs-' + tipo + '-box'] }, base));
+
+  const tmp = document.createElement('div');
+  tmp.id = 'vs-exp-parte';
+  tmp.style.cssText = 'position:absolute;left:-99999px;top:0;width:' + (VS_EXP_ANCHO - 48) + 'px;background:#fff';
+  box.parentNode.appendChild(tmp);   // dentro de la hoja, para que lo pinte el mismo CSS
+  const partes = k => {
+    const n = Math.ceil(L.length / k), out = [];
+    for (let i = 0; i < k; i++) {
+      // Reparto parejo: las primeras partes llevan una fila más si no da exacto.
+      const ini = Math.round(i * L.length / k), fin = Math.round((i + 1) * L.length / k);
+      if (fin > ini) out.push({ desde: ini, filas: L.slice(ini, fin), parte: i + 1, de: k });
+    }
+    return n ? out : [];
+  };
+  const alto = P => { tmp.innerHTML = vsArmar(tipo, L, R, w, hoy, real, P); return tmp.offsetHeight; };
+  try {
+    let k = 1, lst = partes(1);
+    while (k < L.length && lst.some(P => alto(P) > VS_EXP_ALTO)) { k++; lst = partes(k); }
+    if (k === 1) { tmp.remove(); return exportarPanel(Object.assign({ ids: ['vs-' + tipo + '-box'] }, base)); }
+    for (const P of lst) {
+      tmp.innerHTML = vsArmar(tipo, L, R, w, hoy, real, P);
+      await exportarPanel(Object.assign({}, base, {
+        ids: ['vs-exp-parte'], titulo: base.titulo + ' · parte ' + P.parte + ' de ' + P.de,
+        sub: [base.sub, 'filas ' + (P.desde + 1) + '–' + (P.desde + P.filas.length) + ' de ' + L.length].filter(Boolean).join(' · '),
+        archivo: base.archivo + '_parte' + P.parte + 'de' + P.de, soloDescarga: true,
+      }));
+    }
+    if (window.hdSalida === 'copiar') hdAviso('Se descargaron ' + lst.length + ' imágenes: el portapapeles sólo guarda una');
+  } finally {
+    tmp.remove();
+  }
 }
 
 window.vsExcel = function (tipo) {

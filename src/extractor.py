@@ -697,7 +697,10 @@ def read_visitas(wb, mes_corte):
         ano      = to_int(row[10], 0)
 
         fecha = _fecha_visita(row[2])
-        coment = re.sub(r"\s+", " ", safe_str(row[7])).strip()[:COMENT_MAX]
+        # Las fichas pegadas desde un formulario traen emojis que la hoja ya
+        # guardó como «??????»: esas rachas se sacan, un «?» suelto se respeta.
+        coment = re.sub(r"\?{3,}", " ", safe_str(row[7]))
+        coment = re.sub(r"\s+", " ", coment).strip()[:COMENT_MAX]
         if fecha and fecha > TODAY and cliente:
             programadas.append({"e": asignado, "f": fecha.isoformat(), "c": cliente, "t": tipo_act,
                                 "a": safe_str(row[1]), "k": safe_str(row[4]), "m": coment})
