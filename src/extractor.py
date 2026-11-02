@@ -44,6 +44,27 @@ def _xlsb_to_xlsx(xlsb_path):
             os.path.abspath(xlsb_path),
             UpdateLinks=0, ReadOnly=True
         )
+        # Con PANEL_HOY las fórmulas con HOY() (p. ej. el mes y la semana de
+        # «Analisis Facturación») deben calcular a la fecha de corte y no al día
+        # en que se corre: el 01-11 la hoja pasaba entera a noviembre con un
+        # corte al 31-10. Se reemplaza sólo en la copia temporal; el Excel
+        # original queda intacto.
+        if os.environ.get("PANEL_HOY"):
+            _c = date.fromisoformat(os.environ["PANEL_HOY"])
+            # Replace trabaja sobre la fórmula en el idioma de Excel: en español
+            # es HOY() y FECHA(a;m;d); en inglés TODAY() y DATE(a,m,d).
+            _cambios = (("HOY()",   f"FECHA({_c.year};{_c.month};{_c.day})"),
+                        ("TODAY()", f"DATE({_c.year},{_c.month},{_c.day})"))
+            for _ws in wb_com.Worksheets:
+                for _de, _a in _cambios:
+                    try:
+                        # LookAt 2 = xlPart
+                        _ws.Cells.Replace(What=_de, Replacement=_a,
+                                          LookAt=2, SearchOrder=1, MatchCase=False)
+                    except Exception as _e:
+                        print(f"  No se pudo fijar {_de} en «{_ws.Name}»: {_e}")
+            excel.CalculateFull()
+            print(f"  HOY() fijado al {_c:%d-%m-%Y} en la copia temporal")
         wb_com.SaveAs(tmp_path, FileFormat=51)  # 51 = xlOpenXMLWorkbook
         print(f"  Conversion completada -> {tmp_path}")
         return tmp_path
