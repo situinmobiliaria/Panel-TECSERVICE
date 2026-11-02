@@ -17,7 +17,7 @@ $jsFiles = @(
   'hoja_plan_rm.js',
   'hoja_cartera_st.js',
   'hoja_citas.js','hoja_cli_rel.js','hoja_pipeline.js','hoja_brechas.js',
-  'hoja_ppto2027.js'
+  'hoja_ppto2027.js','hoja_eerr_dir.js'
 )
 
 $writer = [System.IO.StreamWriter]::new($tmp, $false, [System.Text.Encoding]::UTF8)

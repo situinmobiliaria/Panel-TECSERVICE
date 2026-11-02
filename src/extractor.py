@@ -113,7 +113,7 @@ JS_FILES = [
     "hoja_plan_rm.js",
     "hoja_cartera_st.js",
     "hoja_citas.js", "hoja_cli_rel.js", "hoja_pipeline.js", "hoja_brechas.js",
-    "hoja_ppto2027.js",
+    "hoja_ppto2027.js", "hoja_eerr_dir.js",
 ]
 
 # PANEL_HOY=AAAA-MM-DD reprocesa un Excel con la fecha de corte en que se cargó
@@ -4802,6 +4802,105 @@ def read_ppto_2027():
             "tipos": tipos, "vacios": vacios}
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# EERR DIRECTORIO — hoja «EERR Directorio» tal cual: mismas filas, mismos
+# números (Real / PTTO / Variación / Variación % por mes y el bloque «Periodo
+# Actual»). No se recalcula nada. Las filas y columnas ocultas en el Excel no
+# se muestran: openpyxl en modo lectura no las expone, así que se leen del XML.
+# ══════════════════════════════════════════════════════════════════════════════
+def _ocultas_hoja(xlsx_path, nombre):
+    import zipfile
+    try:
+        z = zipfile.ZipFile(xlsx_path)
+        wbx = z.read("xl/workbook.xml").decode("utf-8")
+        rels = z.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        m = re.search(r'<sheet [^>]*name="' + re.escape(nombre) + r'"[^>]*r:id="([^"]+)"', wbx)
+        rel = next(r for r in re.findall(r"<Relationship [^>]*>", rels) if 'Id="' + m.group(1) + '"' in r)
+        tgt = re.search(r'Target="([^"]+)"', rel).group(1).replace("/xl/", "").lstrip("/")
+        x = z.read("xl/" + tgt).decode("utf-8")
+    except Exception as e:
+        print(f"       EERR DIRECTORIO: no se pudieron leer filas ocultas ({e})")
+        return set(), set()
+    filas = {int(r) for r in re.findall(r'<row r="(\d+)"[^>]*\bhidden="1"', x)}
+    cols = set()
+    for c in re.findall(r"<col [^>]*>", x):
+        if 'hidden="1"' in c:
+            a = int(re.search(r'min="(\d+)"', c).group(1)); b = int(re.search(r'max="(\d+)"', c).group(1))
+            cols.update(range(a, min(b, 200) + 1))
+    return filas, cols
+
+
+def read_eerr_directorio(wb, xlsx_path):
+    nombre = next((n for n in wb.sheetnames if "DIRECTORIO" in n.upper() and "EERR" in n.upper()), None)
+    if not nombre:
+        return {}
+    rows = [list(r) for r in wb[nombre].iter_rows(max_col=80, values_only=True)]
+    filas_oc, cols_oc = _ocultas_hoja(xlsx_path, nombre)
+    vis = lambda ci: (ci + 1) not in cols_oc            # ci base 0, Excel base 1
+    # Encabezado: la fila que tiene «Real» y la siguiente con las fechas de cada mes
+    h = next((i for i, r in enumerate(rows) if any(_norm_cli(v) == "REAL" for v in r if isinstance(v, str))), None)
+    if h is None or h + 1 >= len(rows):
+        return {}
+    tipos, fechas = rows[h], rows[h + 1]
+    TIPOS = {"REAL": "r", "PTTO": "p", "VARIACION PTTO": "v", "VARIACION PTTO %": "vp"}
+    bloques, orden = {}, []        # clave → {r,p,v,vp: col}
+    for ci in range(2, max(len(tipos), len(fechas))):
+        if not vis(ci):
+            continue
+        t = TIPOS.get(_norm_cli(tipos[ci]) if ci < len(tipos) and tipos[ci] else "")
+        f = fechas[ci] if ci < len(fechas) else None
+        if t is None:
+            continue
+        if isinstance(f, (datetime, date)):
+            k = (f.year, f.month)
+        elif isinstance(f, str) and f.strip():
+            k = f.strip()                                # «Periodo Actual 2026»
+        else:
+            continue
+        if k not in bloques:
+            bloques[k] = {}; orden.append(k)
+        bloques[k].setdefault(t, ci)
+    MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto",
+             "Septiembre","Octubre","Noviembre","Diciembre"]
+    meses_k = sorted(k for k in orden if isinstance(k, tuple))
+    otros_k = [k for k in orden if not isinstance(k, tuple)]
+    num = lambda v: round(float(v), 6) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    filas, notas = [], []
+    for i, r in enumerate(rows):
+        if (i + 1) in filas_oc:
+            continue
+        lbl = safe_str(r[1] if len(r) > 1 else "").strip()
+        if i < h:                                         # notas sobre el encabezado
+            if lbl:
+                notas.append([lbl] + [safe_str(v) if not isinstance(v, (int, float)) else v
+                                      for v in r[2:6] if v is not None])
+            continue
+        if i <= h + 1 or not lbl:
+            continue
+        g = lambda k, t: num(r[bloques[k][t]]) if t in bloques[k] and bloques[k][t] < len(r) else None
+        filas.append({
+            "lbl": re.sub(r"\s+", " ", lbl),
+            "pct": lbl.startswith("%"),
+            "m": [[g(k, t) for t in ("r", "p", "v", "vp")] for k in meses_k],
+            "a": [[g(k, t) for t in ("r", "p", "v", "vp")] for k in otros_k],
+        })
+    # Meses cerrados: los que traen Real en alguna fila
+    cerrados = [j for j in range(len(meses_k)) if any(f["m"][j][0] not in (None, 0) for f in filas)]
+    out = {
+        "hoja": nombre,
+        "meses": [MESES[m - 1] for (_, m) in meses_k],
+        "n_cerrados": (max(cerrados) + 1) if cerrados else 0,
+        "acum": [str(k) for k in otros_k],
+        "filas": filas,
+        "notas": notas,
+        "ocultas": sorted(filas_oc),
+    }
+    print(f"       EERR DIRECTORIO: {len(filas)} filas | {len(meses_k)} meses ({out['n_cerrados']} con real) | "
+          f"bloques {out['acum']} | filas ocultas omitidas {out['ocultas']}")
+    return out
+
+
 def read_region_clientes(wb):
     """Región de cada cliente, para el costo de viajes del "Margen Neto" de
     Panel Fact Cliente.
@@ -6553,6 +6652,7 @@ def main():
     gd_costo = read_gd_costos(wb2)
     region_clientes = read_region_clientes(wb2)
     citas_costeo    = read_citas_costeo(wb2)
+    eerr_dir        = read_eerr_directorio(wb2, xlsx_to_use)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -6587,6 +6687,7 @@ def main():
     app_data["back_order"] = back_ord
     app_data["pipeline_st"] = pipe_st
     app_data["ppto2027"] = read_ppto_2027()
+    app_data["eerr_dir"] = eerr_dir
     # Un lector que no encuentra su hoja, o la encuentra rota, devuelve un dict
     # vacío sin quejarse, y el tablero sale con esa sección en blanco sin que
     # nadie lo note hasta que alguien la abre. Paso el 11-09-2026 con
