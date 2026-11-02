@@ -113,6 +113,7 @@ JS_FILES = [
     "hoja_plan_rm.js",
     "hoja_cartera_st.js",
     "hoja_citas.js", "hoja_cli_rel.js", "hoja_pipeline.js", "hoja_brechas.js",
+    "hoja_ppto2027.js",
 ]
 
 # PANEL_HOY=AAAA-MM-DD reprocesa un Excel con la fecha de corte en que se cargó
@@ -4708,6 +4709,96 @@ def read_gd_costos(wb):
     return idx
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PRESUPUESTO 2027 SERVICIO TÉCNICO — archivo «PPTO 2027 TS.xlsx» en la raíz
+# Hoja «P&L TECSERVICE»: EERR proyectado mensual (MM$).
+# Hoja «Ingresos SS»: ingresos por tipo (bloques «Mantenimiento Esterilización»,
+# «Reparación Dental», «Trazabilidad»…) y, dentro de cada bloque, una fila por
+# cliente y contrato con los 12 meses en M$ (miles). Todo el detalle de cada
+# cliente (contrato, vigencia, clasificación) sale de esa misma hoja.
+# ══════════════════════════════════════════════════════════════════════════════
+def read_ppto_2027():
+    import glob
+    cands = [p for d in (ROOT, os.path.join(ROOT, "data"))
+             for p in glob.glob(os.path.join(d, "*.xlsx"))
+             if re.search(r"ppto\s*2027", os.path.basename(p), re.I)
+             and not os.path.basename(p).startswith("~$")]
+    if not cands:
+        print("       PPTO 2027: no se encontró «PPTO 2027 TS.xlsx»")
+        return {}
+    path = max(cands, key=os.path.getmtime)
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    num = lambda v: float(v) if isinstance(v, (int, float)) else 0.0
+
+    # ── EERR proyectado ──────────────────────────────────────────────────────
+    ws = next((wb[n] for n in wb.sheetnames if "P&L" in n.upper()), None)
+    eerr, params = [], []
+    if ws is not None:
+        rows = list(ws.iter_rows(values_only=True))
+        h = next((i for i, r in enumerate(rows)
+                  if any(_norm_cli(v) == "ENERO" for v in r if isinstance(v, str))), None)
+        if h is not None:
+            c_ene = next(j for j, v in enumerate(rows[h]) if isinstance(v, str) and _norm_cli(v) == "ENERO")
+            for r in rows[h + 1:]:
+                lbl = safe_str(r[1] if len(r) > 1 else "").strip()
+                if lbl:
+                    vals = [round(num(r[c_ene + m]), 4) for m in range(12)]
+                    pct = lbl.startswith("%") or "S/" in lbl.upper()
+                    eerr.append({"lbl": lbl, "pct": pct, "m": vals,
+                                 "tot": round(num(r[c_ene + 12]), 4)})
+                # Parámetros del modelo: columnas R-S
+                if len(r) > 18 and isinstance(r[17], str) and r[17].strip() and \
+                        _norm_cli(r[17]) != "PARAMETROS" and r[18] is not None:
+                    params.append({"lbl": r[17].strip(), "v": r[18]})
+    # ── Ingresos por tipo ────────────────────────────────────────────────────
+    ws = next((wb[n] for n in wb.sheetnames if "INGRESOS" in n.upper()), None)
+    tipos, actual = [], None
+    if ws is not None:
+        for r in ws.iter_rows(values_only=True):
+            r = list(r) + [None] * 23
+            b, d = r[1], r[3]
+            if isinstance(b, str) and b.strip() and _norm_cli(b) not in ("ANO", "MENSUAL") \
+                    and d is None and r[8] is None:
+                actual = {"tipo": b.strip(), "items": []}
+                tipos.append(actual)
+                continue
+            if actual is None or not isinstance(b, (int, float)) or not safe_str(d).strip():
+                continue
+            meses = [num(r[8 + m]) / 1000 for m in range(12)]    # M$ → MM$
+            if not any(meses):
+                continue
+            nro = r[2]
+            nro = str(int(nro)) if isinstance(nro, float) and nro.is_integer() else safe_str(nro).strip()
+            # «Nuevo», «NVO», «Nvo»: contrato que todavía no existe (se escribe distinto)
+            if re.fullmatch(r"(?i)nvo|nuevo", nro):
+                nro = "Nuevo"
+            origen = ("Contrato vigente" if nro.isdigit() else
+                      "Contrato nuevo" if nro == "Nuevo" else "Sin contrato")
+            actual["items"].append({
+                "cli":    safe_str(d).strip(),
+                "n":      nro,
+                "origen": origen,
+                "equipo": safe_str(r[4]).strip(),
+                "linea":  safe_str(r[5]).strip(),
+                "clasif": safe_str(r[6]).strip() or "Sin clasificar",
+                "marca":  safe_str(r[7]).strip(),
+                "obs":    safe_str(r[21]).strip(),
+                "m":      [round(v, 4) for v in meses],
+                "tot":    round(sum(meses), 4),
+            })
+    wb.close()
+    # el primer bloque («TecService») es el título de la hoja, no un tipo de ingreso
+    vacios = [t["tipo"] for t in tipos[1:] if not t["items"]]
+    tipos = [t for t in tipos if t["items"]]
+    tot_ing = sum(it["tot"] for t in tipos for it in t["items"])
+    ing_eerr = next((f["tot"] for f in eerr if _norm_cli(f["lbl"]).startswith("INGRESOS DE ACTIVIDADES")), 0)
+    print(f"       PPTO 2027: {len(tipos)} tipos de ingreso | "
+          f"{sum(len(t['items']) for t in tipos)} filas | MM${tot_ing:,.1f} "
+          f"(EERR MM${ing_eerr:,.1f}{' — NO CUADRA' if abs(tot_ing - ing_eerr) > 0.5 else ''})")
+    return {"archivo": os.path.basename(path), "eerr": eerr, "params": params,
+            "tipos": tipos, "vacios": vacios}
+
+
 def read_region_clientes(wb):
     """Región de cada cliente, para el costo de viajes del "Margen Neto" de
     Panel Fact Cliente.
@@ -6492,6 +6583,7 @@ def main():
     app_data["cli_rel"]  = cli_rel
     app_data["back_order"] = back_ord
     app_data["pipeline_st"] = pipe_st
+    app_data["ppto2027"] = read_ppto_2027()
     # Un lector que no encuentra su hoja, o la encuentra rota, devuelve un dict
     # vacío sin quejarse, y el tablero sale con esa sección en blanco sin que
     # nadie lo note hasta que alguien la abre. Paso el 11-09-2026 con
