@@ -2,9 +2,10 @@
 // hoja_ppto2027.js — Presupuesto 2027 Servicio Técnico
 // EERR proyectado (hoja «P&L TECSERVICE») e ingresos por tipo, mes y
 // cliente (hoja «Ingresos SS») del archivo «PPTO 2027 TS.xlsx».
-// Todo el detalle de cada cliente (contrato, vigencia, clasificación) sale
-// de esa misma planilla; no se cruza con CONTRATOS TODOS.
-// Depende de: APP_DATA.ppto2027
+// El detalle de cada cliente (contrato, vigencia, clasificación) sale de esa
+// misma planilla; el tipo de contrato se cruza con CONTRATOS TODOS en el
+// extractor, y el comparativo suma «PPTO TS Consolidado» y «EERR S&S».
+// Depende de: APP_DATA.ppto2027, panel, fact_desglose
 // ═══════════════════════════════════════════════════════════════
 (function () {
   const A = window.APP_DATA || {};
@@ -35,6 +36,11 @@
   const _cliOpen = new Set();       // clientes con su contrato abierto
   let _celda = null;                // { k, m } celda con el detalle de clientes abierto
   let _eerrIng = false;             // fila de ingresos del EERR abierta por tipo
+  let _compMes = false;             // comparativo: mes a mes o acumulado y año
+  const _compPar = new Set(['rp']); // comparativo: qué pares de columnas se restan (uno o más)
+  let _topN = 20;                   // clientes en el top (0 = todos)
+  const _topOpen = new Set();       // clientes del top abiertos
+  const _progOpen = new Set();      // tipos de contrato abiertos
   let _ch1 = null, _ch2 = null, _ch3 = null;
 
   // ── Formato ──────────────────────────────────────────────────
@@ -91,6 +97,16 @@
     tablaIngresos();
   };
   window.p27EerrIng = () => { _eerrIng = !_eerrIng; tablaEERR(); };
+  window.p27CompMes = () => { _compMes = !_compMes; tablaComparativo(); };
+  // Selección múltiple: siempre queda al menos una comparación activa.
+  window.p27CompPar = k => {
+    if (!_compPar.has(k)) _compPar.add(k);
+    else if (_compPar.size > 1) _compPar.delete(k);
+    tablaComparativo();
+  };
+  window.p27Top = n => { _topN = n; tablaTop(); };
+  window.p27TopTog = k => { _topOpen.has(k) ? _topOpen.delete(k) : _topOpen.add(k); tablaTop(); };
+  window.p27ProgTog = k => { _progOpen.has(k) ? _progOpen.delete(k) : _progOpen.add(k); tablaProg(); };
 
   // ── Esqueleto ────────────────────────────────────────────────
   function esqueleto() {
@@ -108,6 +124,35 @@
       <div class="ch"><span class="ct">EERR Proyectado 2027 (MM$)</span>
         <span style="font-size:.63rem;color:var(--mut);margin-left:auto">clic en «Ingresos» para abrirlos por tipo</span></div>
       <div class="cb"><div id="p27-eerr"></div><div id="p27-params"></div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:.9rem" id="p27-card-comp">
+      <div class="ch"><span class="ct">Comparativo PPTO 2026 · Real 2026 · PPTO 2027</span>
+        <span id="p27-comp-sub" style="font-size:.63rem;color:var(--mut);margin-left:.7rem"></span>
+        <div class="exp-oculto" style="display:flex;gap:.3rem;margin-left:auto;align-items:center;flex-wrap:wrap">
+          <span style="font-size:.6rem;font-weight:700;color:var(--mut);letter-spacing:.04em">COMPARAR:</span>
+          <div id="p27-seg-comp" style="display:flex;gap:.25rem"></div>
+          <button id="p27-comp-btn" onclick="window.p27CompMes()" style="${BTN};border:1px solid var(--brd);background:var(--bg2);color:var(--txt)">Ver mes a mes</button>
+          <button id="p27-comp-pdf" onclick="exportarPanel({ids:['p27-card-comp'],titulo:'Comparativo PPTO 2026, Real 2026 y PPTO 2027',archivo:'Comparativo_EERR_2026_2027',btn:'p27-comp-pdf',ancho:1500})" style="${BTN};border:none;background:#002D73;color:#fff">Exportar</button>
+        </div></div>
+      <div class="cb"><div id="p27-comp"></div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:.9rem" id="p27-card-top">
+      <div class="ch"><span class="ct">Top de Clientes PPTO 2027</span>
+        <div class="exp-oculto" style="display:flex;gap:.3rem;margin-left:auto;align-items:center">
+          <div id="p27-seg-top" style="display:flex;gap:.25rem"></div>
+          <button id="p27-top-pdf" onclick="exportarPanel({ids:['p27-card-top'],titulo:'Top de Clientes PPTO 2027',archivo:'Top_Clientes_PPTO_2027',btn:'p27-top-pdf',ancho:1600})" style="${BTN};border:none;background:#002D73;color:#fff">Exportar</button>
+        </div></div>
+      <div class="cb">
+        <div id="p27-top-kpi" class="g5" style="grid-template-columns:repeat(4,1fr);margin-bottom:.7rem"></div>
+        <div id="p27-top"></div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:.9rem" id="p27-card-prog">
+      <div class="ch"><span class="ct">Resumen por Tipo de Contrato PPTO 2027</span>
+        <button id="p27-prog-pdf" onclick="exportarPanel({ids:['p27-card-prog'],titulo:'Resumen por Tipo de Contrato PPTO 2027',archivo:'Tipo_Contrato_PPTO_2027',btn:'p27-prog-pdf',ancho:1400})" style="${BTN};border:none;background:#002D73;color:#fff;margin-left:auto">Exportar</button></div>
+      <div class="cb"><div id="p27-prog"></div></div>
     </div>
 
     <div style="display:flex;flex-direction:column;gap:.4rem;margin:1.2rem 0 .75rem">
@@ -312,13 +357,14 @@
         <div style="font-size:.66rem;font-weight:700;color:var(--az1);margin-bottom:.35rem">${esc(titulo)} ·
           ${m === 12 ? 'Total 2027' : MES_L[m] + ' 2027'} · ${l.length} ${l.length === 1 ? 'fila' : 'filas'} · MM$${nf(tot, 1)}</div>
         <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%">
-          <thead><tr>${thd('CLIENTE')}${thd('TIPO')}${thd('N° CONTRATO')}${thd('CONTRATO')}${thd('CLASIFICACIÓN')}
+          <thead><tr>${thd('CLIENTE')}${thd('TIPO')}${thd('N° CONTRATO')}${thd('CONTRATO')}${thd('TIPO DE CONTRATO')}${thd('CLASIFICACIÓN')}
             ${thd('LÍNEA DE PRODUCTO')}${thd('VIGENCIA')}${thd('MONTO MM$', 'right')}${thd('% DEL TOTAL', 'right')}</tr></thead>
           <tbody>${l.map((it, i) => `<tr style="background:${i % 2 ? '#fff' : 'transparent'}">
             <td style="${TDD};font-weight:600">${esc(it.cli)}</td>
             <td style="${TDD}">${esc(it.tipo)}</td>
             <td style="${TDD}">${esc(it.n || '—')}</td>
             <td style="${TDD};color:${COL_ORIGEN[it.origen]}">${esc(it.origen)}</td>
+            <td style="${TDD}">${esc(prog(it.prog) || '—')}${it.prog_fte === 'Asignado' ? ' (asignado)' : ''}</td>
             <td style="${TDD}">${esc(it.clasif)}</td>
             <td style="${TDD}">${esc(it.linea || '—')}</td>
             <td style="${TDD}">${vigencia(it) ? fmtFecha(vigencia(it)) : '—'}</td>
@@ -335,6 +381,7 @@
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.5rem .9rem">
           ${dato('N° CONTRATO', esc(it.n || '—'))}
           ${dato('CONTRATO', `<span style="color:${COL_ORIGEN[it.origen]}">${esc(LBL_ORIGEN[it.origen])}</span>`)}
+          ${it.prog ? dato('TIPO DE CONTRATO', esc(it.prog) + (it.prog_fte === 'Asignado' ? ' (asignado)' : '')) : ''}
           ${dato('CLASIFICACIÓN', esc(it.clasif))}
           ${dato('LÍNEA DE PRODUCTO', esc(it.linea || '—'))}
           ${it.marca ? dato('MARCA', esc(it.marca)) : ''}
@@ -532,6 +579,292 @@
       </tbody></table></div>`;
   }
 
+  // ── Comparativo PPTO 2026 · Real 2026 · PPTO 2027 ────────────
+  // El «Real» trae los meses cerrados y el resto con el presupuesto 2026. Los
+  // porcentajes se recalculan sobre ingresos en cada columna: sumarlos no da.
+  const COMP = P.comp || {};
+  const nReal = COMP.n_real || 0;
+  const LBL_ACUM = nReal ? 'Ene–' + MES[nReal - 1] : '';
+  const compFila = k => (COMP.filas || []).find(f => f.k === k);
+  const PCT_TRAS = { margen_mm: '% Margen', ebitda_directo: '% EBITDA Directo', ebitda_empresa: '% EBITDA Empresa' };
+  const CEL_C = new Set(['margen_mm', 'ebitda_directo', 'ebitda_indirecto', 'total_gastos_adicionales',
+                         'ebitda_empresa', 'resultado_operacional', 'resultado_no_operacional', 'resultado_antes_imp']);
+  const hasta = (a, n) => sum(a.slice(0, n));
+  // Qué se compara: la variación es siempre a − b, en el acumulado y en el año.
+  const PARES = {
+    rp:   { t: 'Real 2026 vs PPTO 2026', col: 'Real vs PPTO 26', a: 'r26', b: 'p26' },
+    p27r: { t: 'PPTO 2027 vs Real 2026', col: 'PPTO 27 vs Real',    a: 'p27', b: 'r26' },
+    p27p: { t: 'PPTO 2027 vs PPTO 2026', col: 'PPTO 27 vs PPTO 26', a: 'p27', b: 'p26' },
+  };
+  const ALTO_TH = '1.7rem';          // alto de la 1ª fila de encabezado: la 2ª se fija bajo ella
+  // Variación: positivo siempre es favorable (más ingreso o menos gasto).
+  const colVar = v => v > 0.05 ? '#00832F' : v < -0.05 ? '#C00000' : 'var(--mut)';
+
+  function tablaComparativo() {
+    const box = document.getElementById('p27-comp');
+    if (!box) return;
+    const F = COMP.filas || [];
+    if (!F.length) { box.innerHTML = '<div style="padding:.6rem;color:var(--mut);font-size:.68rem">Sin datos para comparar: falta la hoja «PPTO TS Consolidado» o «EERR S&amp;S».</div>'; return; }
+    const lbl = document.getElementById('p27-comp-sub');
+    if (lbl) lbl.textContent = 'Real a ' + MES_L[nReal - 1].toLowerCase() + '; ' +
+      (nReal < 12 ? MES[nReal] + '–Dic completados con PPTO 2026' : 'año completo') + ' · MM$';
+    const sg = document.getElementById('p27-seg-comp');
+    if (sg) sg.innerHTML = Object.keys(PARES).map(k => {
+      const on = _compPar.has(k);
+      return `<button onclick="window.p27CompPar('${k}')" aria-pressed="${on}" style="${BTN};border:1px solid ${on ? 'var(--az2)' : 'var(--brd)'};
+        background:${on ? 'var(--az2)' : 'var(--bg2)'};color:${on ? '#fff' : 'var(--txt)'};font-weight:${on ? 700 : 400}">${PARES[k].t}</button>`;
+    }).join('');
+    const PARS = Object.keys(PARES).filter(k => _compPar.has(k)).map(k => PARES[k]);  // en orden fijo
+    const bt = document.getElementById('p27-comp-btn');
+    if (bt) bt.textContent = _compMes ? 'Ver acumulado y año' : 'Ver mes a mes';
+    const TD = 'padding:.3rem .5rem;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums;font-size:.64rem';
+    const SL = bg => `position:sticky;left:0;z-index:1;background:${bg};${SEP}`;
+    const ING = compFila('ingresos_totales');
+    const estilo = f => {
+      const azul = f.k === 'resultado_ejercicio', cel = CEL_C.has(f.k);
+      return { azul, bg: azul ? 'var(--az3)' : cel ? '#def3fa' : 'var(--bg,#fff)',
+               col: azul ? '#fff' : '#111', fw: azul || cel || f.k === 'ingresos_totales' ? 700 : 400 };
+    };
+    const etiq = (t, e, pct) => `<td style="${SL(e.bg)};padding:.3rem .6rem;font-size:.64rem;white-space:nowrap;
+      font-weight:${e.fw};color:${pct ? 'var(--mut)' : e.col};${pct ? 'font-style:italic;padding-left:1.2rem' : ''}">${esc(t)}</td>`;
+    let thead, rows = '';
+
+    if (_compMes) {
+      thead = `<tr><th style="${TH};text-align:left;left:0;z-index:3;min-width:230px">Real 2026 + PPTO</th>
+        ${MES.map((m, i) => `<th style="${TH};text-align:right;${i >= nReal ? 'background:#8A6D00' : ''}">${m} 26${i >= nReal ? ' *' : ''}</th>`).join('')}
+        <th style="${TH};text-align:right;background:#1a3a6b">Total 2026</th></tr>`;
+      F.forEach(f => {
+        const e = estilo(f);
+        const cel = (v, i) => `<td style="${TD};color:${e.col};font-weight:${e.fw};${i >= nReal && !e.azul ? 'background:#FFF2CC' : ''}">${fMM(v)}</td>`;
+        rows += `<tr style="background:${e.bg}">${etiq(f.lbl, e)}${f.r26.map(cel).join('')}
+          <td style="${TD};color:${e.col};font-weight:700">${fMM(sum(f.r26))}</td></tr>`;
+        if (PCT_TRAS[f.k]) rows += `<tr>${etiq(PCT_TRAS[f.k], { bg: 'var(--bg,#fff)', fw: 400 }, true)}
+          ${f.r26.map((v, i) => `<td style="${TD};color:var(--mut);font-style:italic">${ING.r26[i] ? pcN(v / ING.r26[i]) : ''}</td>`).join('')}
+          <td style="${TD};color:var(--mut);font-style:italic">${pcN(sum(f.r26) / sum(ING.r26))}</td></tr>`;
+      });
+    } else {
+      const sepG = 'border-left:2px solid var(--az1)';
+      const sepV = 'border-left:1px solid var(--brd)';   // separa cada comparación
+      const nCol = 3 + PARS.length * 2;
+      const thBase = (t, st) => `<th style="${TH};top:${ALTO_TH};text-align:right;${st}">${t}</th>`;
+      const thVar = PARS.map(p => thBase(p.col, sepV) + thBase('Var. %', '')).join('');
+      thead = `<tr>
+          <th rowspan="2" style="${TH};text-align:left;left:0;z-index:4;min-width:230px;vertical-align:bottom">Concepto</th>
+          <th colspan="${nCol}" style="${TH};height:${ALTO_TH};text-align:center;background:#1a3a6b">Acumulado a la fecha (${LBL_ACUM})</th>
+          <th colspan="${nCol}" style="${TH};height:${ALTO_TH};text-align:center;background:#0E2D55">Total del año</th></tr>
+        <tr>${['PPTO 2026', 'Real 2026', 'PPTO 2027'].map((t, i) => thBase(t, i ? '' : sepG)).join('')}${thVar}
+          ${['PPTO 2026', 'Real + PPTO 2026', 'PPTO 2027'].map((t, i) => thBase(t, i ? '' : sepG)).join('')}${thVar}</tr>`;
+      const fv = v => (Math.abs(v) < 0.05 ? '–' : nf(v, 1));
+      const pv = (a, b) => Math.abs(b) > 1e-9 ? pcN(a / Math.abs(b)) : '–';
+      F.forEach(f => {
+        const e = estilo(f);
+        const a26 = hasta(f.p26, nReal), aR = hasta(f.r26, nReal), a27 = hasta(f.p27, nReal);
+        const y26 = sum(f.p26), yR = sum(f.r26), y27 = sum(f.p27);
+        const AC = { p26: a26, r26: aR, p27: a27 }, AN = { p26: y26, r26: yR, p27: y27 };
+        const cVar = v => e.azul ? '#fff' : colVar(v);
+        const c = (txt, st) => `<td style="${TD};color:${e.col};font-weight:${e.fw};${st || ''}">${txt}</td>`;
+        const vars = V => PARS.map(p => {
+          const v = V[p.a] - V[p.b];
+          return c(fv(v), `${sepV};color:${cVar(v)}`) + c(pv(v, V[p.b]), 'color:' + cVar(v));
+        }).join('');
+        rows += `<tr style="background:${e.bg}">${etiq(f.lbl, e)}
+          ${c(fMM(a26), sepG)}${c(fMM(aR), 'font-weight:700')}${c(fMM(a27), 'font-weight:700')}${vars(AC)}
+          ${c(fMM(y26), sepG)}${c(fMM(yR), 'font-weight:700')}${c(fMM(y27), 'font-weight:700')}${vars(AN)}</tr>`;
+        if (PCT_TRAS[f.k]) {
+          const pc = (a, n) => { const d = n === 12 ? sum(ING[a]) : hasta(ING[a], n); return d ? (n === 12 ? sum(f[a]) : hasta(f[a], n)) / d : 0; };
+          const P1 = pc('p26', nReal), P2 = pc('r26', nReal), P3 = pc('p27', nReal),
+                P4 = pc('p26', 12), P5 = pc('r26', 12), P6 = pc('p27', 12);
+          const m = (txt, st) => `<td style="${TD};color:var(--mut);font-style:italic;${st || ''}">${txt}</td>`;
+          const pts = v => (v >= 0 ? '+' : '') + nf(v * 100, 1) + ' pp';
+          const dif = n => PARS.map(p => m(pts(pc(p.a, n) - pc(p.b, n)), sepV) + m('')).join('');
+          rows += `<tr>${etiq(PCT_TRAS[f.k], { bg: 'var(--bg,#fff)', fw: 400 }, true)}
+            ${m(pcN(P1), sepG)}${m(pcN(P2))}${m(pcN(P3))}${dif(nReal)}
+            ${m(pcN(P4), sepG)}${m(pcN(P5))}${m(pcN(P6))}${dif(12)}</tr>`;
+        }
+      });
+    }
+    box.innerHTML = `<div style="overflow:auto;max-height:62vh">
+      <table class="p27t" style="width:100%;border-collapse:separate;border-spacing:0">
+        <thead>${thead}</thead><tbody>${rows}</tbody></table></div>
+      <div style="font-size:.6rem;color:var(--mut);margin-top:.4rem;line-height:1.5">
+        ${nReal < 12 ? `<b>Real + PPTO 2026:</b> ${LBL_ACUM} es Real; ${MES[nReal]}–Dic (*) sale del presupuesto 2026, sólo en el panel. ` : ''}
+        Variaciones: positivo es favorable (más ingreso o menos gasto). Real: hoja «EERR S&amp;S», con los subtotales recalculados desde sus líneas. <b>Ojo:</b> esa hoja lleva el personal técnico en Costo de Ventas y casi no trae gastos indirectos, mientras el presupuesto los abre distinto, así que costo, margen, GAV y gastos no son comparables línea a línea. PPTO 2026: hoja «PPTO TS Consolidado». PPTO 2027: «P&amp;L TECSERVICE».</div>`;
+  }
+
+  // ── Top de clientes ──────────────────────────────────────────
+  // «Clientes Varios» junta las reparaciones del año: no es un cliente, así
+  // que va al pie y fuera del ranking.
+  const esVarios = c => /^CLIENTES VARIOS/.test(norm(c));
+  const COL_TOP = [
+    { t: 'Mant. Esterilización', f: it => /^mantenimiento est/i.test(it.tipo) },
+    { t: 'Mant. Dental',         f: it => /^mantenimiento den/i.test(it.tipo) },
+    { t: 'Mant. Endoscopía',     f: it => /^mantenimiento end/i.test(it.tipo) },
+    { t: 'Trazabilidad',         f: it => /^trazab/i.test(it.tipo) },
+    { t: 'Reparaciones',         f: it => /^reparaci/i.test(it.tipo) },
+  ];
+  const prog = p => String(p || '').replace(/ CARE PROGRAM$/, '').replace(/^\w+/, w => w[0] + w.slice(1).toLowerCase());
+  const esContrato = it => it.origen !== 'Sin contrato';
+
+  // Facturación real 2026 abierta en contrato y otros (hoja FACTURACION). El
+  // contrato se topa al total, igual que en Brechas: lo devengado puede
+  // superar lo facturado y ahí «otros» saldría negativo.
+  const _fact = A.fact_desglose || {};
+  const abre26 = d => { const t = +d.t26 || 0, c = Math.max(0, Math.min(+d.c26 || 0, t)); return { t, c, o: t - c }; };
+
+  function clientesTop() {
+    const G = {};
+    conTipo().forEach(it => {
+      const k = norm(it.cli);
+      (G[k] = G[k] || { cli: it.cli, it: [] }).it.push(it);
+    });
+    return Object.values(G).map(g => {
+      g.tot = total(g.it);
+      g.cont = total(g.it.filter(esContrato));
+      g.nc = new Set(g.it.filter(esContrato).map(i => i.n === 'Nuevo' ? 'N' + i.tipo : i.n)).size;
+      g.progs = [...new Set(g.it.filter(esContrato).map(i => prog(i.prog)))];
+      g.mg = sum(g.it.filter(esContrato).map(i => i.tot * ((P.margenes || {})[i.prog] || 0)));
+      return g;
+    }).sort((a, b) => b.tot - a.tot);
+  }
+
+  function kpisTop() {
+    const el = document.getElementById('p27-top-kpi');
+    if (!el) return;
+    const all = conTipo(), T = total(all) || 1, c = total(all.filter(esContrato)), o = T - c;
+    const R = Object.values(_fact).reduce((s, d) => { const a = abre26(d); s.c += a.c; s.o += a.o; return s; }, { c: 0, o: 0 });
+    const RT = (R.c + R.o) || 1;
+    el.innerHTML =
+      kpiHTML('PPTO 2027 · % Facturación Contratos', pcN(c / T), 'MM$' + nf(c, 1) + ' vigentes y nuevos', '#002D73') +
+      kpiHTML('PPTO 2027 · % Facturación Otros', pcN(o / T), 'MM$' + nf(o, 1) + ' reparaciones y trazabilidad', '#D46000') +
+      kpiHTML('Real 2026 · % Facturación Contratos', pcN(R.c / RT), 'MM$' + nf(R.c / 1e6, 1) + ' a la fecha', '#0A7D74') +
+      kpiHTML('Real 2026 · % Facturación Otros', pcN(R.o / RT), 'MM$' + nf(R.o / 1e6, 1) + ' a la fecha', '#8B8200');
+  }
+
+  function tablaTop() {
+    const box = document.getElementById('p27-top');
+    if (!box) return;
+    const seg = document.getElementById('p27-seg-top');
+    if (seg) seg.innerHTML = [[10, 'Top 10'], [20, 'Top 20'], [0, 'Todos']].map(([v, t]) => {
+      const on = _topN === v;
+      return `<button onclick="window.p27Top(${v})" style="${BTN};border:1px solid ${on ? 'var(--az2)' : 'var(--brd)'};
+        background:${on ? 'var(--az2)' : 'var(--bg2)'};color:${on ? '#fff' : 'var(--txt)'};font-weight:${on ? 700 : 400}">${t}</button>`;
+    }).join('');
+    const todosC = clientesTop(), TT = sum(todosC.map(g => g.tot)) || 1;
+    const reales = todosC.filter(g => !esVarios(g.cli)), varios = todosC.filter(g => esVarios(g.cli));
+    const lista = _topN ? reales.slice(0, _topN) : reales;
+    const TD = 'padding:.3rem .5rem;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums;font-size:.63rem';
+    const pc = (a, b) => b ? pcN(a / b) : '–';
+    const porCol = g => COL_TOP.map(c => total(g.it.filter(c.f)));
+    const THG = (t, n, bg) => `<th colspan="${n}" style="${TH};text-align:center;background:${bg}">${t}</th>`;
+    const TH2 = (t, al) => `<th style="${TH};top:1.45rem;text-align:${al || 'right'}">${t}</th>`;
+    let acu = 0, rows = '';
+    const fila = (g, i, bg) => {
+      acu += g.tot;
+      const k = norm(g.cli), abierto = _topOpen.has(k);
+      let h = `<tr style="background:${bg};cursor:pointer" onclick="window.p27TopTog(${JSON.stringify(k).replace(/"/g, '&quot;')})">
+        <td style="${TD};text-align:center;color:var(--mut)">${i == null ? '' : i + 1}</td>
+        <td style="padding:.3rem .55rem;font-size:.64rem;font-weight:600;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${SEP}" title="${esc(g.cli)}">
+          <span style="display:inline-block;width:.85rem;font-size:.55rem;color:var(--mut);transform:rotate(${abierto ? 90 : 0}deg)">&#9654;</span>${esc(g.cli)}</td>
+        <td style="${TD};text-align:left">${esc(g.progs.join(' / ') || '–')}</td>
+        <td style="${TD}">${g.nc || '–'}</td>
+        ${porCol(g).map(v => `<td style="${TD}">${fMM(v)}</td>`).join('')}
+        <td style="${TD};font-weight:700;${SEP}">${fMM(g.tot)}</td>
+        <td style="${TD}">${pc(g.tot, TT)}</td><td style="${TD};color:var(--mut);${SEP}">${pc(acu, TT)}</td>
+        <td style="${TD};font-weight:700">${g.mg ? nf(g.mg, 1) : '–'}</td><td style="${TD}">${g.mg ? pc(g.mg, g.cont) : '–'}</td></tr>`;
+      if (abierto) h += `<tr><td colspan="${COL_TOP.length + 9}" style="padding:.35rem .6rem .55rem 2.2rem;background:var(--bg2)">
+        ${g.it.slice().sort((a, b) => b.tot - a.tot).map(it => `<div style="font-size:.62rem;padding:.1rem 0">
+          <b>${esc(it.tipo)}</b> · ${it.n ? (/^\d+$/.test(it.n) ? 'contrato #' + esc(it.n) : 'contrato nuevo') : 'sin contrato'}
+          ${it.prog ? ' · ' + esc(prog(it.prog)) + (it.prog_fte === 'Asignado' ? ' (asignado)' : '') : ''}
+          · MM$${nf(it.tot, 2)}</div>`).join('')}</td></tr>`;
+      return h;
+    };
+    lista.forEach((g, i) => { rows += fila(g, i, i % 2 ? 'var(--bg)' : 'var(--bg2)'); });
+    if (_topN && reales.length > lista.length) {
+      const resto = reales.slice(lista.length), tr = sum(resto.map(g => g.tot));
+      acu += tr;
+      rows += `<tr style="background:var(--bg2);color:var(--mut)"><td></td>
+        <td style="padding:.3rem .55rem;font-size:.63rem;font-style:italic;${SEP}">Otros ${resto.length} clientes</td><td></td><td></td>
+        ${COL_TOP.map(c => `<td style="${TD}">${fMM(sum(resto.map(g => total(g.it.filter(c.f)))))}</td>`).join('')}
+        <td style="${TD};font-weight:700;${SEP}">${fMM(tr)}</td><td style="${TD}">${pc(tr, TT)}</td><td style="${TD};${SEP}">${pc(acu, TT)}</td>
+        <td style="${TD};font-weight:700">${nf(sum(resto.map(g => g.mg)), 1)}</td><td style="${TD}">${pc(sum(resto.map(g => g.mg)), sum(resto.map(g => g.cont)))}</td></tr>`;
+    }
+    varios.forEach(g => { rows += fila(g, null, '#FFF8E5'); });
+    rows += `<tr style="background:var(--az3);color:#fff;font-weight:700"><td></td>
+      <td style="padding:.38rem .55rem;font-size:.66rem;${SEP}">Total ingresos</td><td></td><td></td>
+      ${COL_TOP.map(c => `<td style="${TD}">${fMM(total(conTipo().filter(c.f)))}</td>`).join('')}
+      <td style="${TD};${SEP}">${fMM(TT)}</td><td style="${TD}">100,0%</td><td style="${TD};${SEP}"></td>
+      <td style="${TD}">${nf(sum(todosC.map(g => g.mg)), 1)}</td><td style="${TD}">${pc(sum(todosC.map(g => g.mg)), sum(todosC.map(g => g.cont)))}</td></tr>`;
+    box.innerHTML = `<div style="overflow:auto;max-height:78vh">
+      <table class="p27t" style="width:100%;border-collapse:separate;border-spacing:0">
+        <thead><tr>${THG('Cliente', 4, 'var(--az1)')}${THG('Desglose PPTO 2027 (MM$)', COL_TOP.length + 1, '#1a3a6b')}
+          ${THG('Peso', 2, '#0E2D55')}${THG('Margen', 2, '#0A5C8C')}</tr>
+          <tr>${TH2('#', 'center')}${TH2('Cliente', 'left')}${TH2('Tipo de contrato', 'left')}${TH2('Contratos')}
+          ${COL_TOP.map(c => TH2(c.t)).join('')}${TH2('Total')}${TH2('% total')}${TH2('% acum.')}${TH2('MM$')}${TH2('% s/ contratos')}</tr></thead>
+        <tbody>${rows}</tbody></table></div>
+      <div style="font-size:.6rem;color:var(--mut);margin-top:.4rem;line-height:1.5">
+        Las reparaciones del PPTO están en una sola bolsa («Clientes Varios»), que va al pie y fuera del ranking. El margen es el del programa de cada contrato, sólo sobre lo facturado por contrato: reparaciones y trazabilidad no tienen margen por programa («–»). Los % de arriba vienen de la hoja FACTURACION (contratos y correctiva) para el Real 2026.</div>`;
+  }
+
+  // ── Resumen por tipo de contrato ─────────────────────────────
+  const ORD_PROG = ['BASIC CARE PROGRAM', 'ADVANCED CARE PROGRAM', 'PROFESIONAL CARE PROGRAM'];
+  const claveCt = it => it.n === 'Nuevo' ? 'N|' + norm(it.cli) + '|' + it.tipo : it.n;
+
+  function tablaProg() {
+    const box = document.getElementById('p27-prog');
+    if (!box) return;
+    const MG = P.margenes || {};
+    const all = conTipo(), ctr = all.filter(esContrato);
+    const res = l => ({ l, c: new Set(l.map(claveCt)).size, cli: new Set(l.map(i => norm(i.cli))).size, m: total(l) });
+    const F = ORD_PROG.map(p => {
+      const r = res(ctr.filter(i => i.prog === p));
+      r.p = p; r.pct = MG[p] || 0; r.mg = r.m * r.pct;
+      r.asig = r.l.filter(i => i.prog_fte === 'Asignado');
+      return r;
+    });
+    const T = res(ctr), TMG = sum(F.map(r => r.mg)), sin = res(all.filter(i => !esContrato(i))), TG = T.m + sin.m;
+    const TD = 'padding:.34rem .55rem;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums;font-size:.65rem';
+    const th = (t, al) => `<th style="${TH};text-align:${al || 'right'}">${t}</th>`;
+    let rows = '';
+    F.forEach((r, i) => {
+      const ab = _progOpen.has(r.p);
+      rows += `<tr style="background:${i % 2 ? 'var(--bg)' : 'var(--bg2)'};cursor:pointer" onclick="window.p27ProgTog('${r.p}')">
+        <td style="padding:.34rem .6rem;font-size:.66rem;font-weight:700;white-space:nowrap;${SEP}">
+          <span style="display:inline-block;width:.85rem;font-size:.55rem;color:var(--mut);transform:rotate(${ab ? 90 : 0}deg)">&#9654;</span>${esc(r.p)}
+          ${r.asig.length ? `<span style="font-size:.56rem;color:#8A6D00;font-weight:400"> · ${r.asig.length} asignados</span>` : ''}</td>
+        <td style="${TD}">${r.c}</td><td style="${TD}">${r.cli}</td>
+        <td style="${TD};font-weight:700">${nf(r.m, 1)}</td><td style="${TD};color:var(--mut)">${pcN(TG ? r.m / TG : 0)}</td>
+        <td style="${TD}">${nf(r.c ? r.m / r.c : 0, 1)}</td><td style="${TD};${SEP}">${nf(r.cli ? r.m / r.cli : 0, 1)}</td>
+        <td style="${TD}">${pcN(r.pct)}</td><td style="${TD};font-weight:700">${nf(r.mg, 1)}</td><td style="${TD}">${nf(r.c ? r.mg / r.c : 0, 1)}</td></tr>`;
+      if (ab) rows += `<tr><td colspan="10" style="padding:.35rem .6rem .55rem 2.2rem;background:var(--bg2)">
+        <table style="border-collapse:collapse;width:100%"><thead><tr>${['CLIENTE', 'N° CONTRATO', 'INGRESO', 'CÓMO SE DEFINIÓ EL TIPO', 'MM$ 2027'].map((t, j) =>
+          `<th style="font-size:.56rem;color:var(--az1);padding:.2rem .5rem;text-align:${j === 4 ? 'right' : 'left'}">${t}</th>`).join('')}</tr></thead>
+        <tbody>${r.l.slice().sort((a, b) => b.tot - a.tot).map(it => `<tr>
+          <td style="font-size:.62rem;padding:.16rem .5rem;font-weight:600">${esc(it.cli)}</td>
+          <td style="font-size:.62rem;padding:.16rem .5rem">${esc(it.n)}</td>
+          <td style="font-size:.62rem;padding:.16rem .5rem">${esc(it.tipo)}</td>
+          <td style="font-size:.62rem;padding:.16rem .5rem;${it.prog_fte === 'Asignado' ? 'color:#8A6D00;font-weight:600' : ''}">${it.prog_fte === 'Asignado' ? 'Asignado (sin tipo en contratos)' : esc(it.prog_fte)}</td>
+          <td style="font-size:.62rem;padding:.16rem .5rem;text-align:right;font-weight:700">${nf(it.tot, 2)}</td></tr>`).join('')}</tbody></table></td></tr>`;
+    });
+    rows += `<tr style="background:var(--az3);color:#fff;font-weight:700">
+      <td style="padding:.38rem .6rem;font-size:.66rem;${SEP}">Total contratos</td>
+      <td style="${TD}">${T.c}</td><td style="${TD}">${T.cli}</td><td style="${TD}">${nf(T.m, 1)}</td><td style="${TD}">${pcN(TG ? T.m / TG : 0)}</td>
+      <td style="${TD}">${nf(T.c ? T.m / T.c : 0, 1)}</td><td style="${TD};${SEP}">${nf(T.cli ? T.m / T.cli : 0, 1)}</td>
+      <td style="${TD}">${pcN(T.m ? TMG / T.m : 0)}</td><td style="${TD}">${nf(TMG, 1)}</td><td style="${TD}">${nf(T.c ? TMG / T.c : 0, 1)}</td></tr>
+    <tr style="background:var(--bg2);color:var(--mut)">
+      <td style="padding:.3rem .6rem;font-size:.63rem;font-style:italic;${SEP}">Sin contrato (reparaciones y trazabilidad)</td>
+      <td style="${TD}">–</td><td style="${TD}">–</td><td style="${TD}">${nf(sin.m, 1)}</td><td style="${TD}">${pcN(TG ? sin.m / TG : 0)}</td>
+      <td style="${TD}">–</td><td style="${TD};${SEP}">–</td><td style="${TD}">–</td><td style="${TD}">–</td><td style="${TD}">–</td></tr>`;
+    const nAs = sum(F.map(r => r.asig.length)), mAs = sum(F.map(r => total(r.asig)));
+    box.innerHTML = `<div style="overflow:auto"><table class="p27t" style="width:100%;border-collapse:separate;border-spacing:0">
+      <thead><tr>${th('TIPO DE CONTRATO', 'left')}${th('CONTRATOS')}${th('CLIENTES')}${th('MONTO TOTAL')}${th('% PPTO')}
+        ${th('PROM. X CONTRATO')}${th('PROM. X CLIENTE')}${th('% MARGEN')}${th('MARGEN TOTAL')}${th('MARGEN PROM. X CONTRATO')}</tr></thead>
+      <tbody>${rows}</tbody></table></div>
+      <div style="font-size:.6rem;color:var(--mut);margin-top:.4rem;line-height:1.5">
+        Cifras en MM$. El tipo sale de cruzar el N° de contrato del PPTO con CONTRATOS TODOS (columna «Tipo de Contrato» y, si está vacía o «SIN PROGRAMA», «Tipo de Contrato 2»).
+        <b style="color:#8A6D00">${nAs} filas (MM$${nf(mAs, 1)})</b> no tienen tipo, incluidos los contratos nuevos, y quedaron en Advanced, el programa intermedio.
+        El % de margen de cada programa viene de «Resumen Tipos Programas». El % del total es el margen ponderado por monto. Un cliente con dos programas cuenta en ambos, por eso el total de clientes es menor que la suma.</div>`;
+  }
+
   // ── Notas ────────────────────────────────────────────────────
   function notas() {
     const el = document.getElementById('p27-notas');
@@ -548,7 +881,7 @@
     const cuadra =ing && Math.abs(ing.tot - total(all)) < 0.5;
     const li = t => `<li style="margin-bottom:.2rem">${t}</li>`;
     el.innerHTML = `<div style="font-weight:700;color:var(--az1);margin-bottom:.3rem">Notas</div><ul style="margin:0;padding-left:1.1rem">
-      ${li('<b>Fuente:</b> ' + esc(P.archivo || 'PPTO 2027 TS.xlsx') + ' — hoja «P&amp;L TECSERVICE» (EERR, en MM$) y hoja «Ingresos SS» (ingresos por tipo y cliente, en M$, que acá se muestran en MM$). El detalle de cada cliente (contrato, vigencia, clasificación) es el de esa planilla.')}
+      ${li('<b>Fuente:</b> ' + esc(P.archivo || 'PPTO 2027 TS.xlsx') + ' — hoja «P&amp;L TECSERVICE» (EERR, en MM$) y hoja «Ingresos SS» (ingresos por tipo y cliente, en M$, que acá se muestran en MM$). El detalle de cada cliente (contrato, vigencia, clasificación) es el de esa planilla; el tipo de contrato se cruza con CONTRATOS TODOS.')}
       ${li('<b>Cuadratura:</b> la suma de los ingresos por cliente es MM$' + nf(total(all), 1) + (ing ? ' y el EERR trae MM$' + nf(ing.tot, 1) + (cuadra ? ' — cuadran.' : ' — <b style="color:#C00000">no cuadran</b>.') : '.'))}
       ${li('<b>Contrato:</b> «vigente» = la fila trae N° de contrato; «nuevo» = la planilla lo marca como Nuevo/NVO (contrato que aún no existe); «sin contrato» = reparaciones a clientes varios y trazabilidad. La <b>clasificación</b> (Backlog / Nuevos Negocios) es la columna «Clasificación Ventas».')}
       ${li('<b>Vencimientos:</b> ' + vencen().length + ' contratos terminan antes de diciembre 2027 y tienen ingreso sólo hasta su término; su renovación no está incluida en el presupuesto. Otros ' + vencenDic().length + ' vencen el 31-12-2027 (MM$' + nf(total(vencenDic()), 1) + ' en el año): facturan el año completo, pero su renovación condiciona el 2028.')}
@@ -572,7 +905,7 @@
     if (!w.dataset.init) {
       w.dataset.init = '1';
       w.innerHTML = esqueleto();
-      tablaEERR(); tablaVence(); notas();
+      tablaEERR(); tablaComparativo(); kpisTop(); tablaTop(); tablaProg(); tablaVence(); notas();
     }
     render();
   };

@@ -19,6 +19,87 @@ from collections import defaultdict
 import openpyxl
 import pandas as pd
 
+# Hoja «EERR Directorio»: se toma tal como se ve en Excel (texto con su
+# formato, colores, negritas y bordes, sin filas ni columnas ocultas) y el
+# panel la pinta igual. Se lee por COM porque así sale el texto ya formateado
+# por Excel, incluido el formato condicional; openpyxl sólo da el valor.
+_EERR_DIR = {}
+
+def _bgr(c):
+    c = int(c); return "#%02X%02X%02X" % (c & 255, (c >> 8) & 255, (c >> 16) & 255)
+
+def snap_eerr_directorio(wb_com):
+    ws = next((w for w in wb_com.Worksheets if w.Name.strip().upper() == "EERR DIRECTORIO"), None)
+    if ws is None:
+        return {}
+    last = lambda o: ws.Cells.Find("*", SearchOrder=o, SearchDirection=2)  # 2 = xlPrevious
+    lr, lc = last(1), last(2)          # 1 = xlByRows, 2 = xlByColumns
+    if lr is None:
+        return {}
+    nr, nc = lr.Row, lc.Column
+    filas = [r for r in range(1, nr + 1) if not ws.Rows(r).Hidden]
+    cols  = [c for c in range(1, nc + 1) if not ws.Columns(c).Hidden]
+    estilos, idx, grid = [], {}, []
+    for r in filas:
+        fila = []
+        for c in cols:
+            cel = ws.Cells(r, c)
+            txt = cel.Text
+            if txt and set(txt.strip()) == {"#"}:
+                ws.Columns(c).AutoFit(); txt = cel.Text
+            d = cel.DisplayFormat
+            st = {}
+            if d.Interior.ColorIndex != -4142: st["bg"] = _bgr(d.Interior.Color)
+            if txt.strip():
+                f = d.Font
+                st["fg"] = _bgr(f.Color)
+                if f.Bold: st["b"] = 1
+                if f.Italic: st["i"] = 1
+                st["sz"] = f.Size
+                al = cel.HorizontalAlignment
+                st["al"] = {-4131: "l", -4108: "c", -4152: "r", 7: "c"}.get(al, "r" if isinstance(cel.Value, (int, float)) else "l")
+                if cel.IndentLevel: st["ind"] = cel.IndentLevel
+            for k, b in (("bt", 8), ("bb", 9)):
+                bo = d.Borders(b)
+                if bo.LineStyle not in (-4142, None):
+                    st[k] = [bo.Weight, _bgr(bo.Color)]
+            key = json.dumps(st, sort_keys=True)
+            if key not in idx:
+                idx[key] = len(estilos); estilos.append(st)
+            fila.append([txt.strip(), idx[key]])
+        grid.append(fila)
+    merges = []
+    vis_r = {r: i for i, r in enumerate(filas)}; vis_c = {c: i for i, c in enumerate(cols)}
+    vistos = set()
+    for r in filas:
+        for c in cols:
+            cel = ws.Cells(r, c)
+            if cel.MergeCells:
+                ma = cel.MergeArea
+                k = ma.Address
+                if k in vistos: continue
+                vistos.add(k)
+                rr = [x for x in range(ma.Row, ma.Row + ma.Rows.Count) if x in vis_r]
+                cc = [x for x in range(ma.Column, ma.Column + ma.Columns.Count) if x in vis_c]
+                if rr and cc:
+                    merges.append([vis_r[rr[0]], vis_c[cc[0]], len(rr), len(cc)])
+    # Bordes de la grilla vacía: se recortan filas/columnas de los extremos
+    # sin texto ni relleno, que en el Excel son sólo margen.
+    vacia = lambda cel: not cel[0] and "bg" not in estilos[cel[1]]
+    while grid and all(vacia(x) for x in grid[0]):
+        grid.pop(0); filas.pop(0); merges = [[a - 1, b, e, g] for a, b, e, g in merges]
+    while grid and all(vacia(x) for x in grid[-1]): grid.pop(); filas.pop()
+    while cols and all(vacia(f[0]) for f in grid):
+        for f in grid: f.pop(0)
+        cols.pop(0); merges = [[a, b - 1, e, g] for a, b, e, g in merges]
+    while cols and all(vacia(f[-1]) for f in grid):
+        for f in grid: f.pop()
+        cols.pop()
+    alto = [ws.Rows(r).RowHeight for r in filas]
+    ancho = [ws.Columns(c).ColumnWidth for c in cols]
+    return {"hoja": ws.Name, "filas": grid, "estilos": estilos, "merges": merges,
+            "alto": alto, "ancho": [round(a, 2) for a in ancho]}
+
 def _xlsb_to_xlsx(xlsb_path):
     """Convierte .xlsb a .xlsx temporal usando Excel COM. Retorna la ruta del xlsx generado."""
     import win32com.client, shutil, tempfile
@@ -35,7 +116,9 @@ def _xlsb_to_xlsx(xlsb_path):
     excel = None
     wb_com = None
     try:
-        excel = win32com.client.Dispatch("Excel.Application")
+        # DispatchEx abre un Excel propio: con Dispatch se engancha al que el
+        # usuario tenga abierto y el Quit() del final se lo cierra.
+        excel = win32com.client.DispatchEx("Excel.Application")
         try: excel.Visible = False
         except Exception: pass
         excel.DisplayAlerts = False
@@ -67,6 +150,16 @@ def _xlsb_to_xlsx(xlsb_path):
             print(f"  HOY() fijado al {_c:%d-%m-%Y} en la copia temporal")
         wb_com.SaveAs(tmp_path, FileFormat=51)  # 51 = xlOpenXMLWorkbook
         print(f"  Conversion completada -> {tmp_path}")
+        # Después de guardar: si una columna sale con «###» se ensancha, y eso
+        # no debe quedar en el xlsx que leen los demás lectores.
+        try:
+            _EERR_DIR.update(snap_eerr_directorio(wb_com))
+            if _EERR_DIR:
+                print(f"  EERR Directorio: {len(_EERR_DIR['filas'])} filas x {len(_EERR_DIR['filas'][0])} columnas visibles")
+            else:
+                print("  EERR Directorio: no se encontró la hoja")
+        except Exception as _e:
+            print(f"  EERR Directorio: no se pudo leer ({_e})")
         return tmp_path
     finally:
         if wb_com:
@@ -108,7 +201,7 @@ JS_FILES = [
     "hoja_vencimientos.js", "hoja_vision.js", "hoja_presupuesto.js",
     "hoja_facturacion.js", "hoja_panelfact.js", "hoja_base_instalada.js", "hoja_satisfaccion.js",
     "hoja_visitas.js", "hoja_mapa.js", "hoja_matriz.js", "hoja_casos.js", "hoja_alerta.js",
-    "hoja_pdf.js", "hoja_eerr.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js",
+    "hoja_pdf.js", "hoja_eerr.js", "hoja_eerr_dir.js", "hoja_desglose.js", "hoja_inv_ts.js", "hoja_rep_vend.js",
     "hoja_prosp_bi.js",
     "hoja_plan_rm.js",
     "hoja_cartera_st.js",
@@ -291,6 +384,8 @@ def read_contratos(wb):
         # AJ (idx 35): tipo de programa (Basic/Advanced/Profesional/Integral Care Program)
         prog_raw  = row[35] if len(row) > 35 else None
         programa  = safe_str(prog_raw).replace('​','').strip() if prog_raw else ""
+        # AN (idx 39): «Tipo de Contrato 2», segunda clasificación del programa
+        programa2 = safe_str(row[39]).replace('​','').strip() if len(row) > 39 and row[39] else ""
         # AK (idx 36): flag "FACTURACIÓN < CONTRATOS" (SI/NO)
         bajo_contrato = safe_str(row[36]).strip().upper() if len(row) > 36 and row[36] else ""
 
@@ -326,6 +421,7 @@ def read_contratos(wb):
             "estado":         estado,
             "estado_excel":   estado,   # sin la corrección de «superados» de más abajo
             "programa":       programa,
+            "programa2":      programa2,
             "linea_negocio":  linea_negocio_contrato(num_str),
             "bajo_contrato":  bajo_contrato,
             "dias_inicio_cli": tpo_activo,
@@ -2845,6 +2941,120 @@ def _cit_rol(nombre):
     return pers.strip(), _CIT_ROLES.get(clave, cargo.strip().capitalize())
 
 
+_CIT_NO_PERSONA = re.compile(
+    r"\b(CORRECTIV|MANTENCION|DIAGNOSTICO|DX|MC|MP|HP|CLINICA|HOSPITAL|ISM|"
+    r"INSTALACION|REVISION|LEVANTAMIENTO|ANDES|FACH|TERRAE)")
+
+
+def _cit_es_persona(nombre, rol):
+    """El recurso de servicio no siempre es un técnico: muchas citas traen ahí
+    el nombre del trabajo («MC ISM MACUL», «DX FACH»). Es persona quien declara
+    un cargo real o, sin cargo, se escribe como nombre y apellido."""
+    if rol in ("Técnico", "Técnico supervisor", "Supervisor"):
+        return True
+    if rol != _CIT_SIN_ROL:
+        return False
+    return bool(re.fullmatch(r"[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+( [A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,2}", nombre)) \
+        and not _CIT_NO_PERSONA.search(_norm_cli(nombre))
+
+
+# Mismo cliente con otro nombre en la hoja de citas y en CONTRATOS TODOS.
+_CIT_CLI_ALIAS = {
+    "HOSPITAL SAN LUIS DE BUIN-PAINE": "HOSPITAL SAN LUIS BUIN",
+    "CLINICA SANATORIO ALEMAN SPA": "CLINICA SANATORIO ALEMAN S.A",
+    "HOSPITAL DE NIÑOS DR. EXEQUIEL GONZALEZ CORTES": "HOSPITAL EXEQUIEL GONZALEZ CORTES",
+    "HOSPITAL DE VICTORIA": "HOSPITAL VICTORIA",
+}
+
+
+def read_propietarios(wb, contratos):
+    """Coordinador por cliente según el dueño de sus oportunidades.
+
+    Sirve para los clientes que no están en CONTRATOS TODOS: en los que sí están,
+    el propietario coincide con el coordinador del contrato en el 98% de las
+    filas de «Repuestos Vendidas». El «Titular» de «Facturacion a Fecha» no se
+    usa: es quien emite el documento y sólo coincide en una de cada cuatro.
+    Los reportes traen el propietario sólo en la primera fila de cada grupo."""
+    coords = {c["coord"] for c in contratos if c.get("coord")}
+
+    def coord_de(nombre):
+        t = set(_norm_cli(nombre).split())
+        return next((c for c in coords if t <= set(_norm_cli(c).split())), None)
+
+    out = defaultdict(lambda: defaultdict(int))
+    for hoja, c_cli in (("Repuestos Vendidas", 2), ("Brecha Sin Stock", 6), ("Brecha Oport por Facturar", 2)):
+        ws = next((wb[n] for n in wb.sheetnames if n.strip().upper() == hoja.upper()), None)
+        if ws is None:
+            continue
+        prop = None
+        for r in ws.iter_rows(min_row=2, values_only=True):
+            if r[0]:
+                prop = coord_de(r[0])
+            if prop and len(r) > c_cli and isinstance(r[c_cli], str) and r[c_cli].strip():
+                out[_norm_cli(r[c_cli])][prop] += 1
+    return out
+
+
+def citas_con_coordinador(citas, contratos, propietarios):
+    """Agrega a las citas el coordinador de cada cliente y qué recursos son
+    personas. La hoja de citas no trae coordinador: se toma de CONTRATOS TODOS
+    por nombre de cliente, y con varios coordinadores manda el de más contratos
+    activados. Sin contrato, se usa el dueño de sus oportunidades (ver
+    read_propietarios). GEMCO es la propia empresa y queda sin coordinador."""
+    if not citas:
+        return
+    por_cli = defaultdict(lambda: defaultdict(int))
+    for c in contratos:
+        if c.get("coord"):
+            por_cli[_norm_cli(c["cliente"])][c["coord"]] += 10 if c["estado"] == "Activado" else 1
+    alias = {_norm_cli(a): _norm_cli(b) for a, b in _CIT_CLI_ALIAS.items()}
+    citas["cli_coord"], citas["cli_coord_fte"] = [], []
+    for n in citas["clientes"]:
+        k = alias.get(_norm_cli(n), _norm_cli(n))
+        if k in por_cli:
+            citas["cli_coord"].append(max(por_cli[k], key=por_cli[k].get))
+            citas["cli_coord_fte"].append("Contrato")
+            continue
+        votos = propietarios.get(k)
+        if not votos and not k.startswith("GEMCO"):
+            igual = next((p for p in propietarios if _plan_mismo_cliente(p, k)), None)
+            votos = propietarios[igual] if igual else None
+        if votos and not k.startswith("GEMCO"):
+            citas["cli_coord"].append(max(votos, key=votos.get))
+            citas["cli_coord_fte"].append("Propietario")
+        else:
+            citas["cli_coord"].append(None)
+            citas["cli_coord_fte"].append("")
+    # Cartera vigente de cada coordinador, para medir su carga en terreno.
+    cartera = defaultdict(lambda: {"contratos": 0, "clientes": set()})
+    for c in contratos:
+        if c.get("coord") and c["estado"] == "Activado":
+            cartera[c["coord"]]["contratos"] += 1
+            cartera[c["coord"]]["clientes"].add(_norm_cli(c["cliente"]))
+    citas["coord_cartera"] = {k: {"contratos": v["contratos"], "clientes": len(v["clientes"])}
+                              for k, v in cartera.items()}
+    citas["tec_persona"] = [
+        1 if _cit_es_persona(n, citas["roles"][r]) else 0
+        for n, r in zip(citas["tecnicos"], citas["tec_rol"])
+    ]
+    # Una cita con cuadrilla trae una fila por técnico y otra «cabecera» con el
+    # nombre del trabajo («MC ISM MACUL») y la misma duración: esa no es una
+    # visita más, y dejarla duplicaba las horas.
+    con_persona = {f[9] for f in citas["filas"] if citas["tec_persona"][f[0]]}
+    antes = len(citas["filas"])
+    citas["filas"] = [f for f in citas["filas"]
+                      if citas["tec_persona"][f[0]] or f[9] not in con_persona]
+    citas["n"] = len(citas["filas"])
+    citas["sin_dur"] = sum(1 for f in citas["filas"] if not f[5])
+    print(f"       CITAS: {antes - citas['n']} filas cabecera de cuadrilla descartadas | "
+          f"{len({f[9] for f in citas['filas']})} citas únicas")
+    ok = sum(1 for f in citas["filas"] if citas["cli_coord"][f[1]])
+    per = sum(1 for f in citas["filas"] if citas["tec_persona"][f[0]])
+    op = sum(1 for f in citas["filas"] if citas["cli_coord_fte"][f[1]] == "Propietario")
+    print(f"       CITAS: {ok}/{citas['n']} con coordinador ({op} por propietario de oportunidad) | "
+          f"{per}/{citas['n']} con técnico identificado")
+
+
 def _cit_tipo(tt):
     """Naturaleza de la visita, desde el prefijo del tipo de trabajo."""
     pre = safe_str(tt).strip().split("_")[0].strip().upper()
@@ -4205,6 +4415,8 @@ def read_citas_servicios(wb):
             round(dur),
             round(prog),
             1 if safe_str(tt).strip().upper().endswith("_CR") else 0,
+            f.toordinal(),
+            int(re.sub(r"\D", "", safe_str(row[2])) or 0),
         ])
 
     if not filas:
@@ -4233,7 +4445,7 @@ def read_citas_servicios(wb):
         "orden_tipo": orden_tipo,
         "equipos":   equipos,
         "meses":     meses,
-        # [técnico, cliente, tipo, equipo, mes, minutos, min. programados, con repuesto]
+        # [técnico, cliente, tipo, equipo, mes, minutos, min. programados, con repuesto, día, N° de cita]
         "filas":     filas,
         "n":         len(filas),
         "sin_dur":   sin_dur,
@@ -4800,6 +5012,198 @@ def read_ppto_2027():
           f"(EERR MM${ing_eerr:,.1f}{' — NO CUADRA' if abs(tot_ing - ing_eerr) > 0.5 else ''})")
     return {"archivo": os.path.basename(path), "eerr": eerr, "params": params,
             "tipos": tipos, "vacios": vacios}
+
+
+# Programa que se asigna al contrato sin tipo: el intermedio de los tres.
+PROGRAMA_INTERMEDIO = "ADVANCED CARE PROGRAM"
+_PROGRAMAS = ("BASIC CARE PROGRAM", "ADVANCED CARE PROGRAM", "PROFESIONAL CARE PROGRAM")
+
+
+def cruzar_ppto_contratos(ppto, contratos, resumen_programas):
+    """Tipo de contrato de cada fila de ingreso del PPTO 2027, por N° de contrato.
+
+    Manda «Tipo de Contrato» de CONTRATOS TODOS y, si viene vacío o «SIN
+    PROGRAMA», «Tipo de Contrato 2». Lo que sigue sin tipo, incluidos los
+    contratos nuevos que aún no tienen número, se asigna al programa intermedio
+    y queda marcado. Las filas sin contrato no llevan programa."""
+    if not ppto:
+        return
+    por_n = {str(c["n"]).strip(): c for c in contratos}
+    cuenta = defaultdict(int)
+    for t in ppto.get("tipos", []):
+        for it in t["items"]:
+            if it["origen"] == "Sin contrato":
+                it["prog"] = it["prog_fte"] = ""
+                continue
+            c = por_n.get(it["n"], {})
+            p1, p2 = c.get("programa", ""), c.get("programa2", "")
+            if p1 in _PROGRAMAS:
+                it["prog"], it["prog_fte"] = p1, "Tipo de Contrato"
+            elif p2 in _PROGRAMAS:
+                it["prog"], it["prog_fte"] = p2, "Tipo de Contrato 2"
+            else:
+                it["prog"], it["prog_fte"] = PROGRAMA_INTERMEDIO, "Asignado"
+            cuenta[it["prog_fte"]] += 1
+            if it["origen"] == "Contrato vigente" and not c:
+                print(f"       PPTO 2027: contrato {it['n']} no está en CONTRATOS TODOS")
+    ppto["margenes"] = {r["programa"]: r["pct_margen"] for r in (resumen_programas or [])
+                        if r["programa"] in _PROGRAMAS}
+    print(f"       PPTO 2027: tipo de contrato {dict(cuenta)}")
+
+
+def read_ppto_ts_2026(wb):
+    """Presupuesto 2026 mes a mes, hoja «PPTO TS Consolidado». Es el único lugar
+    con los 12 meses: «Ratio Costos 2» deja vacíos los meses sin cierre."""
+    ws = next((wb[n] for n in wb.sheetnames if n.strip().upper() == "PPTO TS CONSOLIDADO"), None)
+    if ws is None:
+        return []
+    rows = list(ws.iter_rows(min_row=1, max_row=70, values_only=True))
+    h = next((i for i, r in enumerate(rows)
+              if any(isinstance(v, str) and _norm_cli(v) == "ENERO" for v in r)), None)
+    if h is None:
+        return []
+    c_ene = next(j for j, v in enumerate(rows[h]) if isinstance(v, str) and _norm_cli(v) == "ENERO")
+    c_lbl = next(j for j, v in enumerate(rows[h]) if v is not None)
+    filas = []
+    for r in rows[h + 1:]:
+        lbl = safe_str(r[c_lbl]).strip() if c_lbl < len(r) else ""
+        if lbl:
+            filas.append({"lbl": lbl, "m": [to_float(v) if isinstance(v, (int, float)) else 0.0
+                                            for v in r[c_ene:c_ene + 12]]})
+    return filas
+
+
+def read_real_ss(wb):
+    """Real 2026 mes a mes, hoja «EERR S&S».
+
+    Se toman sólo las líneas base y los subtotales se recalculan: en esa hoja
+    varios subtotales mensuales no suman sus líneas (EBITDA Directo de enero
+    deja fuera el margen). La columna «Periodo Actual» sí cuadra y sirve de
+    control. La hoja no trae presupuesto."""
+    ws = next((wb[n] for n in wb.sheetnames if n.strip().upper() == "EERR S&S"), None)
+    if ws is None:
+        return {}
+    rows = list(ws.iter_rows(min_row=1, max_row=60, max_col=20, values_only=True))
+    h = next((i for i, r in enumerate(rows)
+              if sum(1 for v in r if isinstance(v, str) and _norm_cli(v) == "REAL") >= 12), None)
+    if h is None:
+        return {}
+    cols = [j for j, v in enumerate(rows[h + 1]) if isinstance(v, (datetime, date))][:12]
+    c_acu = next((j for j, v in enumerate(rows[h + 1])
+                  if isinstance(v, str) and "PERIODO" in _norm_cli(v)), None)
+    BASE = {
+        "ingresos_totales": "INGRESOS DE ACTIVIDADES", "costo_ventas": "COSTO DE VENTAS",
+        "gastos_empleados": "GASTOS POR BENEFICIOS", "otros_gastos": "OTROS GASTOS POR NATURALEZA DIRECTOS",
+        "gav_indirecto": "GAV INDIRECTO", "finiquitos": "FINIQUITOS", "multas": "MULTAS",
+        "prov_obsolescencias": "PROVISION OBSOLESCENCIAS", "prov_incobrables": "PROVISION INCOBRA",
+        "prov_habilitacion": "PROVISION HABILITACION", "depreciacion": "GASTOS POR DEPRECIACION",
+        "otros_ingresos_funcion": "OTROS INGRESOS POR FUNCION", "ingreso_financiero": "INGRESO FINANCIERO",
+        "costo_financiero": "COSTO FINANCIERO", "otros_gastos_funcion": "OTROS GASTOS POR FUNCION",
+        "diferencia_cambio": "DIFERENCIA DE CAMBIO", "impuesto_renta": "IMPUESTO A LA RENTA",
+    }
+    fila = lambda frag: next((x for x in rows[h + 2:] if x[1] and _norm_cli(x[1]).startswith(frag)), None)
+    num = lambda v: to_float(v) if isinstance(v, (int, float)) else 0.0
+    D = {}
+    for k, frag in BASE.items():
+        r = fila(frag)
+        if r is None:
+            print(f"       EERR S&S: sin fila «{frag}»")
+        D[k] = [num(r[j]) for j in cols] if r else [0.0] * 12
+
+    def suma(*claves):
+        return [sum(v) for v in zip(*(D[c] for c in claves))]
+
+    D["margen_mm"] = suma("ingresos_totales", "costo_ventas")
+    D["ebitda_directo"] = suma("margen_mm", "gastos_empleados", "otros_gastos")
+    D["ebitda_indirecto"] = suma("ebitda_directo", "gav_indirecto")
+    D["total_gastos_adicionales"] = suma("finiquitos", "multas", "prov_obsolescencias",
+                                         "prov_incobrables", "prov_habilitacion")
+    D["ebitda_empresa"] = suma("ebitda_indirecto", "total_gastos_adicionales")
+    D["resultado_operacional"] = suma("ebitda_empresa", "depreciacion")
+    D["resultado_no_operacional"] = suma("otros_ingresos_funcion", "ingreso_financiero", "costo_financiero",
+                                         "otros_gastos_funcion", "diferencia_cambio")
+    D["resultado_antes_imp"] = suma("resultado_operacional", "resultado_no_operacional")
+    D["resultado_ejercicio"] = suma("resultado_antes_imp", "impuesto_renta")
+
+    n = 0
+    while n < 12 and abs(D["ingresos_totales"][n]) > 0.001:
+        n += 1
+    CONTROL = {"ebitda_directo": "EBITDA DIRECTO", "ebitda_empresa": "EBITDA EMPRESA",
+               "resultado_operacional": "RESULTADO OPERACIONAL",
+               "resultado_ejercicio": "RESULTADO DEL EJERCICIO"}
+    if c_acu is not None:
+        for k, frag in CONTROL.items():
+            r = fila(frag)
+            if r and abs(num(r[c_acu]) - sum(D[k][:n])) > 0.5:
+                print(f"       EERR S&S: «{frag}» no cuadra con Periodo Actual "
+                      f"({sum(D[k][:n]):,.1f} / {num(r[c_acu]):,.1f})")
+    D["n"] = n
+    return D
+
+
+# Líneas del comparativo: etiqueta, clave en ratios2 y filas del presupuesto
+# (P&L 2027 y PPTO TS Consolidado tienen la misma estructura) cuya suma da la línea.
+_EMP = ["GASTOS POR BENEFICIOS A LOS EMPLEADOS DIRECTOS", "GASTOS POR BENEFICIOS A LOS EMPLEADOS INDIRECTOS"]
+_OGD = ["OTROS GASTOS POR NATURALEZA DIRECTOS"]
+_COMP_LINEAS = [
+    ("Ingresos de actividades ordinarias", "ingresos_totales", ["INGRESOS DE ACTIVIDADES"]),
+    ("Costo de ventas",                    "costo_ventas",     ["COSTO DE EXPLOTACION"]),
+    ("MARGEN DEL PRODUCTO",                "margen_mm",        ["MARGEN DEL PRODUCTO"]),
+    ("Gastos por beneficios a los empleados", "gastos_empleados", _EMP),
+    ("Otros gastos por naturaleza Directos",  "otros_gastos",     _OGD),
+    ("EBITDA Directo",                     "ebitda_directo",   ["MARGEN DEL PRODUCTO"] + _EMP + _OGD),
+    ("GAV Indirecto",                      "gav_indirecto",    ["OTROS GASTOS POR NATURALEZA INDIRECTOS"]),
+    ("EBITDA Indirecto",                   "ebitda_indirecto", ["EBITDA"]),
+    ("Finiquitos",                         "finiquitos",       ["FINIQUITOS"]),
+    ("Multas",                             "multas",           ["MULTAS"]),
+    ("Provisión Obsolescencias Inventarios", "prov_obsolescencias", ["PROVISION OBSOLESCENCIAS"]),
+    ("Provisión Incobrables",              "prov_incobrables", ["PROVISION INCOBRA"]),
+    ("Provisión Habilitación Oficinas",    "prov_habilitacion", ["PROVISION HABILITACION"]),
+    ("Total Gastos Adicionales",           "total_gastos_adicionales", ["TOTAL GASTOS ADICIONALES"]),
+    ("EBITDA EMPRESA",                     "ebitda_empresa",   ["EBITDA EMPRESA"]),
+    ("Gastos por depreciación y amortización", "depreciacion", ["GASTOS POR DEPRECIACION"]),
+    ("Resultado Operacional",              "resultado_operacional", ["RESULTADO OPERACIONAL"]),
+    ("Otros ingresos por función",         "otros_ingresos_funcion", ["OTROS INGRESOS POR FUNCION"]),
+    ("Ingresos financieros",               "ingreso_financiero", ["INGRESOS FINANCIER"]),
+    ("Costo financiero",                   "costo_financiero", ["COSTO FINANCIERO"]),
+    ("Otros gastos por función",           "otros_gastos_funcion", ["OTROS GASTOS POR FUNCION"]),
+    ("Diferencia de cambio",               "diferencia_cambio", ["DIFERENCIA DE CAMBIO"]),
+    ("Resultado no operacional",           "resultado_no_operacional", ["RESULTADO NO OPERACIONAL"]),
+    ("Resultado antes de impuestos",       "resultado_antes_imp", ["RESULTADO ANTES"]),
+    ("Impuesto a la renta",                "impuesto_renta",   ["IMPUESTO A LA RENTA"]),
+    ("Resultado del ejercicio",            "resultado_ejercicio", ["RESULTADO DEL EJERCICIO"]),
+]
+
+
+def comparativo_eerr(ppto, ppto26, real_ss):
+    """PPTO 2026, Real 2026 y PPTO 2027 por línea del EERR, mes a mes.
+
+    Los meses sin cierre del Real se completan con el presupuesto 2026 sólo
+    aquí, para mostrar el año; el Excel no se toca."""
+    if not (ppto and ppto26 and real_ss.get("n")):
+        return {}
+    n = real_ss["n"]
+    clave = lambda t: re.sub(r"\s+", " ", _norm_cli(t))
+
+    def serie(filas, frags):
+        tot = [0.0] * 12
+        for fr in frags:
+            f = next((x for x in filas if clave(x["lbl"]).startswith(fr)), None)
+            if f is None:
+                print(f"       COMPARATIVO: sin fila «{fr}» en el presupuesto")
+                continue
+            tot = [a + b for a, b in zip(tot, f["m"])]
+        return tot
+
+    filas = []
+    for lbl, k, frags in _COMP_LINEAS:
+        p26 = serie(ppto26, frags)
+        p27 = serie(ppto.get("eerr", []), frags)
+        filas.append({"lbl": lbl, "k": k,
+                      "p26": [round(v, 4) for v in p26],
+                      "r26": [round(v, 4) for v in real_ss[k][:n]] + [round(v, 4) for v in p26[n:]],
+                      "p27": [round(v, 4) for v in p27]})
+    return {"n_real": n, "filas": filas}
 
 
 def read_region_clientes(wb):
@@ -6553,6 +6957,9 @@ def main():
     gd_costo = read_gd_costos(wb2)
     region_clientes = read_region_clientes(wb2)
     citas_costeo    = read_citas_costeo(wb2)
+    ppto26          = read_ppto_ts_2026(wb2)
+    real_ss         = read_real_ss(wb2)
+    propietarios    = read_propietarios(wb2, contratos)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
     cr = visitas["resumen"].get("Cristian Perez", {})
@@ -6587,6 +6994,11 @@ def main():
     app_data["back_order"] = back_ord
     app_data["pipeline_st"] = pipe_st
     app_data["ppto2027"] = read_ppto_2027()
+    cruzar_ppto_contratos(app_data["ppto2027"], contratos, resumen_programas)
+    if app_data["ppto2027"]:
+        app_data["ppto2027"]["comp"] = comparativo_eerr(app_data["ppto2027"], ppto26, real_ss)
+    citas_con_coordinador(citas, contratos, propietarios)
+    app_data["eerr_dir"] = _EERR_DIR
     # Un lector que no encuentra su hoja, o la encuentra rota, devuelve un dict
     # vacío sin quejarse, y el tablero sale con esa sección en blanco sin que
     # nadie lo note hasta que alguien la abre. Paso el 11-09-2026 con

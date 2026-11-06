@@ -300,3 +300,29 @@ correspondiente en el historial de git (buscar por fecha 2026-07-18 /
 por interpretación razonable de lo pedido, no están validados por el
 equipo de finanzas/comercial más allá de las confirmaciones explícitas que
 se citan arriba.
+
+════════════════════════════════════════════════════════════
+PRESUPUESTO 2027, EERR DIRECTORIO Y TERRENO (2026-11-06)
+════════════════════════════════════════════════════════════
+- Tipo de contrato del PPTO 2027: se cruza por N° de contrato con CONTRATOS
+  TODOS. Manda «Tipo de Contrato»; si está vacío o es SIN PROGRAMA, «Tipo de
+  Contrato 2». Lo demás, incluidos los contratos nuevos, va a ADVANCED (el
+  programa intermedio, pedido así) y queda marcado como asignado.
+- Margen por programa: % de la hoja «Resumen Tipos Programas».
+- Comparativo: PPTO 2026 sale de «PPTO TS Consolidado», único lugar con los 12
+  meses. Real sale de «EERR S&S» (pedido así el 06-11-2026): se toman sus líneas
+  base y los subtotales se recalculan, porque varios subtotales mensuales de
+  esa hoja no suman sus líneas; el resultado se controla contra su columna
+  Periodo Actual. Los meses sin cierre se completan con el PPTO 2026 sólo en el
+  panel. Esa hoja abre costos distinto al presupuesto y casi no trae indirectos.
+- La columna «Periodo Actual 2026» de EERR Directorio no suma Otros gastos por
+  naturaleza Directos; el panel la muestra tal cual.
+- Terreno: si el cliente no está en CONTRATOS TODOS, el coordinador es el dueño
+  de sus oportunidades («Repuestos Vendidas» y hojas de Brechas), que coincide con
+  el coordinador del contrato en el 98% de las filas. El «Titular» de «Facturacion
+  a Fecha» no se usa: es quien emite el documento. GEMCO queda sin coordinador.
+  Cuatro nombres escritos distinto se unieron a mano (_CIT_CLI_ALIAS).
+- Terreno: las citas con cuadrilla traen una fila «cabecera» con el nombre del
+  trabajo en el recurso y la misma duración que un técnico de esa cita. Son
+  duplicados y se descartan. «Citas» cuenta números de cita únicos; las horas
+  suman las de cada técnico.

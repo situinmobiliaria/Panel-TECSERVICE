@@ -13,7 +13,7 @@
   let _tipo = 'todos';
   let _met  = 'horas';     // 'horas' | 'citas'
   let _chMes = null, _chTec = null, _chTipo = null, _chProg = null;
-  let _chCli = null, _chCliMes = null;
+  let _chCli = null, _chCliMes = null, _chCoord = null;
 
   const esc  = s => String(s == null ? '' : s).replace(/&/g, '&amp;')
     .replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -47,17 +47,25 @@
   const COLORS = ['#002D73', '#28D2C3', '#FFC000', '#33448D', '#7A1FAA',
                   '#D46000', '#00832F', '#C00000', '#4C9BE8', '#E8B24C'];
 
-  const TEC   = CT.tecnicos || [];
-  const ROLES = CT.roles || [];
-  const TROL  = CT.tec_rol || [];
+  // Las filas cabecera de cuadrilla ya salen del extractor. Si alguna cita
+  // quedara sólo con el nombre del trabajo en el recurso, va a un grupo aparte
+  // para que el ranking, los cargos y los conteos vean sólo personas.
+  const SIN_TEC = '(Sin técnico identificado)';
+  const SIN_ID  = (CT.tecnicos || []).length;
+  const PERSONA = CT.tec_persona || [];
+  const TEC   = (CT.tecnicos || []).concat(SIN_TEC);
+  const ROLES = (CT.roles || []).concat('Sin técnico identificado');
+  const TROL  = (CT.tec_rol || []).concat(ROLES.length - 1);
   const CLI   = CT.clientes || [];
   const TIPOS = CT.tipos || [];
   const EQ    = CT.equipos || [];
   const MESES = CT.meses || [];
-  const FILAS = CT.filas || [];
+  const FILAS = (CT.filas || []).map(f => PERSONA[f[0]] ? f : [SIN_ID].concat(f.slice(1)));
   const ORDEN_TIPO = CT.orden_tipo || TIPOS;
 
   const rolDe = t => ROLES[TROL[t]] || 'Sin cargo declarado';
+  const conPersona = fs => fs.filter(f => f[0] !== SIN_ID);
+  const nTecnicos = fs => new Set(conPersona(fs).map(f => f[0])).size;
 
   // ── Filtro ───────────────────────────────────────────────────
   // Una sola pasada devuelve las filas vivas; todo lo demás se calcula sobre
@@ -91,7 +99,7 @@
       const d = g[k] || (g[k] = { k: k, n: 0, min: 0, prog: 0, cr: 0,
                                   cli: new Set(), mes: {}, tec: new Set() });
       d.n++; d.min += f[5]; d.prog += f[6]; d.cr += f[7];
-      d.cli.add(f[1]); d.tec.add(f[0]);
+      d.cli.add(f[1]); if (f[0] !== SIN_ID) d.tec.add(f[0]);
       const m = d.mes[f[4]] || (d.mes[f[4]] = { n: 0, min: 0 });
       m.n++; m.min += f[5];
     });
@@ -139,10 +147,11 @@
     const min  = fs.reduce((s, f) => s + f[5], 0);
     const prog = fs.reduce((s, f) => s + f[6], 0);
     const cr   = fs.reduce((s, f) => s + f[7], 0);
-    const tec  = new Set(fs.map(f => f[0])).size;
+    const tec  = nTecnicos(fs);
     const cli  = new Set(fs.map(f => f[1])).size;
     const sinD = fs.filter(f => !f[5]).length;
     const media = fs.length ? min / fs.length : 0;
+    const unicas = new Set(fs.map(f => f[9])).size;
 
     const k = (col, val2, lbl, sub, tip) =>
       `<div class="kpi" style="--kc:${col}" data-tip="${esc(tip)}">
@@ -152,9 +161,9 @@
        </div>`;
 
     box.innerHTML =
-      k('var(--az1)', nUn(fs.length), 'Citas completadas',
-        cli + ' clientes atendidos' + (sinD ? ' · ' + nUn(sinD) + ' sin tiempo registrado' : ''),
-        'Visitas con estado Completada en el período y filtros activos.' +
+      k('var(--az1)', nUn(unicas), 'Citas completadas',
+        nUn(fs.length) + ' asignaciones de técnico · ' + cli + ' clientes' + (sinD ? ' · ' + nUn(sinD) + ' sin tiempo registrado' : ''),
+        'Citas únicas por número, con estado Completada en el período y filtros activos. Una cita con dos técnicos es una cita y dos asignaciones; las horas suman las de cada técnico.' +
         (sinD ? ' ' + nUn(sinD) + ' de ellas tienen Duración Modificada en cero: cuentan como visita pero no suman horas.' : '')) +
       k('var(--teal)', n1(hrs(min)) + ' h', 'Horas en terreno',
         nUn(min) + ' minutos',
@@ -163,7 +172,7 @@
         n1(media / 60) + ' h por visita',
         'Minutos en terreno divididos por el número de visitas.') +
       k('var(--or)', nUn(tec), 'Técnicos en terreno',
-        (fs.length && tec ? n1(fs.length / tec) : '0') + ' citas por técnico',
+        (tec ? n1(conPersona(fs).length / tec) : '0') + ' citas por técnico',
         'Personas con al menos una cita completada en el período.') +
       k('var(--gn)', pc0(min, prog), 'Real sobre programado',
         n1(hrs(prog)) + ' h programadas',
@@ -214,10 +223,10 @@
     if (!cv || typeof Chart === 'undefined') return;
     if (_chTec) { _chTec.destroy(); _chTec = null; }
     cv.parentNode.style.height =
-      Math.max(300, 26 + new Set(fs.map(f => f[0])).size * 22) + 'px';
+      Math.max(300, 26 + nTecnicos(fs) * 22) + 'px';
     // Todas las personas de la hoja, no un top: son 25 y la pregunta es
     // justamente quién quedó abajo. Cortarlo escondía a un tercio del equipo.
-    const g = agrupar(fs, f => f[0]);
+    const g = agrupar(conPersona(fs), f => f[0]);
     const arr = Object.values(g).sort((a, b) => valG(b) - valG(a));
     _chTec = new Chart(cv.getContext('2d'), {
       type: 'bar',
@@ -436,7 +445,7 @@
   // y sólo cambian las claves y las etiquetas.
   // Los cargos arrancan abiertos: colapsados se veían cuatro filas y parecía
   // que faltaba gente, cuando el detalle son las 25 personas de la hoja.
-  const _abiertas = { rol: new Set(), tec: new Set(), cli: new Set() };
+  const _abiertas = { rol: new Set(), tec: new Set(), cli: new Set(), atec: new Set(), acoo: new Set() };
   let _rolInicial = false;
   window._ctTog = function (tabla, k) {
     const s = _abiertas[tabla];
@@ -547,22 +556,275 @@
       <p style="font-size:.55rem;color:var(--mut);margin:.45rem 0 0;line-height:1.5">${o.nota}</p>`;
   }
 
+  // ── Análisis por técnico y coordinador ───────────────────────
+  // Las citas sin persona (el recurso trae el nombre del trabajo) y las de
+  // clientes sin contrato no se reparten: quedan en su propia fila al pie.
+  const SIN_COO = '(Sin coordinador identificado)';
+  const tecDe = f => TEC[f[0]];
+  const cooDe = f => (CT.cli_coord || [])[f[1]] || SIN_COO;
+  const G_TIPO = [['% PREV.', 'Mantención preventiva'], ['% CORR.', 'Mantención correctiva'],
+                  ['% DIAG.', 'Diagnóstico'], ['% INST.', 'Instalación y puesta en marcha']];
+
+  function tablaAnalisis(o) {
+    const box = document.getElementById(o.box);
+    if (!box) return;
+    const G = {};
+    o.fs.forEach(f => {
+      const k = o.keyG(f);
+      const d = G[k] || (G[k] = { k, n: 0, min: 0, prog: 0, sd: 0, cli: new Set(), otro: new Set(), mes: new Set(), ids: new Set(), t: {} });
+      // Lo programado sólo cuenta si la cita trae duración: si no, una cita sin
+      // dato hunde el Real/Prog de un técnico que sí la hizo.
+      d.n++; d.min += f[5]; if (f[5]) d.prog += f[6]; else d.sd++;
+      d.cli.add(f[1]); d.mes.add(f[4]); d.ids.add(f[9]);
+      if (o.keyD(f) !== SIN_TEC && o.keyD(f) !== SIN_COO) d.otro.add(o.keyD(f));
+      d.t[TIPOS[f[2]]] = (d.t[TIPOS[f[2]]] || 0) + 1;
+    });
+    const orden = Object.values(G).sort((a, b) =>
+      (a.k === o.sin) - (b.k === o.sin) || valG(b) - valG(a));
+    window['_ctKeys_' + o.tabla] = orden.map(d => d.k);
+    if (!orden.length) { box.innerHTML = '<p style="font-size:.6rem;color:var(--mut)">Sin datos para el filtro activo.</p>'; return; }
+    const totH = orden.reduce((s, d) => s + d.min, 0), totN = new Set(o.fs.map(f => f[9])).size;
+    const th = (t, al) => `<th style="position:sticky;top:0;z-index:2;background:var(--az1);color:#fff;padding:.4rem .55rem;
+      font-size:.56rem;letter-spacing:.03em;text-align:${al};white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)">${t}</th>`;
+    const SEP = 'border-right:1px solid var(--brd)';
+    const num = (v, st) => `<td style="padding:.3rem .55rem;text-align:right;font-size:.62rem;font-variant-numeric:tabular-nums;${SEP};${st || ''}">${v}</td>`;
+    const cols = d => `
+      ${num(nUn(d.ids.size))}
+      ${num(n1(hrs(d.min)) + ' h', 'font-weight:700;color:var(--az1)')}
+      ${num(pc1(d.min, totH), 'color:var(--mut)')}
+      ${num(d.n - d.sd ? Math.round(d.min / (d.n - d.sd)) : '—', 'color:var(--mut)')}
+      ${num(n1(d.ids.size / d.mes.size), 'color:var(--mut)')}
+      ${num(nUn(d.cli.size))}
+      ${num(nUn(d.otro.size))}
+      ${G_TIPO.map(([, t]) => num(pc0(d.t[t] || 0, d.n))).join('')}
+      ${num(pc0(d.min, d.prog), 'color:' + (d.prog && d.min / d.prog > 1 ? 'var(--or)' : 'var(--gn)'))}
+      ${num(d.sd ? nUn(d.sd) : '—', 'color:' + (d.sd / d.n > .3 ? 'var(--rd,#C00000);font-weight:700' : 'var(--mut)'))}`;
+    let rows = '';
+    orden.forEach((d, i) => {
+      const ab = _abiertas[o.tabla].has(d.k), bg = d.k === o.sin ? '#FFF8E5' : 'var(--bg2)';
+      rows += `<tr style="background:${bg};cursor:pointer;border-left:3px solid ${COLORS[i % COLORS.length]}"
+          onclick="window._ctTog('${o.tabla}',${JSON.stringify(String(d.k)).replace(/"/g, '&quot;')})">
+        <td style="padding:.3rem .55rem;font-size:.66rem;font-weight:700;white-space:nowrap;position:sticky;left:0;background:${bg};z-index:1;${SEP}">
+          <span style="display:inline-block;width:.8rem;font-size:.5rem;color:var(--mut);transform:rotate(${ab ? 90 : 0}deg)">&#9654;</span>${esc(d.k)}</td>
+        ${cols(d)}</tr>`;
+      if (ab) {
+        const S = {};
+        o.fs.filter(f => o.keyG(f) === d.k).forEach(f => {
+          const k = (o.abrir || o.keyD)(f);
+          const s = S[k] || (S[k] = { k, n: 0, min: 0, prog: 0, sd: 0, cli: new Set(), mes: new Set(), t: {} });
+          s.n++; s.min += f[5]; if (f[5]) s.prog += f[6]; else s.sd++;
+          s.cli.add(f[1]); s.mes.add(f[4]); s.t[TIPOS[f[2]]] = (s.t[TIPOS[f[2]]] || 0) + 1;
+        });
+        Object.values(S).sort((a, b) => valG(b) - valG(a)).forEach(s => {
+          const c = (v) => num(v, 'color:var(--mut)');
+          rows += `<tr style="background:var(--bg)">
+            <td style="padding:.22rem .55rem .22rem 1.9rem;font-size:.61rem;color:var(--mut);white-space:nowrap;position:sticky;left:0;background:var(--bg);z-index:1;${SEP}">${esc(s.k)}</td>
+            ${c(nUn(s.n))}${num(n1(hrs(s.min)) + ' h', 'color:var(--az2)')}${c(pc1(s.min, d.min))}
+            ${c(s.n - s.sd ? Math.round(s.min / (s.n - s.sd)) : '—')}${c(n1(s.n / s.mes.size))}${c(nUn(s.cli.size))}${c('')}
+            ${G_TIPO.map(([, t]) => c(pc0(s.t[t] || 0, s.n))).join('')}${c(pc0(s.min, s.prog))}${c(s.sd ? nUn(s.sd) : '—')}</tr>`;
+        });
+      }
+    });
+    const lee = orden.filter(d => d.k !== o.sin);
+    box.innerHTML = `
+      <div style="display:flex;gap:.4rem;margin-bottom:.5rem;flex-wrap:wrap;align-items:center" class="exp-oculto">
+        <button onclick="window._ctTodo('${o.tabla}',true)" style="font-size:.57rem;padding:.16rem .5rem;border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt);cursor:pointer">Expandir todo</button>
+        <button onclick="window._ctTodo('${o.tabla}',false)" style="font-size:.57rem;padding:.16rem .5rem;border:1px solid var(--brd);border-radius:3px;background:var(--bg2);color:var(--txt);cursor:pointer">Colapsar todo</button>
+        <span style="font-size:.57rem;color:var(--mut)">${lee.length} ${o.nom} · clic para abrir ${o.nomD}</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:1050px">
+          <thead><tr>${th(o.cab, 'left')}${['CITAS', 'HORAS', '% HORAS', 'MIN/CITA', 'CITAS/MES', 'CLIENTES', o.cabD].map(t => th(t, 'right')).join('')}
+            ${G_TIPO.map(([t]) => th(t, 'right')).join('')}${th('REAL/PROG', 'right')}${th('SIN DURACIÓN', 'right')}</tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr style="background:var(--az3);color:#fff;font-weight:700">
+            <td style="padding:.35rem .55rem;font-size:.63rem;position:sticky;left:0;background:var(--az3);z-index:1">TOTAL</td>
+            <td style="padding:.35rem .55rem;text-align:right;font-size:.61rem">${nUn(totN)}</td>
+            <td style="padding:.35rem .55rem;text-align:right;font-size:.61rem">${n1(hrs(totH))} h</td>
+            <td colspan="${6 + G_TIPO.length + 1}"></td></tr></tfoot>
+        </table>
+      </div>
+      <p style="font-size:.55rem;color:var(--mut);margin:.45rem 0 0;line-height:1.5">${o.nota}</p>`;
+  }
+
+  // Horas de cada coordinador abiertas por tipo de intervención.
+  function chCoord(fs) {
+    const cv = document.getElementById('ctCoord');
+    if (!cv || typeof Chart === 'undefined') return;
+    if (_chCoord) { _chCoord.destroy(); _chCoord = null; }
+    const g = agrupar(fs, cooDe);
+    const keys = Object.keys(g).sort((a, b) => (a === SIN_COO) - (b === SIN_COO) || valG(g[b]) - valG(g[a]));
+    const pres = ORDEN_TIPO.filter(t => fs.some(f => TIPOS[f[2]] === t));
+    const celda = {};
+    fs.forEach(f => {
+      const k = cooDe(f) + '|' + TIPOS[f[2]], c = celda[k] || (celda[k] = { n: 0, min: 0 });
+      c.n++; c.min += f[5];
+    });
+    _chCoord = new Chart(cv.getContext('2d'), {
+      type: 'bar',
+      data: { labels: keys, datasets: pres.map(t => ({
+        label: t, backgroundColor: colTipo(t), borderColor: '#fff', borderWidth: 1,
+        data: keys.map(k => { const c = celda[k + '|' + t]; return c ? val(c.min, c.n) : 0; }) })) },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } },
+          tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ': ' + fmtV(c.raw) } } },
+        scales: { x: { stacked: true, title: { display: true, text: lblMet(), font: { size: 10 } } },
+                  y: { stacked: true, ticks: { font: { size: 10 } } } } },
+    });
+  }
+
+  // Clientes sin contrato cuyo coordinador sale del dueño de sus oportunidades:
+  // se listan para poder revisarlos, porque no es un dato directo.
+  function listaAsignados(fs) {
+    const box = document.getElementById('ct-a-coo-lista');
+    if (!box) return;
+    const FTE = CT.cli_coord_fte || [];
+    const G = {};
+    fs.filter(f => FTE[f[1]] === 'Propietario').forEach(f => {
+      const d = G[f[1]] || (G[f[1]] = { n: 0, min: 0 });
+      d.n++; d.min += f[5];
+    });
+    const L = Object.keys(G).sort((a, b) => G[b].n - G[a].n);
+    if (!L.length) { box.innerHTML = ''; return; }
+    const th = (t, al) => `<th style="background:var(--az1);color:#fff;padding:.32rem .55rem;font-size:.56rem;text-align:${al}">${t}</th>`;
+    const td = (t, x) => `<td style="padding:.24rem .55rem;font-size:.62rem;${x || ''}">${t}</td>`;
+    box.innerHTML = `<details><summary style="font-size:.62rem;color:var(--az1);font-weight:700;cursor:pointer;margin:.6rem 0 .3rem">
+        ${L.length} clientes sin contrato con coordinador asignado por sus oportunidades: ver lista</summary>
+      <table style="width:100%;border-collapse:collapse"><thead><tr>${th('CLIENTE', 'left')}${th('COORDINADOR', 'left')}${th('CITAS', 'right')}${th('HORAS', 'right')}</tr></thead>
+      <tbody>${L.map((k, i) => `<tr style="background:${i % 2 ? 'var(--bg)' : 'var(--bg2)'}">
+        ${td(esc(CLI[k]), 'font-weight:600')}${td(esc(CT.cli_coord[k]))}${td(nUn(G[k].n), 'text-align:right')}${td(n1(hrs(G[k].min)) + ' h', 'text-align:right')}</tr>`).join('')}</tbody></table></details>`;
+  }
+
+  // ── Tablas comparativas ──────────────────────────────────────
+  // Una fila por persona con las mismas medidas, para ver quién carga más
+  // trabajo. Se ordena por la medida elegida y cada uno se mide contra el
+  // promedio del grupo o contra otra persona.
+  const _cmp = { tec: { met: 'horas', ref: 'prom' }, coo: { met: 'horas', ref: 'prom' } };
+  const CARTERA = CT.coord_cartera || {};
+  window._ctMetT = v => { _cmp.tec.met = v; render(); };
+  window._ctMetC = v => { _cmp.coo.met = v; render(); };
+  window._ctRefT = v => { _cmp.tec.ref = v; render(); };
+  window._ctRefC = v => { _cmp.coo.ref = v; render(); };
+
+  const M_TEC = [
+    ['horas', 'HORAS', d => hrs(d.min), n1], ['citas', 'CITAS', d => d.n, nUn],
+    ['dias', 'DÍAS EN TERRENO', d => d.dias.size, nUn],
+    ['cdia', 'CITAS/DÍA', d => d.n / d.dias.size, n1],
+    ['hdia', 'HORAS/DÍA', d => d.diasD.size ? hrs(d.min) / d.diasD.size : 0, n1],
+    ['hmes', 'HORAS/MES', d => hrs(d.min) / d.mes.size, n1],
+    ['cli', 'CLIENTES', d => d.cli.size, nUn],
+    ['corr', 'CORRECTIVAS', d => d.corr, nUn],
+  ];
+  const M_COO = [
+    ['horas', 'HORAS', d => hrs(d.min), n1], ['citas', 'CITAS', d => d.ids.size, nUn],
+    ['cli', 'CLIENTES ATENDIDOS', d => d.cli.size, nUn],
+    ['tec', 'TÉCNICOS', d => d.tec.size, nUn],
+    ['ctr', 'CONTRATOS ACTIVOS', d => (CARTERA[d.k] || {}).contratos || 0, nUn],
+    ['hctr', 'HORAS/CONTRATO', d => { const c = (CARTERA[d.k] || {}).contratos; return c ? hrs(d.min) / c : 0; }, n1],
+    ['ccli', 'CITAS/CLIENTE', d => d.ids.size / d.cli.size, n1],
+    ['hmes', 'HORAS/MES', d => hrs(d.min) / d.mes.size, n1],
+  ];
+
+  function tablaCompara(o) {
+    const box = document.getElementById(o.box);
+    if (!box) return;
+    const G = {};
+    o.fs.forEach(f => {
+      const k = o.keyG(f);
+      if (k === o.sin) return;
+      const d = G[k] || (G[k] = { k, n: 0, min: 0, corr: 0, cli: new Set(), tec: new Set(), mes: new Set(), dias: new Set(), diasD: new Set(), ids: new Set() });
+      d.n++; d.min += f[5]; d.cli.add(f[1]); d.mes.add(f[4]); d.dias.add(f[8]); d.ids.add(f[9]);
+      if (f[5]) d.diasD.add(f[8]);
+      if (f[0] !== SIN_ID) d.tec.add(f[0]);
+      if (TIPOS[f[2]] === 'Mantención correctiva') d.corr++;
+    });
+    const L = Object.values(G);
+    if (!L.length) { box.innerHTML = '<p style="font-size:.6rem;color:var(--mut)">Sin datos para el filtro activo.</p>'; return; }
+    const st = _cmp[o.tabla];
+    if (st.ref !== 'prom' && !G[st.ref]) st.ref = 'prom';
+    const met = o.med.find(m => m[0] === st.met) || o.med[0];
+    const v = (d, m) => m[2](d);
+    const prom = m => L.reduce((s, d) => s + v(d, m), 0) / L.length;
+    L.sort((a, b) => v(b, met) - v(a, met));
+    const base = st.ref === 'prom' ? prom(met) : v(G[st.ref], met);
+    const maxV = Math.max(...L.map(d => v(d, met))) || 1;
+    seg(o.chips, o.med.map(m => [m[0], m[1]]), st.met, o.fnMet);
+    const nomRef = st.ref === 'prom' ? 'promedio' : st.ref;
+    const refSel = document.getElementById(o.sel);
+    if (refSel) refSel.innerHTML = `<option value="prom">Promedio del grupo</option>` +
+      L.slice().sort((a, b) => String(a.k).localeCompare(b.k)).map(d =>
+        `<option value="${esc(d.k)}" ${d.k === st.ref ? 'selected' : ''}>${esc(d.k)}</option>`).join('');
+    const SEP = 'border-right:1px solid var(--brd)';
+    const th = (t, al, on) => `<th style="position:sticky;top:0;z-index:2;background:${on ? '#1a3a6b' : 'var(--az1)'};color:#fff;padding:.4rem .5rem;
+      font-size:.56rem;letter-spacing:.03em;text-align:${al};white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)">${t}</th>`;
+    const td = (t, x) => `<td style="padding:.28rem .5rem;text-align:right;font-size:.62rem;font-variant-numeric:tabular-nums;${SEP};${x || ''}">${t}</td>`;
+    const rows = L.map((d, i) => {
+      const dif = base ? (v(d, met) - base) / Math.abs(base) : 0;
+      const esRef = d.k === st.ref;
+      const col = esRef ? 'var(--mut)' : dif > 0.005 ? '#00832F' : dif < -0.005 ? '#C00000' : 'var(--mut)';
+      const bg = esRef ? '#FFF2CC' : i % 2 ? 'var(--bg)' : 'var(--bg2)';
+      return `<tr style="background:${bg}">
+        ${td(i + 1, 'text-align:center;color:var(--mut)')}
+        <td style="padding:.28rem .55rem;font-size:.64rem;font-weight:600;white-space:nowrap;${SEP}">${esc(d.k)}</td>
+        ${o.med.map(m => td(m[3](v(d, m)), m === met ? 'font-weight:700;color:var(--az1)' : '')).join('')}
+        <td style="padding:.28rem .5rem;min-width:130px;${SEP}"><div style="height:9px;border-radius:2px;background:var(--az2);width:${Math.max(1, v(d, met) / maxV * 100)}%"></div></td>
+        ${td(esRef ? 'base' : (dif > 0 ? '+' : '') + n1(dif * 100) + '%', 'font-weight:700;color:' + col)}</tr>`;
+    }).join('');
+    box.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:980px">
+      <thead><tr>${th('#', 'center')}${th(o.cab, 'left')}${o.med.map(m => th(m[1], 'right', m === met)).join('')}
+        ${th(met[1], 'left', true)}${th('VS ' + esc(nomRef.toUpperCase()), 'right', true)}</tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr style="background:var(--az3);color:#fff;font-weight:700">
+        <td></td><td style="padding:.35rem .55rem;font-size:.63rem">PROMEDIO</td>
+        ${o.med.map(m => `<td style="padding:.35rem .5rem;text-align:right;font-size:.61rem">${n1(prom(m))}</td>`).join('')}
+        <td></td><td></td></tr></tfoot></table></div>
+      <p style="font-size:.55rem;color:var(--mut);margin:.45rem 0 0;line-height:1.5">${o.nota}</p>`;
+  }
+
   // ── Render ───────────────────────────────────────────────────
   function render() {
     const fs = filtradas();
     renderSegs();
     kpis(fs);
-    chMes(fs); chTec(fs); chTipo(fs); chProg(fs); chCli(fs); chCliMes(fs);
+    chMes(fs); chTec(fs); chTipo(fs); chProg(fs); chCli(fs); chCliMes(fs); chCoord(fs);
 
     const st = document.getElementById('ct-sub');
-    if (st) st.textContent = nUn(fs.length) + ' citas · ' + n1(hrs(fs.reduce((s, f) => s + f[5], 0))) +
-      ' h · ' + new Set(fs.map(f => f[0])).size + ' técnicos · ' +
+    if (st) st.textContent = nUn(new Set(fs.map(f => f[9])).size) + ' citas · ' + n1(hrs(fs.reduce((s, f) => s + f[5], 0))) +
+      ' h · ' + nTecnicos(fs) + ' técnicos · ' +
       new Set(fs.map(f => f[1])).size + ' clientes · ' + lblFiltro();
 
     if (!_rolInicial) {
       _rolInicial = true;
       new Set(FILAS.map(f => rolDe(f[0]))).forEach(r => _abiertas.rol.add(r));
     }
+    tablaCompara({
+      box: 'ct-c-tec', tabla: 'tec', fs: fs, keyG: tecDe, sin: SIN_TEC, cab: 'TÉCNICO', med: M_TEC,
+      chips: 'ct-cm-tec', fnMet: '_ctMetT', sel: 'ct-cr-tec',
+      nota: 'Días en terreno = días distintos con al menos una cita. Horas/día se calcula sobre los días con duración registrada. ' +
+            'Cuidado con las horas de quien tiene muchas citas sin duración (ver SIN DURACIÓN en el análisis): aparece con menos horas de las reales; ahí sirve mejor mirar citas y días.',
+    });
+    tablaCompara({
+      box: 'ct-c-coo', tabla: 'coo', fs: fs, keyG: cooDe, sin: SIN_COO, cab: 'COORDINADOR', med: M_COO,
+      chips: 'ct-cm-coo', fnMet: '_ctMetC', sel: 'ct-cr-coo',
+      nota: 'El coordinador no va a terreno: las horas son las de las citas a clientes de su cartera, o sea el trabajo que le toca coordinar. ' +
+            'Contratos activos = estado Activado en CONTRATOS TODOS. Las citas sin coordinador identificado no entran.',
+    });
+
+    tablaAnalisis({
+      box: 'ct-a-tec', tabla: 'atec', fs: fs, keyG: tecDe, keyD: cooDe, sin: SIN_TEC,
+      cab: 'TÉCNICO', cabD: 'COORDINADORES', nom: 'técnicos', nomD: 'sus coordinadores',
+      nota: 'Cuando dos técnicos van a la misma cita, la cita y sus horas cuentan para cada uno. MIN/CITA se calcula sobre las citas con duración; SIN DURACIÓN cuenta las que no la traen, y sus horas no suman, así que un técnico con muchas citas sin duración aparece con menos horas de las reales.',
+    });
+    tablaAnalisis({
+      box: 'ct-a-coo', tabla: 'acoo', fs: fs, keyG: cooDe, keyD: tecDe, sin: SIN_COO,
+      abrir: f => cooDe(f) === SIN_COO ? CLI[f[1]] : tecDe(f),
+      cab: 'COORDINADOR', cabD: 'TÉCNICOS', nom: 'coordinadores', nomD: 'sus técnicos',
+      nota: 'La hoja de citas no trae coordinador: se toma el del cliente en CONTRATOS TODOS, y con más de uno manda el de más contratos activados. ' +
+            'Si el cliente no tiene contrato, se usa el dueño de sus oportunidades en «Repuestos Vendidas» y las hojas de Brechas, que en los clientes con contrato coincide con el coordinador el 98% de las veces. ' +
+            '«Sin coordinador identificado» son clientes que no aparecen con coordinador en ninguna hoja, más GEMCO, que es la propia empresa. Ábrela para ver cuáles son.',
+    });
+    listaAsignados(fs);
+
     tablaGrupo({
       box: 'ct-t-rol', tabla: 'rol', fs: fs,
       keyG: f => rolDe(f[0]), keyD: f => f[0],
@@ -577,7 +839,7 @@
     tablaGrupo({
       box: 'ct-t-tec', tabla: 'tec', fs: fs,
       keyG: f => f[0], keyD: f => TIPOS[f[2]],
-      lblG: k => TEC[k] + '  ·  ' + rolDe(+k), lblD: k2 => k2,
+      lblG: k => +k === SIN_ID ? SIN_TEC : TEC[k] + '  ·  ' + rolDe(+k), lblD: k2 => k2,
       cab: 'TÉCNICO / INTERVENCIÓN', nomG: 'técnicos', nomD: 'el tipo de intervención',
       cab4: 'CLIENTES', col4: d => nUn(d.cli.size),
       tot4: f2 => nUn(new Set(f2.map(x => x[1])).size),
@@ -587,7 +849,7 @@
     tablaGrupo({
       box: 'ct-t-cli', tabla: 'cli', fs: fs,
       keyG: f => f[1], keyD: f => f[0],
-      lblG: k => CLI[k], lblD: k2 => TEC[k2] + '  ·  ' + rolDe(+k2),
+      lblG: k => CLI[k], lblD: k2 => +k2 === SIN_ID ? SIN_TEC : TEC[k2] + '  ·  ' + rolDe(+k2),
       cab: 'CLIENTE / TÉCNICO', nomG: 'clientes', nomD: 'quién lo atendió',
       cab4: 'TÉCNICOS', col4: d => nUn(d.tec.size),
       tot4: f2 => nUn(new Set(f2.map(x => x[0])).size),
