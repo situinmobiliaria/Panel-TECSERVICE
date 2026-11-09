@@ -4,7 +4,7 @@
 // cliente (hoja «Ingresos SS») del archivo «PPTO 2027 TS.xlsx».
 // El detalle de cada cliente (contrato, vigencia, clasificación) sale de esa
 // misma planilla; el tipo de contrato se cruza con CONTRATOS TODOS en el
-// extractor, y el comparativo suma «PPTO TS Consolidado» y «EERR S&S».
+// extractor, y el comparativo suma «PPTO TS Consolidado» y «EERR Directorio».
 // Depende de: APP_DATA.ppto2027, panel, fact_desglose
 // ═══════════════════════════════════════════════════════════════
 (function () {
@@ -604,7 +604,7 @@
     const box = document.getElementById('p27-comp');
     if (!box) return;
     const F = COMP.filas || [];
-    if (!F.length) { box.innerHTML = '<div style="padding:.6rem;color:var(--mut);font-size:.68rem">Sin datos para comparar: falta la hoja «PPTO TS Consolidado» o «EERR S&amp;S».</div>'; return; }
+    if (!F.length) { box.innerHTML = '<div style="padding:.6rem;color:var(--mut);font-size:.68rem">Sin datos para comparar: falta la hoja «PPTO TS Consolidado» o «EERR Directorio».</div>'; return; }
     const lbl = document.getElementById('p27-comp-sub');
     if (lbl) lbl.textContent = 'Real a ' + MES_L[nReal - 1].toLowerCase() + '; ' +
       (nReal < 12 ? MES[nReal] + '–Dic completados con PPTO 2026' : 'año completo') + ' · MM$';
@@ -688,7 +688,7 @@
         <thead>${thead}</thead><tbody>${rows}</tbody></table></div>
       <div style="font-size:.6rem;color:var(--mut);margin-top:.4rem;line-height:1.5">
         ${nReal < 12 ? `<b>Real + PPTO 2026:</b> ${LBL_ACUM} es Real; ${MES[nReal]}–Dic (*) sale del presupuesto 2026, sólo en el panel. ` : ''}
-        Variaciones: positivo es favorable (más ingreso o menos gasto). Real: hoja «EERR S&amp;S», con los subtotales recalculados desde sus líneas. <b>Ojo:</b> esa hoja lleva el personal técnico en Costo de Ventas y casi no trae gastos indirectos, mientras el presupuesto los abre distinto, así que costo, margen, GAV y gastos no son comparables línea a línea. PPTO 2026: hoja «PPTO TS Consolidado». PPTO 2027: «P&amp;L TECSERVICE».</div>`;
+        Variaciones: positivo es favorable (más ingreso o menos gasto). Real 2026: columnas Real de la hoja «EERR Directorio»; ahí el personal indirecto va dentro de GAV Indirecto, y aquí se separa como % TS × «Gastos por beneficios a los empleados Indirectos» de «EERR GEMCO Consolidado» (GAV queda con el resto). EBITDA Directo no incluye el personal indirecto. PPTO 2026: hoja «PPTO TS Consolidado». PPTO 2027: hoja «P&amp;L TECSERVICE» de «PPTO 2027 TS.xlsx».</div>`;
   }
 
   // ── Top de clientes ──────────────────────────────────────────

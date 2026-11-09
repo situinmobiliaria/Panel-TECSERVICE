@@ -32,7 +32,11 @@ def snap_eerr_directorio(wb_com):
     ws = next((w for w in wb_com.Worksheets if w.Name.strip().upper() == "EERR DIRECTORIO"), None)
     if ws is None:
         return {}
-    last = lambda o: ws.Cells.Find("*", SearchOrder=o, SearchDirection=2)  # 2 = xlPrevious
+    # Find recuerda las opciones de la última búsqueda hecha en Excel; sin
+    # fijarlas, el 08-11-2026 devolvió B2 y la hoja salió con una sola celda.
+    # -4123 = xlFormulas, 2 = xlPart, 2 = xlPrevious
+    last = lambda o: ws.Cells.Find(What="*", After=ws.Cells(1, 1), LookIn=-4123, LookAt=2,
+                                   SearchOrder=o, SearchDirection=2, MatchCase=False)
     lr, lc = last(1), last(2)          # 1 = xlByRows, 2 = xlByColumns
     if lr is None:
         return {}
@@ -5073,85 +5077,125 @@ def read_ppto_ts_2026(wb):
     return filas
 
 
-def read_real_ss(wb):
-    """Real 2026 mes a mes, hoja «EERR S&S».
-
-    Se toman sólo las líneas base y los subtotales se recalculan: en esa hoja
-    varios subtotales mensuales no suman sus líneas (EBITDA Directo de enero
-    deja fuera el margen). La columna «Periodo Actual» sí cuadra y sirve de
-    control. La hoja no trae presupuesto."""
-    ws = next((wb[n] for n in wb.sheetnames if n.strip().upper() == "EERR S&S"), None)
+def _gemco_real_mensual(wb, frag):
+    """Fila de «EERR GEMCO Consolidado» (columnas Real por mes), en MM$."""
+    ws = next((wb[n] for n in wb.sheetnames if n.strip().upper() == "EERR GEMCO CONSOLIDADO"), None)
     if ws is None:
-        return {}
-    rows = list(ws.iter_rows(min_row=1, max_row=60, max_col=20, values_only=True))
+        return None
+    rows = list(ws.iter_rows(min_row=1, max_row=60, values_only=True))
     h = next((i for i, r in enumerate(rows)
               if sum(1 for v in r if isinstance(v, str) and _norm_cli(v) == "REAL") >= 12), None)
-    if h is None:
+    if h is None or h + 1 >= len(rows):
+        return None
+    cols = {}
+    for j, v in enumerate(rows[h]):
+        f = rows[h + 1][j] if j < len(rows[h + 1]) else None
+        if isinstance(f, (int, float)) and not isinstance(f, bool):
+            f = datetime(1899, 12, 30) + timedelta(days=f)
+        if isinstance(v, str) and _norm_cli(v) == "REAL" and isinstance(f, (datetime, date)):
+            cols.setdefault(f.month - 1, j)
+    r = next((x for x in rows[h + 2:] for v in x[:3]
+              if isinstance(v, str) and _norm_cli(v).startswith(frag)), None)
+    if r is None:
+        return None
+    return [to_float(r[cols[m]]) if m in cols and isinstance(r[cols[m]], (int, float)) else 0.0
+            for m in range(12)]
+
+
+def read_real_dir(wb):
+    """Real 2026 mes a mes, columnas «Real» de la hoja «EERR Directorio».
+
+    Cada línea se toma tal como está en la hoja, subtotales incluidos. Los
+    meses con Real son los primeros con ingresos; el resto queda para
+    completarse con el presupuesto 2026.
+
+    Personal: la fila «Gastos por beneficios a los empleados» del Real es
+    sólo el directo (viene de «EERR S&S»); el indirecto está dentro de «GAV
+    Indirecto», que es % TS (col. A) × (personal indirecto + otros gastos
+    indirectos de «EERR GEMCO Consolidado» − arriendo). Aquí se separa: el
+    personal indirecto es % TS × esa fila de GEMCO y GAV queda con el resto,
+    así los subtotales no cambian."""
+    ws = next((wb[n] for n in wb.sheetnames if n.strip().upper() == "EERR DIRECTORIO"), None)
+    if ws is None:
+        print("       EERR Directorio: no se encontró la hoja; el comparativo queda sin Real")
         return {}
-    cols = [j for j, v in enumerate(rows[h + 1]) if isinstance(v, (datetime, date))][:12]
-    c_acu = next((j for j, v in enumerate(rows[h + 1])
-                  if isinstance(v, str) and "PERIODO" in _norm_cli(v)), None)
-    BASE = {
+    rows = list(ws.iter_rows(min_row=1, max_row=80, values_only=True))
+    h = next((i for i, r in enumerate(rows)
+              if sum(1 for v in r if isinstance(v, str) and _norm_cli(v) == "REAL") >= 12), None)
+    if h is None or h + 1 >= len(rows):
+        print("       EERR Directorio: sin encabezado «Real» por mes")
+        return {}
+    c_lbl = next(j for j, v in enumerate(rows[h]) if isinstance(v, str) and v.strip())
+    cols = {}
+    for j, v in enumerate(rows[h]):
+        f = rows[h + 1][j] if j < len(rows[h + 1]) else None
+        if isinstance(f, (int, float)) and not isinstance(f, bool):
+            f = datetime(1899, 12, 30) + timedelta(days=f)
+        if isinstance(v, str) and _norm_cli(v) == "REAL" and isinstance(f, (datetime, date)):
+            cols.setdefault(f.month - 1, j)
+    if len(cols) < 12:
+        print(f"       EERR Directorio: sólo {len(cols)} meses con columna Real")
+    LINEAS = {
         "ingresos_totales": "INGRESOS DE ACTIVIDADES", "costo_ventas": "COSTO DE VENTAS",
-        "gastos_empleados": "GASTOS POR BENEFICIOS", "otros_gastos": "OTROS GASTOS POR NATURALEZA DIRECTOS",
-        "gav_indirecto": "GAV INDIRECTO", "finiquitos": "FINIQUITOS", "multas": "MULTAS",
+        "margen_mm": "MARGEN DEL PRODUCTO",
+        "gastos_empleados_dir": "GASTOS POR BENEFICIOS", "otros_gastos": "OTROS GASTOS POR NATURALEZA DIRECTOS",
+        "ebitda_directo": "EBITDA DIRECTO", "gav_indirecto": "GAV INDIRECTO",
+        "ebitda_indirecto": "EBITDA INDIRECTO", "finiquitos": "FINIQUITOS", "multas": "MULTAS",
         "prov_obsolescencias": "PROVISION OBSOLESCENCIAS", "prov_incobrables": "PROVISION INCOBRA",
-        "prov_habilitacion": "PROVISION HABILITACION", "depreciacion": "GASTOS POR DEPRECIACION",
+        "prov_habilitacion": "PROVISION HABILITACION",
+        "total_gastos_adicionales": "TOTAL GASTOS ADICIONALES", "ebitda_empresa": "EBITDA EMPRESA",
+        "depreciacion": "GASTOS POR DEPRECIACION", "resultado_operacional": "RESULTADO OPERACIONAL",
         "otros_ingresos_funcion": "OTROS INGRESOS POR FUNCION", "ingreso_financiero": "INGRESO FINANCIERO",
         "costo_financiero": "COSTO FINANCIERO", "otros_gastos_funcion": "OTROS GASTOS POR FUNCION",
-        "diferencia_cambio": "DIFERENCIA DE CAMBIO", "impuesto_renta": "IMPUESTO A LA RENTA",
+        "diferencia_cambio": "DIFERENCIA DE CAMBIO", "resultado_no_operacional": "RESULTADO NO OPERACIONAL",
+        "resultado_antes_imp": "RESULTADO ANTES", "impuesto_renta": "IMPUESTO A LA RENTA",
+        "resultado_ejercicio": "RESULTADO DEL EJERCICIO",
     }
-    fila = lambda frag: next((x for x in rows[h + 2:] if x[1] and _norm_cli(x[1]).startswith(frag)), None)
+    lbl = lambda r: _norm_cli(r[c_lbl]) if c_lbl < len(r) and isinstance(r[c_lbl], str) else ""
     num = lambda v: to_float(v) if isinstance(v, (int, float)) else 0.0
-    D = {}
-    for k, frag in BASE.items():
-        r = fila(frag)
+    D, crudo, fila = {}, {}, {}
+    for k, frag in LINEAS.items():
+        r = fila[k] = next((x for x in rows[h + 2:] if lbl(x).startswith(frag)), None)
         if r is None:
-            print(f"       EERR S&S: sin fila «{frag}»")
-        D[k] = [num(r[j]) for j in cols] if r else [0.0] * 12
-
-    def suma(*claves):
-        return [sum(v) for v in zip(*(D[c] for c in claves))]
-
-    D["margen_mm"] = suma("ingresos_totales", "costo_ventas")
-    D["ebitda_directo"] = suma("margen_mm", "gastos_empleados", "otros_gastos")
-    D["ebitda_indirecto"] = suma("ebitda_directo", "gav_indirecto")
-    D["total_gastos_adicionales"] = suma("finiquitos", "multas", "prov_obsolescencias",
-                                         "prov_incobrables", "prov_habilitacion")
-    D["ebitda_empresa"] = suma("ebitda_indirecto", "total_gastos_adicionales")
-    D["resultado_operacional"] = suma("ebitda_empresa", "depreciacion")
-    D["resultado_no_operacional"] = suma("otros_ingresos_funcion", "ingreso_financiero", "costo_financiero",
-                                         "otros_gastos_funcion", "diferencia_cambio")
-    D["resultado_antes_imp"] = suma("resultado_operacional", "resultado_no_operacional")
-    D["resultado_ejercicio"] = suma("resultado_antes_imp", "impuesto_renta")
-
+            print(f"       EERR Directorio: sin fila «{frag}»")
+        crudo[k] = [r[cols[m]] if r is not None and m in cols and cols[m] < len(r) else None
+                    for m in range(12)]
+        D[k] = [num(v) for v in crudo[k]]
     n = 0
-    while n < 12 and abs(D["ingresos_totales"][n]) > 0.001:
+    while n < 12 and isinstance(crudo["ingresos_totales"][n], (int, float))             and abs(crudo["ingresos_totales"][n]) > 0.001:
         n += 1
-    CONTROL = {"ebitda_directo": "EBITDA DIRECTO", "ebitda_empresa": "EBITDA EMPRESA",
-               "resultado_operacional": "RESULTADO OPERACIONAL",
-               "resultado_ejercicio": "RESULTADO DEL EJERCICIO"}
-    if c_acu is not None:
-        for k, frag in CONTROL.items():
-            r = fila(frag)
-            if r and abs(num(r[c_acu]) - sum(D[k][:n])) > 0.5:
-                print(f"       EERR S&S: «{frag}» no cuadra con Periodo Actual "
-                      f"({sum(D[k][:n]):,.1f} / {num(r[c_acu]):,.1f})")
     D["n"] = n
+
+    # Personal indirecto: sale de GAV Indirecto (ver arriba)
+    pct = fila["gav_indirecto"][0] if fila["gav_indirecto"] else None
+    ind = _gemco_real_mensual(wb, "GASTOS POR BENEFICIOS A LOS EMPLEADOS INDIRECTOS")
+    if isinstance(pct, (int, float)) and ind:
+        D["gastos_empleados_ind"] = [pct * ind[m] if m < n else 0.0 for m in range(12)]
+        D["gav_indirecto"] = [g - e for g, e in zip(D["gav_indirecto"], D["gastos_empleados_ind"])]
+        print(f"       EERR Directorio: personal indirecto = {pct:.2%} x GEMCO "
+              f"(MM${sum(D['gastos_empleados_ind']):,.1f}), descontado de GAV Indirecto")
+    else:
+        print("       EERR Directorio: no se pudo separar el personal indirecto (falta % TS o la fila "
+              "de «EERR GEMCO Consolidado»); queda dentro de GAV Indirecto")
+        D["gastos_empleados_ind"] = [0.0] * 12
+    print(f"       EERR Directorio: Real enero a {_MESES_LARGO[n - 1] if n else '—'} | "
+          f"ingresos MM${sum(D['ingresos_totales'][:n]):,.1f}")
     return D
 
 
 # Líneas del comparativo: etiqueta, clave en ratios2 y filas del presupuesto
 # (P&L 2027 y PPTO TS Consolidado tienen la misma estructura) cuya suma da la línea.
-_EMP = ["GASTOS POR BENEFICIOS A LOS EMPLEADOS DIRECTOS", "GASTOS POR BENEFICIOS A LOS EMPLEADOS INDIRECTOS"]
+_EMP_DIR = ["GASTOS POR BENEFICIOS A LOS EMPLEADOS DIRECTOS"]
+_EMP_IND = ["GASTOS POR BENEFICIOS A LOS EMPLEADOS INDIRECTOS"]
 _OGD = ["OTROS GASTOS POR NATURALEZA DIRECTOS"]
 _COMP_LINEAS = [
     ("Ingresos de actividades ordinarias", "ingresos_totales", ["INGRESOS DE ACTIVIDADES"]),
     ("Costo de ventas",                    "costo_ventas",     ["COSTO DE EXPLOTACION"]),
     ("MARGEN DEL PRODUCTO",                "margen_mm",        ["MARGEN DEL PRODUCTO"]),
-    ("Gastos por beneficios a los empleados", "gastos_empleados", _EMP),
+    ("Gastos por beneficios a los empleados Directos", "gastos_empleados_dir", _EMP_DIR),
     ("Otros gastos por naturaleza Directos",  "otros_gastos",     _OGD),
-    ("EBITDA Directo",                     "ebitda_directo",   ["MARGEN DEL PRODUCTO"] + _EMP + _OGD),
+    ("EBITDA Directo",                     "ebitda_directo",   ["MARGEN DEL PRODUCTO"] + _EMP_DIR + _OGD),
+    ("Gastos por beneficios a los empleados Indirectos", "gastos_empleados_ind", _EMP_IND),
     ("GAV Indirecto",                      "gav_indirecto",    ["OTROS GASTOS POR NATURALEZA INDIRECTOS"]),
     ("EBITDA Indirecto",                   "ebitda_indirecto", ["EBITDA"]),
     ("Finiquitos",                         "finiquitos",       ["FINIQUITOS"]),
@@ -5176,7 +5220,8 @@ _COMP_LINEAS = [
 
 
 def comparativo_eerr(ppto, ppto26, real_ss):
-    """PPTO 2026, Real 2026 y PPTO 2027 por línea del EERR, mes a mes.
+    """PPTO 2026 («PPTO TS Consolidado»), Real 2026 («EERR Directorio») y
+    PPTO 2027 («PPTO 2027 TS.xlsx») por línea del EERR, mes a mes.
 
     Los meses sin cierre del Real se completan con el presupuesto 2026 sólo
     aquí, para mostrar el año; el Excel no se toca."""
@@ -6958,7 +7003,7 @@ def main():
     region_clientes = read_region_clientes(wb2)
     citas_costeo    = read_citas_costeo(wb2)
     ppto26          = read_ppto_ts_2026(wb2)
-    real_ss         = read_real_ss(wb2)
+    real_ss         = read_real_dir(wb2)
     propietarios    = read_propietarios(wb2, contratos)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})

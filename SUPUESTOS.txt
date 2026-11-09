@@ -309,12 +309,21 @@ PRESUPUESTO 2027, EERR DIRECTORIO Y TERRENO (2026-11-06)
   Contrato 2». Lo demás, incluidos los contratos nuevos, va a ADVANCED (el
   programa intermedio, pedido así) y queda marcado como asignado.
 - Margen por programa: % de la hoja «Resumen Tipos Programas».
-- Comparativo: PPTO 2026 sale de «PPTO TS Consolidado», único lugar con los 12
-  meses. Real sale de «EERR S&S» (pedido así el 06-11-2026): se toman sus líneas
-  base y los subtotales se recalculan, porque varios subtotales mensuales de
-  esa hoja no suman sus líneas; el resultado se controla contra su columna
-  Periodo Actual. Los meses sin cierre se completan con el PPTO 2026 sólo en el
-  panel. Esa hoja abre costos distinto al presupuesto y casi no trae indirectos.
+- Comparativo (corregido el 08-11-2026): PPTO 2027 sale de la hoja «P&L
+  TECSERVICE» de «PPTO 2027 TS.xlsx»; PPTO 2026, de «PPTO TS Consolidado»; Real
+  2026, de las columnas Real de «EERR Directorio», cada línea tal como está en
+  la hoja (subtotales incluidos). Antes el Real salía de «EERR S&S», que abre
+  los costos distinto. Los meses sin Real (hoy octubre a diciembre) se
+  completan con el PPTO 2026 sólo en el panel.
+- Comparativo, personal (08-11-2026, pedido así): beneficios a los empleados
+  va en dos líneas, Directos e Indirectos, en las tres columnas. En «EERR
+  Directorio» el Real de esa fila es sólo el directo, y el indirecto está
+  dentro de GAV Indirecto (% TS de la col. A × personal indirecto + otros
+  indirectos de «EERR GEMCO Consolidado» − arriendo). El panel lo separa: el
+  personal indirecto Real es % TS × la fila de personal indirecto de GEMCO, y
+  GAV Indirecto queda con el resto. EBITDA Directo = margen + personal
+  directo + otros gastos directos (en el PPTO ya no incluye el indirecto);
+  EBITDA Indirecto no cambia.
 - La columna «Periodo Actual 2026» de EERR Directorio no suma Otros gastos por
   naturaleza Directos; el panel la muestra tal cual.
 - Terreno: si el cliente no está en CONTRATOS TODOS, el coordinador es el dueño
