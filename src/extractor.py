@@ -19,91 +19,6 @@ from collections import defaultdict
 import openpyxl
 import pandas as pd
 
-# Hoja «EERR Directorio»: se toma tal como se ve en Excel (texto con su
-# formato, colores, negritas y bordes, sin filas ni columnas ocultas) y el
-# panel la pinta igual. Se lee por COM porque así sale el texto ya formateado
-# por Excel, incluido el formato condicional; openpyxl sólo da el valor.
-_EERR_DIR = {}
-
-def _bgr(c):
-    c = int(c); return "#%02X%02X%02X" % (c & 255, (c >> 8) & 255, (c >> 16) & 255)
-
-def snap_eerr_directorio(wb_com):
-    ws = next((w for w in wb_com.Worksheets if w.Name.strip().upper() == "EERR DIRECTORIO"), None)
-    if ws is None:
-        return {}
-    # Find recuerda las opciones de la última búsqueda hecha en Excel; sin
-    # fijarlas, el 08-11-2026 devolvió B2 y la hoja salió con una sola celda.
-    # -4123 = xlFormulas, 2 = xlPart, 2 = xlPrevious
-    last = lambda o: ws.Cells.Find(What="*", After=ws.Cells(1, 1), LookIn=-4123, LookAt=2,
-                                   SearchOrder=o, SearchDirection=2, MatchCase=False)
-    lr, lc = last(1), last(2)          # 1 = xlByRows, 2 = xlByColumns
-    if lr is None:
-        return {}
-    nr, nc = lr.Row, lc.Column
-    filas = [r for r in range(1, nr + 1) if not ws.Rows(r).Hidden]
-    cols  = [c for c in range(1, nc + 1) if not ws.Columns(c).Hidden]
-    estilos, idx, grid = [], {}, []
-    for r in filas:
-        fila = []
-        for c in cols:
-            cel = ws.Cells(r, c)
-            txt = cel.Text
-            if txt and set(txt.strip()) == {"#"}:
-                ws.Columns(c).AutoFit(); txt = cel.Text
-            d = cel.DisplayFormat
-            st = {}
-            if d.Interior.ColorIndex != -4142: st["bg"] = _bgr(d.Interior.Color)
-            if txt.strip():
-                f = d.Font
-                st["fg"] = _bgr(f.Color)
-                if f.Bold: st["b"] = 1
-                if f.Italic: st["i"] = 1
-                st["sz"] = f.Size
-                al = cel.HorizontalAlignment
-                st["al"] = {-4131: "l", -4108: "c", -4152: "r", 7: "c"}.get(al, "r" if isinstance(cel.Value, (int, float)) else "l")
-                if cel.IndentLevel: st["ind"] = cel.IndentLevel
-            for k, b in (("bt", 8), ("bb", 9)):
-                bo = d.Borders(b)
-                if bo.LineStyle not in (-4142, None):
-                    st[k] = [bo.Weight, _bgr(bo.Color)]
-            key = json.dumps(st, sort_keys=True)
-            if key not in idx:
-                idx[key] = len(estilos); estilos.append(st)
-            fila.append([txt.strip(), idx[key]])
-        grid.append(fila)
-    merges = []
-    vis_r = {r: i for i, r in enumerate(filas)}; vis_c = {c: i for i, c in enumerate(cols)}
-    vistos = set()
-    for r in filas:
-        for c in cols:
-            cel = ws.Cells(r, c)
-            if cel.MergeCells:
-                ma = cel.MergeArea
-                k = ma.Address
-                if k in vistos: continue
-                vistos.add(k)
-                rr = [x for x in range(ma.Row, ma.Row + ma.Rows.Count) if x in vis_r]
-                cc = [x for x in range(ma.Column, ma.Column + ma.Columns.Count) if x in vis_c]
-                if rr and cc:
-                    merges.append([vis_r[rr[0]], vis_c[cc[0]], len(rr), len(cc)])
-    # Bordes de la grilla vacía: se recortan filas/columnas de los extremos
-    # sin texto ni relleno, que en el Excel son sólo margen.
-    vacia = lambda cel: not cel[0] and "bg" not in estilos[cel[1]]
-    while grid and all(vacia(x) for x in grid[0]):
-        grid.pop(0); filas.pop(0); merges = [[a - 1, b, e, g] for a, b, e, g in merges]
-    while grid and all(vacia(x) for x in grid[-1]): grid.pop(); filas.pop()
-    while cols and all(vacia(f[0]) for f in grid):
-        for f in grid: f.pop(0)
-        cols.pop(0); merges = [[a, b - 1, e, g] for a, b, e, g in merges]
-    while cols and all(vacia(f[-1]) for f in grid):
-        for f in grid: f.pop()
-        cols.pop()
-    alto = [ws.Rows(r).RowHeight for r in filas]
-    ancho = [ws.Columns(c).ColumnWidth for c in cols]
-    return {"hoja": ws.Name, "filas": grid, "estilos": estilos, "merges": merges,
-            "alto": alto, "ancho": [round(a, 2) for a in ancho]}
-
 def _xlsb_to_xlsx(xlsb_path):
     """Convierte .xlsb a .xlsx temporal usando Excel COM. Retorna la ruta del xlsx generado."""
     import win32com.client, shutil, tempfile
@@ -154,16 +69,6 @@ def _xlsb_to_xlsx(xlsb_path):
             print(f"  HOY() fijado al {_c:%d-%m-%Y} en la copia temporal")
         wb_com.SaveAs(tmp_path, FileFormat=51)  # 51 = xlOpenXMLWorkbook
         print(f"  Conversion completada -> {tmp_path}")
-        # Después de guardar: si una columna sale con «###» se ensancha, y eso
-        # no debe quedar en el xlsx que leen los demás lectores.
-        try:
-            _EERR_DIR.update(snap_eerr_directorio(wb_com))
-            if _EERR_DIR:
-                print(f"  EERR Directorio: {len(_EERR_DIR['filas'])} filas x {len(_EERR_DIR['filas'][0])} columnas visibles")
-            else:
-                print("  EERR Directorio: no se encontró la hoja")
-        except Exception as _e:
-            print(f"  EERR Directorio: no se pudo leer ({_e})")
         return tmp_path
     finally:
         if wb_com:
@@ -5251,6 +5156,105 @@ def comparativo_eerr(ppto, ppto26, real_ss):
     return {"n_real": n, "filas": filas}
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# EERR DIRECTORIO — hoja «EERR Directorio» tal cual: mismas filas, mismos
+# números (Real / PTTO / Variación / Variación % por mes y el bloque «Periodo
+# Actual»). No se recalcula nada. Las filas y columnas ocultas en el Excel no
+# se muestran: openpyxl en modo lectura no las expone, así que se leen del XML.
+# ══════════════════════════════════════════════════════════════════════════════
+def _ocultas_hoja(xlsx_path, nombre):
+    import zipfile
+    try:
+        z = zipfile.ZipFile(xlsx_path)
+        wbx = z.read("xl/workbook.xml").decode("utf-8")
+        rels = z.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        m = re.search(r'<sheet [^>]*name="' + re.escape(nombre) + r'"[^>]*r:id="([^"]+)"', wbx)
+        rel = next(r for r in re.findall(r"<Relationship [^>]*>", rels) if 'Id="' + m.group(1) + '"' in r)
+        tgt = re.search(r'Target="([^"]+)"', rel).group(1).replace("/xl/", "").lstrip("/")
+        x = z.read("xl/" + tgt).decode("utf-8")
+    except Exception as e:
+        print(f"       EERR DIRECTORIO: no se pudieron leer filas ocultas ({e})")
+        return set(), set()
+    filas = {int(r) for r in re.findall(r'<row r="(\d+)"[^>]*\bhidden="1"', x)}
+    cols = set()
+    for c in re.findall(r"<col [^>]*>", x):
+        if 'hidden="1"' in c:
+            a = int(re.search(r'min="(\d+)"', c).group(1)); b = int(re.search(r'max="(\d+)"', c).group(1))
+            cols.update(range(a, min(b, 200) + 1))
+    return filas, cols
+
+
+def read_eerr_directorio(wb, xlsx_path):
+    nombre = next((n for n in wb.sheetnames if "DIRECTORIO" in n.upper() and "EERR" in n.upper()), None)
+    if not nombre:
+        return {}
+    rows = [list(r) for r in wb[nombre].iter_rows(max_col=80, values_only=True)]
+    filas_oc, cols_oc = _ocultas_hoja(xlsx_path, nombre)
+    vis = lambda ci: (ci + 1) not in cols_oc            # ci base 0, Excel base 1
+    # Encabezado: la fila que tiene «Real» y la siguiente con las fechas de cada mes
+    h = next((i for i, r in enumerate(rows) if any(_norm_cli(v) == "REAL" for v in r if isinstance(v, str))), None)
+    if h is None or h + 1 >= len(rows):
+        return {}
+    tipos, fechas = rows[h], rows[h + 1]
+    TIPOS = {"REAL": "r", "PTTO": "p", "VARIACION PTTO": "v", "VARIACION PTTO %": "vp"}
+    bloques, orden = {}, []        # clave → {r,p,v,vp: col}
+    for ci in range(2, max(len(tipos), len(fechas))):
+        if not vis(ci):
+            continue
+        t = TIPOS.get(_norm_cli(tipos[ci]) if ci < len(tipos) and tipos[ci] else "")
+        f = fechas[ci] if ci < len(fechas) else None
+        if t is None:
+            continue
+        if isinstance(f, (datetime, date)):
+            k = (f.year, f.month)
+        elif isinstance(f, str) and f.strip():
+            k = f.strip()                                # «Periodo Actual 2026»
+        else:
+            continue
+        if k not in bloques:
+            bloques[k] = {}; orden.append(k)
+        bloques[k].setdefault(t, ci)
+    MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto",
+             "Septiembre","Octubre","Noviembre","Diciembre"]
+    meses_k = sorted(k for k in orden if isinstance(k, tuple))
+    otros_k = [k for k in orden if not isinstance(k, tuple)]
+    num = lambda v: round(float(v), 6) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    filas, notas = [], []
+    for i, r in enumerate(rows):
+        if (i + 1) in filas_oc:
+            continue
+        lbl = safe_str(r[1] if len(r) > 1 else "").strip()
+        if i < h:                                         # notas sobre el encabezado
+            if lbl:
+                notas.append([lbl] + [safe_str(v) if not isinstance(v, (int, float)) else v
+                                      for v in r[2:6] if v is not None])
+            continue
+        if i <= h + 1 or not lbl:
+            continue
+        g = lambda k, t: num(r[bloques[k][t]]) if t in bloques[k] and bloques[k][t] < len(r) else None
+        filas.append({
+            "lbl": re.sub(r"\s+", " ", lbl),
+            "pct": lbl.startswith("%"),
+            "m": [[g(k, t) for t in ("r", "p", "v", "vp")] for k in meses_k],
+            "a": [[g(k, t) for t in ("r", "p", "v", "vp")] for k in otros_k],
+        })
+    # Meses cerrados: los que traen Real en alguna fila
+    cerrados = [j for j in range(len(meses_k)) if any(f["m"][j][0] not in (None, 0) for f in filas)]
+    out = {
+        "hoja": nombre,
+        "meses": [MESES[m - 1] for (_, m) in meses_k],
+        "n_cerrados": (max(cerrados) + 1) if cerrados else 0,
+        "acum": [str(k) for k in otros_k],
+        "filas": filas,
+        "notas": notas,
+        "ocultas": sorted(filas_oc),
+    }
+    print(f"       EERR DIRECTORIO: {len(filas)} filas | {len(meses_k)} meses ({out['n_cerrados']} con real) | "
+          f"bloques {out['acum']} | filas ocultas omitidas {out['ocultas']}")
+    return out
+
+
 def read_region_clientes(wb):
     """Región de cada cliente, para el costo de viajes del "Margen Neto" de
     Panel Fact Cliente.
@@ -7004,6 +7008,7 @@ def main():
     citas_costeo    = read_citas_costeo(wb2)
     ppto26          = read_ppto_ts_2026(wb2)
     real_ss         = read_real_dir(wb2)
+    eerr_dir        = read_eerr_directorio(wb2, xlsx_to_use)
     propietarios    = read_propietarios(wb2, contratos)
     wb2.close()
     eg = visitas["resumen"].get("Eglys Ramirez", {})
@@ -7043,7 +7048,7 @@ def main():
     if app_data["ppto2027"]:
         app_data["ppto2027"]["comp"] = comparativo_eerr(app_data["ppto2027"], ppto26, real_ss)
     citas_con_coordinador(citas, contratos, propietarios)
-    app_data["eerr_dir"] = _EERR_DIR
+    app_data["eerr_dir"] = eerr_dir
     # Un lector que no encuentra su hoja, o la encuentra rota, devuelve un dict
     # vacío sin quejarse, y el tablero sale con esa sección en blanco sin que
     # nadie lo note hasta que alguien la abre. Paso el 11-09-2026 con
