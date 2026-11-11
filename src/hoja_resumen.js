@@ -224,7 +224,34 @@ new Chart(document.getElementById('cPpto').getContext('2d'),{
   function _col(v){return v>0?'color:var(--gn)':v<0?'color:var(--rd)':'';}
   function _isTotal(r){return r.linea&&r.linea.toLowerCase().includes('total');}
 
-  // Tabla 1 mensual
+  // Tabla 0: Análisis Facturación — sólo lo facturado, sin provisión. Las
+  // diferencias se recalculan contra la facturación (no contra Total YTD).
+  set('rs-fac-mes', af.mes_nombre || MES_CORTE_NOMBRE);
+  set('rs-fac-ano', ANO_ACTUAL);
+  const tb0 = document.getElementById('rs-fac-tbody');
+  if(tb0 && af.tabla_mensual){
+    tb0.innerHTML = af.tabla_mensual.map(r=>{
+      const bold = _isTotal(r) ? 'font-weight:900;background:var(--gy)' : '';
+      const ing = r.ingresos || 0;
+      const dP  = ing - (r.ppto_acum || 0);
+      const dPp = r.ppto_acum ? dP / r.ppto_acum : 0;
+      const dA  = ing - (r.ingresos_aa || 0);
+      const dAp = r.ingresos_aa ? dA / r.ingresos_aa : 0;
+      return `<tr style="${bold}">
+        <td style="font-size:.67rem">${r.linea}</td>
+        <td class="num" style="font-weight:700;color:var(--txt)">${_mm(ing)}</td>
+        <td class="num">${_mm(r.ppto_acum)}</td>
+        <td class="num" style="${_col(dP)}">${_mm(dP)}</td>
+        <td class="num" style="${_col(dPp)}">${r.ppto_acum ? _pct(dPp*100) : '—'}</td>
+        <td class="num">${_mm(r.ingresos_aa)}</td>
+        <td class="num" style="${_col(dA)}">${_mm(dA)}</td>
+        <td class="num" style="${_col(dAp)}">${r.ingresos_aa ? _pct(dAp*100) : '—'}</td>
+        <td class="num">${_mm(r.ppto_anual)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // Tabla 1 mensual (Análisis Resultado: facturación + provisión)
   const tb1 = document.getElementById('rs-anal-tbody');
   if(tb1 && af.tabla_mensual){
     tb1.innerHTML = af.tabla_mensual.map(r=>{

@@ -1104,6 +1104,7 @@ function vxRender(recentrar) {
 
 function vxInit() {
   vsRender();        // seguimiento semanal: realizadas y programadas
+  try { vhRender(); } catch(e) { console.error('Hallazgos visitas:', e); }   // principales hallazgos de los comentarios
   vpProgramadas();   // la tarjeta de arriba no depende de los filtros ni del plan
   if (!((APP_DATA.visitas || {}).det || {}).filas) return;
   vxRender(true);
@@ -2474,3 +2475,216 @@ window.vsExcel = function (tipo) {
   XLSX.utils.book_append_sheet(wb, ws2, 'Alertas');
   XLSX.writeFile(wb, (tipo === 'real' ? 'Visitas_realizadas_' : 'Visitas_programadas_') + w.d0 + '.xlsx');
 };
+
+// ═══════════════════════════════════════════════════════════════
+// PRINCIPALES HALLAZGOS — se arman solos con los comentarios que Eglys y
+// Cristián dejan en cada visita (APP_DATA.visitas.realizadas, campo «m»).
+//   · Las «fichas de visita» (1. Base instalada … 11. Próximo paso) se
+//     separan por campo y se descarta el texto de la plantilla que quedó sin
+//     completar, para que sus palabras («licitación», «fallas», «repuestos»…)
+//     no cuenten como hallazgos.
+//   · Cada comentario se clasifica por temas con palabras clave. Un tema es
+//     un hallazgo cuando aparece en al menos una visita del período; se
+//     ordenan por cantidad de visitas.
+//   · De las fichas además se listan las oportunidades (campo 5, con su monto
+//     en UF si lo trae), los dolores del cliente (7) y la competencia (8).
+// Se recalcula con cada actualización del Excel: no hay textos escritos a mano.
+// ═══════════════════════════════════════════════════════════════
+const VH = { eje: 'todos', per: '90' };
+
+const VH_CAMPOS = ['Base instalada', 'Estado de equipos', 'Contrato vigente', 'Cobertura actual', 'Oportunidad',
+  'Presupuesto y modalidad de compra', 'Dolor principal', 'Competencia', 'Contactos clave', 'Hito próximo', 'Próximo paso'];
+// Texto de la plantilla de la ficha: si un campo trae esto, está sin completar.
+const VH_PLANTILLA = ['equipo / marca / modelo / cantidad', 'operativo / con fallas / fuera de servicio',
+  'si/no / proveedor / alcance / fecha de vencimiento', 'preventivo / correctivo / repuestos / sla',
+  'necesidad identificada / care de interes', 'si/no / monto estimado / licitacion', 'problema concreto que necesita resolver',
+  'proveedor actual y principal brecha', 'usuario tecnico / mantenimiento / compras', 'proximo mantenimiento, vencimiento contractual',
+  'accion concreta + responsable + fecha'];
+
+// Temas: título, descripción corta y palabras clave (sin tildes, en minúscula).
+const VH_TEMAS = [
+  { k: 'oport', t: 'Oportunidades de contrato o cotización', ico: '💼',
+    w: ['cotiz', 'propuesta', 'oferta', 'ofrecer', 'contrato de mantenc', 'plan de mantenc', 'programa de mantenc', 'care',
+        'interes en', 'interesad', 'cubrir preventivo', 'nuevo contrato', 'ampliar', 'ampliacion'] },
+  { k: 'licit', t: 'Licitaciones y compras públicas', ico: '📑',
+    w: ['licitac', 'convenio marco', 'compra agil', 'mercado public', 'trato directo', 'bases de licit', 'chilecompra'] },
+  { k: 'comp', t: 'Competencia y servicio de terceros', ico: '⚔️',
+    w: ['competencia', 'otro proveedor', 'proveedor externo', 'servicio externo', 'tecnico propio', 'ellos mismos',
+        'terceros', 'sin representacion', 'otra empresa', 'servicio tecnico anterior'] },
+  { k: 'falla', t: 'Equipos con fallas o detenidos', ico: '⚠️',
+    w: ['falla', 'detenid', 'fuera de servicio', 'no funciona', 'no opera', 'averi', 'equipo critico', 'inoperativ', 'en panne'] },
+  { k: 'recl', t: 'Reclamos e insatisfacción', ico: '😠',
+    w: ['molest', 'reclamo', 'insatisf', 'queja', 'malestar', 'demora', 'retraso', 'extravi', 'mala experiencia', 'disconform', 'subsanar'] },
+  { k: 'rep', t: 'Repuestos y stock', ico: '🔩',
+    w: ['repuesto', 'stock', 'pieza', 'insumo'] },
+  { k: 'renov', t: 'Renovaciones y vencimientos de contrato', ico: '🔁',
+    w: ['renov', 'vencim', 'vence', 'termino del contrato', 'termino de contrato', 'fin del contrato', 'fecha final del contrato'] },
+  { k: 'cert', t: 'Certificados, cobranza y facturación', ico: '🧾',
+    w: ['certificado', 'cobro', 'cobranza', 'pago', 'factura', 'orden de compra'] },
+  { k: 'equipo', t: 'Venta o recambio de equipos', ico: '🆕',
+    w: ['recambio', 'reposicion', 'compra de equipo', 'equipo nuevo', 'nuevos equipos', 'renovacion de equipo', 'adquisicion', 'adquirir'] },
+  { k: 'capa', t: 'Capacitación', ico: '🎓',
+    w: ['capacitac', 'induccion', 'entrenamiento', 'capacitar'] },
+];
+
+function _vhNorm(s){ return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+function _vhEsc(x){ return String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function _vhFecha(iso){ const p = String(iso || '').split('-'); return p.length === 3 ? p[2] + '-' + p[1] + '-' + p[0] : (iso || '—'); }
+function _vhEjeCorto(e){ return /^eglys/i.test(e || '') ? 'Eglys' : /^cristi/i.test(e || '') ? 'Cristián' : (e || ''); }
+
+// Separa una ficha en sus 11 campos. Devuelve null si el comentario no es ficha.
+// Las etiquetas se buscan sin importar tildes ni mayúsculas («Hito proximo» o «Hito próximo»).
+function _vhEtiqueta(c){
+  const V = { a: '[aá]', e: '[eé]', i: '[ií]', o: '[oó]', u: '[uú]' };
+  return _vhNorm(c).replace(/[aeiou]/g, x => V[x]).replace(/ /g, '\\s+');
+}
+function _vhFicha(m){
+  const t = String(m || '');
+  if(!/1\.\s*Base instalada\s*:/i.test(t)) return null;
+  const pos = [];
+  VH_CAMPOS.forEach(function(c, i){
+    const mm = new RegExp('(?:^|\\s)' + (i + 1) + '\\.\\s*' + _vhEtiqueta(c) + '\\s*:', 'i').exec(t);
+    if(mm) pos.push({ i: i, ini: mm.index, fin: mm.index + mm[0].length });
+  });
+  pos.sort((a, b) => a.ini - b.ini);
+  const f = {};
+  pos.forEach(function(p, j){
+    let v = t.slice(p.fin, j + 1 < pos.length ? pos[j + 1].ini : t.length).trim().replace(/^[\s\-–:]+|[\s\-–]+$/g, '');
+    const vn = _vhNorm(v);
+    if(!vn || VH_PLANTILLA.some(ph => vn.indexOf(ph) >= 0)) v = '';
+    f[VH_CAMPOS[p.i]] = v;
+  });
+  return f;
+}
+
+// Texto útil de un comentario: si es ficha, sólo los valores completados.
+function _vhTexto(r){
+  const f = _vhFicha(r.m);
+  if(!f) return { txt: String(r.m || '').replace(/^FICHA DE VISITA\s*/i, ''), ficha: null, vacia: !String(r.m || '').trim() };
+  const vals = VH_CAMPOS.filter(c => f[c]).map(c => c + ': ' + f[c]);
+  return { txt: vals.join('. '), ficha: f, vacia: !vals.length };
+}
+
+// Frase del comentario alrededor de la primera palabra clave encontrada.
+function _vhFrase(txt, palabras){
+  const n = _vhNorm(txt);
+  let p = -1;
+  palabras.forEach(w => { const i = n.indexOf(w); if(i >= 0 && (p < 0 || i < p)) p = i; });
+  if(p < 0) return txt.slice(0, 180);
+  let ini = Math.max(0, n.lastIndexOf('.', p - 1) + 1, p - 140);
+  let fin = n.indexOf('.', p); fin = fin < 0 ? Math.min(txt.length, p + 160) : Math.min(fin + 1, p + 200);
+  return (ini > 0 ? '…' : '') + txt.slice(ini, fin).trim() + (fin < txt.length ? '…' : '');
+}
+
+function _vhBase(){
+  const R = ((APP_DATA.visitas || {}).realizadas || []).filter(r => r.e && r.f);
+  const ult = R.reduce((m, r) => r.f > m ? r.f : m, '');
+  let desde = '';
+  if(VH.per !== 'ano' && ult){
+    const d = new Date(ult + 'T12:00:00'); d.setDate(d.getDate() - parseInt(VH.per, 10) + 1);
+    desde = d.toISOString().slice(0, 10);
+  }
+  const L = R.filter(r => (VH.eje === 'todos' || r.e === VH.eje) && (!desde || r.f >= desde));
+  return { L: L, ult: ult, desde: desde || (L.length ? L.reduce((m, r) => r.f < m ? r.f : m, L[0].f) : '') };
+}
+
+function _vhChips(id, opts, act, fn){
+  const box = document.getElementById(id);
+  if(!box) return;
+  box.innerHTML = opts.map(o => '<button class="btn' + (o[0] === act ? ' on' : '') + '" style="font-size:.57rem" onclick="' + fn + '(\'' + o[0] + '\')">' + o[1] + '</button>').join('');
+}
+function vhSetEje(v){ VH.eje = v; vhRender(); }
+function vhSetPer(v){ VH.per = v; vhRender(); }
+
+function vhRender(){
+  const box = document.getElementById('vh-box');
+  if(!box) return;
+  const ejes = Array.from(new Set(((APP_DATA.visitas || {}).realizadas || []).map(r => r.e).filter(Boolean))).sort();
+  _vhChips('vh-eje', [['todos', 'Todos']].concat(ejes.map(e => [e, _vhEjeCorto(e)])), VH.eje, 'vhSetEje');
+  _vhChips('vh-per', [['30', 'Últimos 30 días'], ['90', 'Últimos 90 días'], ['ano', 'Año ' + ANO_ACTUAL]], VH.per, 'vhSetPer');
+
+  const B = _vhBase();
+  if(!B.L.length){
+    box.innerHTML = '<p style="padding:1rem;color:var(--mut);font-style:italic;font-size:.65rem">Sin visitas en el período elegido.</p>';
+    return;
+  }
+  const V = B.L.map(r => Object.assign({ r: r }, _vhTexto(r)));
+  const conTxt = V.filter(v => !v.vacia);
+  const nf = x => Math.round(x || 0).toLocaleString('es-CL');
+  const pct = (a, b) => b ? (a / b * 100).toFixed(0) + '%' : '0%';
+
+  // ── Clasificación por tema ─────────────────────────────────
+  const temas = VH_TEMAS.map(function(T){
+    const hits = conTxt.filter(v => { const n = _vhNorm(v.txt); return T.w.some(w => n.indexOf(w) >= 0); });
+    const cli = new Set(hits.map(v => v.r.c));
+    const porEje = {};
+    hits.forEach(v => { const e = _vhEjeCorto(v.r.e); porEje[e] = (porEje[e] || 0) + 1; });
+    return Object.assign({}, T, { hits: hits.sort((a, b) => a.r.f < b.r.f ? 1 : -1), nCli: cli.size, porEje: porEje });
+  }).filter(T => T.hits.length).sort((a, b) => b.hits.length - a.hits.length);
+
+  // ── Fichas: oportunidades, dolores y competencia ───────────
+  const fichas = V.filter(v => v.ficha && !v.vacia);
+  const fichasVacias = V.filter(v => v.ficha && v.vacia);
+  const oport = fichas.filter(v => v.ficha['Oportunidad']).map(function(v){
+    const o = v.ficha['Oportunidad'];
+    const mUF = /([\d][\d\.\s]*(?:,\d+)?)\s*UF/i.exec(o) || /([\d][\d\.\s]*(?:,\d+)?)\s*UF/i.exec(v.ficha['Presupuesto y modalidad de compra'] || '');
+    const uf = mUF ? parseFloat(mUF[1].replace(/[\s\.]/g, '').replace(',', '.')) : 0;
+    return { v: v, o: o, uf: isFinite(uf) ? uf : 0 };
+  });
+  const totUF = oport.reduce((s, x) => s + x.uf, 0);
+
+  // ── Hallazgos en una línea cada uno ─────────────────────────
+  const per = B.desde ? 'del ' + _vhFecha(B.desde) + ' al ' + _vhFecha(B.ult) : '';
+  const bullets = temas.slice(0, 5).map(function(T){
+    const ej = Object.keys(T.porEje).map(e => e + ' ' + T.porEje[e]).join(' · ');
+    return '<li><strong>' + T.ico + ' ' + T.t + '</strong>: aparece en <strong>' + nf(T.hits.length) + '</strong> de ' + nf(conTxt.length) +
+      ' visitas con comentario (' + pct(T.hits.length, conTxt.length) + '), en ' + nf(T.nCli) + ' clientes <span style="color:var(--mut)">(' + ej + ')</span>.</li>';
+  });
+  if(oport.length) bullets.push('<li><strong>💰 Oportunidades registradas en fichas</strong>: ' + nf(oport.length) + ' oportunidades' +
+    (totUF ? ' por un total estimado de <strong>' + nf(totUF) + ' UF</strong>' : '') + ' (detalle abajo).</li>');
+  const sinCom = V.filter(v => v.vacia);
+  if(sinCom.length) bullets.push('<li style="color:var(--mut)"><strong>📝 Registro</strong>: ' + nf(sinCom.length) + ' de ' + nf(V.length) +
+    ' visitas no tienen comentario útil' + (fichasVacias.length ? ' (' + nf(fichasVacias.length) + ' son fichas con la plantilla sin completar)' : '') +
+    ' y no entran en los hallazgos.</li>');
+
+  // ── Tarjetas por tema (desplegables) ───────────────────────
+  const det = (titulo, filas, abierto) => '<details' + (abierto ? ' open' : '') + ' style="border:1px solid var(--brd);border-radius:6px;margin-bottom:.4rem;background:var(--bg2)">' +
+    '<summary style="cursor:pointer;padding:.45rem .7rem;font-size:.66rem;font-weight:700;color:var(--az1)">' + titulo + '</summary>' +
+    '<div style="padding:0 .7rem .55rem;max-height:340px;overflow:auto">' + filas + '</div></details>';
+  const filaVis = (v, frase) => '<div style="padding:.32rem 0;border-bottom:1px solid var(--gy2);font-size:.62rem;line-height:1.45">' +
+    '<span style="font-family:\'Roboto Mono\',monospace;font-size:.56rem;color:var(--mut)">' + _vhFecha(v.r.f) + '</span> · ' +
+    '<strong>' + _vhEsc(v.r.c) + '</strong> <span style="color:var(--mut)">· ' + _vhEjeCorto(v.r.e) + '</span><br>' +
+    '<span style="color:var(--txt)">' + _vhEsc(frase) + '</span></div>';
+
+  const temasHtml = temas.map(T => det(T.ico + ' ' + T.t + ' <span style="font-weight:400;color:var(--mut)">· ' + nf(T.hits.length) + ' visitas · ' + nf(T.nCli) + ' clientes</span>',
+    T.hits.map(v => filaVis(v, _vhFrase(v.txt, T.w))).join(''))).join('');
+
+  const oportHtml = oport.length ? det('💰 Oportunidades registradas en fichas <span style="font-weight:400;color:var(--mut)">· ' + nf(oport.length) +
+      (totUF ? ' · ' + nf(totUF) + ' UF estimadas' : '') + '</span>',
+    '<table class="tbl" style="font-size:.6rem"><thead><tr><th>Fecha</th><th>Cliente</th><th>Ejecutivo</th><th>Oportunidad</th><th class="num">UF</th>' +
+    '<th>Modalidad</th><th>Hito próximo</th><th>Próximo paso</th></tr></thead><tbody>' +
+    oport.sort((a, b) => b.uf - a.uf || (a.v.r.f < b.v.r.f ? 1 : -1)).map(x => '<tr><td style="white-space:nowrap">' + _vhFecha(x.v.r.f) + '</td><td>' + _vhEsc(x.v.r.c) +
+      '</td><td>' + _vhEjeCorto(x.v.r.e) + '</td><td>' + _vhEsc(x.o) + '</td><td class="num">' + (x.uf ? nf(x.uf) : '—') + '</td><td>' +
+      _vhEsc(x.v.ficha['Presupuesto y modalidad de compra'] || '—') + '</td><td>' + _vhEsc(x.v.ficha['Hito próximo'] || '—') + '</td><td>' +
+      _vhEsc(x.v.ficha['Próximo paso'] || '—') + '</td></tr>').join('') + '</tbody></table>') : '';
+  const listaCampo = (campo, ico, tit) => {
+    const L = fichas.filter(v => v.ficha[campo]);
+    return L.length ? det(ico + ' ' + tit + ' <span style="font-weight:400;color:var(--mut)">· ' + nf(L.length) + ' fichas</span>',
+      L.map(v => filaVis(v, v.ficha[campo])).join('')) : '';
+  };
+
+  box.innerHTML =
+    '<div style="font-size:.6rem;color:var(--mut);margin-bottom:.45rem">' + nf(V.length) + ' visitas ' + per + ' · ' + nf(conTxt.length) +
+      ' con comentario · ' + nf(fichas.length) + ' fichas completadas</div>' +
+    (bullets.length ? '<ul style="margin:0 0 .7rem;padding-left:1.1rem;font-size:.68rem;line-height:1.7">' + bullets.join('') + '</ul>'
+                    : '<p style="font-size:.66rem;color:var(--mut)">No se encontraron hallazgos en los comentarios del período.</p>') +
+    '<div style="font-size:.58rem;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:.2rem 0 .35rem">Detalle por tema · clic para desplegar</div>' +
+    temasHtml + oportHtml +
+    listaCampo('Dolor principal', '🩹', 'Dolores principales del cliente') +
+    listaCampo('Competencia', '⚔️', 'Competencia registrada en fichas') +
+    '<p style="font-size:.56rem;color:var(--mut);margin:.55rem 0 0;line-height:1.5">Los hallazgos se arman solos con los comentarios de ' +
+    'las visitas de Eglys y Cristián (hoja <strong>VISITAS</strong>): cada comentario se clasifica por temas según sus palabras clave y se ' +
+    'cuentan las visitas y clientes de cada tema. En las fichas de visita sólo se leen los campos completados; el texto de la plantilla ' +
+    'que quedó sin llenar no cuenta. Una visita puede caer en más de un tema. El monto en UF de las oportunidades se lee del campo ' +
+    '«Oportunidad» (o «Presupuesto») cuando trae un número seguido de «UF».</p>';
+}

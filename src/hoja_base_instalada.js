@@ -2600,6 +2600,18 @@ function initBaseInstalada(){
     <div class="kpi" style="--kc:var(--or)"><div class="kpi-lbl">Tipos de Equipo</div><div class="kpi-val">${porTipo.length}</div><div class="kpi-sub">tipos distintos</div></div>
   </div>
 
+  <!-- Seguimiento de la base instalada: cambios vs reporte anterior y vs mes anterior -->
+  <div class="card" style="margin-bottom:1rem" id="bi-seg-card">
+    <div class="ch" style="flex-wrap:wrap;gap:.5rem">
+      <span class="ct">Seguimiento de la Base Instalada · Potencial ST Sí → No</span>
+      <div id="bi-seg-refs" style="display:flex;gap:.25rem;flex-wrap:wrap"></div>
+      <button id="bi-seg-pdf" onclick="exportarPanel({ids:['bi-seg-card'],titulo:'Base Instalada · Potencial ST Sí a No',archivo:'BI_seguimiento',btn:'bi-seg-pdf'})"
+        style="margin-left:auto;font-size:.58rem;padding:.22rem .7rem;background:#002D73;color:#fff;border:none;
+               border-radius:4px;cursor:pointer;white-space:nowrap">Exportar</button>
+    </div>
+    <div class="cb"><div id="bi-seg-body"></div></div>
+  </div>
+
   <!-- Cards por línea de negocio (2×3) -->
   <div class="sh" style="margin-bottom:.6rem"><h2>Por Línea de Negocio</h2><div class="sh-line"></div><span class="sh-tag">Distribución de equipos · top tipos · clientes · % con contrato activo</span></div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1.1rem" id="bi-linea-cards"></div>
@@ -2809,6 +2821,7 @@ function initBaseInstalada(){
   // KPIs, cards por línea, gráficos y tabla se delegan a _biRefreshDynamic
   // para que reaccionen al filtro Potencial ST
   _biRefreshDynamic();
+  _biRenderSeguimiento();
 }
 
 // Helper: agrega región a cada cliente buscando en MAPA_DATA por nombre normalizado
@@ -2830,4 +2843,188 @@ function _biRegionFromClients(clients){
     regionMap[r].bi += c.total;
   });
   return Object.entries(regionMap).sort((a,b)=>b[1].bi-a[1].bi).slice(0,14);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SEGUIMIENTO DE LA BASE INSTALADA — equipos con Potencial ST Sí que pasan a No
+// Fuente: APP_DATA.bi_seguimiento, que arma el extractor comparando la foto
+// de la base instalada de este reporte (data/historial_bi/) contra la del
+// reporte anterior y contra la última del mes anterior. Sólo se sigue el paso
+// de Potencial ST Sí a No (marcas que se dejan de representar). Mientras no
+// haya una foto anterior, la comparación viene marcada como «base» (todo en
+// cero) y la tabla muestra la estructura con el aviso de que no hubo cambios.
+// ═══════════════════════════════════════════════════════════════
+let _biSegRef = 'vs_anterior';   // 'vs_anterior' | 'vs_mes'
+let _biSegTab = 'resumen';       // 'resumen' | 'linea' | 'estado' | 'region' | 'equipos' | 'clientes'
+const _biSegAbiertos = {};       // grupos desplegados en la vista Resumen
+
+function biSegRef(k){ _biSegRef = k; _biRenderSeguimiento(); }
+function biSegTab(k){ _biSegTab = k; _biRenderSeguimiento(); }
+function biSegGrupo(k){ _biSegAbiertos[k] = !_biSegAbiertos[k]; _biRenderSeguimiento(); }
+
+function _biSegFecha(iso){
+  if(!iso) return '—';
+  const p = String(iso).split('-');
+  return p.length === 3 ? p[2] + '-' + p[1] + '-' + p[0] : iso;
+}
+
+// Tarifa anual de mantención de una línea (misma _BI_TARIFA de la hoja); 0 si la línea no valoriza.
+function _biSegTarifa(linea){
+  const k = _biNorm(linea);
+  return k === 'ESTERILIZACION' ? _BI_TARIFA.esterilizacion : k === 'ENDOSCOPIA' ? _BI_TARIFA.endoscopia
+       : k === 'DENTAL' ? _BI_TARIFA.dental : 0;
+}
+function _biSegPot(porLinea){
+  return Object.keys(porLinea || {}).reduce((s, l) => s + (porLinea[l] || 0) * _biSegTarifa(l), 0);
+}
+
+function _biRenderSeguimiento(){
+  const box = document.getElementById('bi-seg-body');
+  if(!box) return;
+  const S = APP_DATA.bi_seguimiento || {};
+  const C = S[_biSegRef];
+  const fAct = _biSegFecha(S.fecha);
+  const refLbl = _biSegRef === 'vs_mes' ? 'mes anterior' : 'reporte anterior';
+
+  const refs = document.getElementById('bi-seg-refs');
+  if(refs){
+    refs.innerHTML = [['vs_anterior','Vs. reporte anterior'],['vs_mes','Vs. mes anterior']].map(function(o){
+      const c = S[o[0]] || {};
+      const f = c.base ? 'sin foto previa' : _biSegFecha(c.fecha_ref);
+      return '<button class="btn' + (_biSegRef === o[0] ? ' on' : '') + '" onclick="biSegRef(\'' + o[0] + '\')" style="font-size:.58rem">' +
+        o[1] + ' <span style="opacity:.75">(' + f + ')</span></button>';
+    }).join('');
+  }
+
+  if(!C || !C.antes){
+    box.innerHTML = '<p style="padding:1rem;color:var(--mut);font-style:italic;font-size:.65rem">' +
+      'Sin datos de seguimiento: vuelve a correr el extractor para guardar la primera foto de la base instalada.</p>';
+    return;
+  }
+
+  const A = C.antes || {}, N = C.ahora || {}, P = C.pasaron || {};
+  const fRef = _biSegFecha(C.fecha_ref);
+  const nf = v => Math.round(v || 0).toLocaleString('es-CL');
+  const pctF = v => v.toFixed(1).replace('.', ',') + '%';
+  const potPerdido = _biSegPot(P.por_linea);
+
+  // ── Aviso ────────────────────────────────────────────────────
+  let aviso;
+  if(C.base || !C.n_pasaron){
+    aviso = '<div style="display:flex;align-items:center;gap:.5rem;padding:.55rem .75rem;border-radius:6px;' +
+      'background:var(--gy);border-left:3px solid var(--gn);font-size:.66rem;margin-bottom:.6rem">' +
+      '<span style="color:var(--gn);font-weight:900">✓</span><span><strong>No han habido cambios respecto al ' + refLbl +
+      (C.base ? '' : ' (' + fRef + ')') + ':</strong> ningún equipo con Potencial ST Sí pasó a No. ' +
+      (C.base
+        ? 'Aún no hay una foto anterior guardada: la primera foto de la base instalada es la del <strong>' + fRef +
+          '</strong> y desde el próximo reporte la comparación se hace sola.'
+        : '') +
+      '</span></div>';
+  } else {
+    aviso = '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:.9rem;padding:.55rem .75rem;border-radius:6px;' +
+      'background:var(--gy);border-left:3px solid var(--rd);font-size:.66rem;margin-bottom:.6rem">' +
+      '<span>Del <strong>' + fRef + '</strong> al <strong>' + fAct + '</strong>:</span>' +
+      '<span style="color:var(--rd);font-weight:700">' + nf(C.n_pasaron) + ' equipos pasaron de Potencial ST Sí a No</span>' +
+      '<span>' + nf(P.clientes) + ' clientes</span>' +
+      '<span>' + pctF(A.equipos ? C.n_pasaron / A.equipos * 100 : 0) + ' del potencial Sí anterior</span>' +
+      (potPerdido ? '<span style="color:var(--rd);font-weight:700">Potencial ST anual perdido: ' + fmtMM(potPerdido) + '</span>' : '') +
+      '</div>';
+  }
+
+  // ── Tabla de métricas ────────────────────────────────────────
+  // Por fila: potencial Sí anterior, cuántos pasaron a No (y %), potencial ST
+  // anual que se pierde (sólo líneas con tarifa) y potencial Sí actual.
+  const fila = (lbl, a, p, n, opt) => {
+    opt = opt || {}; p = p || 0;
+    const pct = a ? p / a * 100 : 0;
+    const d = (n || 0) - (a || 0);
+    const colD = d < 0 ? 'var(--rd)' : d > 0 ? 'var(--gn)' : 'var(--mut)';
+    return '<tr' + (opt.sub ? '' : ' style="font-weight:700"') + '>' +
+      '<td style="' + (opt.sub ? 'padding-left:1.2rem;' : '') + 'font-size:.64rem">' + lbl + '</td>' +
+      '<td class="num">' + nf(a) + '</td>' +
+      '<td class="num" style="font-weight:700;color:' + (p ? 'var(--rd)' : 'var(--mut)') + '">' + (p ? nf(p) : '0') + '</td>' +
+      '<td class="num" style="color:' + (p ? 'var(--rd)' : 'var(--mut)') + '">' + (a ? pctF(pct) : '—') + '</td>' +
+      '<td class="num" style="color:' + (opt.pot ? 'var(--rd)' : 'var(--mut)') + '">' + (opt.pot === undefined ? '—' : (opt.pot ? fmtMM(opt.pot) : '$0')) + '</td>' +
+      '<td class="num">' + nf(n) + '</td>' +
+      '<td class="num" style="color:' + colD + '">' + (d > 0 ? '+' : '') + nf(d) + '</td></tr>';
+  };
+  // Encabezado de grupo desplegable: en Resumen se abre y cierra con un clic.
+  const grupo = (t, k, abierto, n) => '<tr onclick="biSegGrupo(\'' + k + '\')" style="cursor:pointer" title="Clic para ' + (abierto ? 'cerrar' : 'desplegar') + '">' +
+    '<td colspan="7" style="font-size:.6rem;font-weight:700;color:var(--az1);text-transform:uppercase;' +
+    'letter-spacing:.05em;padding:.4rem .6rem;background:var(--gy)">' + (abierto ? '▾ ' : '▸ ') + t +
+    ' <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mut)">· ' + n + (n === 1 ? ' fila' : ' filas') + '</span></td></tr>';
+  const claves = (o1, o2) => Array.from(new Set(Object.keys(o1 || {}).concat(Object.keys(o2 || {}))))
+    .sort((x, y) => ((o1 || {})[y] || 0) - ((o1 || {})[x] || 0));
+  const ESTADO_LBL = { 'Contrato': 'Contrato', 'Garantia': 'Garantía', 'Sin garantia': 'Sin garantía', 'Sin clasificar': 'Sin clasificar' };
+  const sec = (campo, lblFn, conPot) => claves(A[campo], N[campo]).map(k =>
+    fila(lblFn ? lblFn(k) : k, (A[campo] || {})[k], (P[campo] || {})[k], (N[campo] || {})[k],
+         { sub: true, pot: conPot ? (_biSegTarifa(k) ? ((P[campo] || {})[k] || 0) * _biSegTarifa(k) : undefined) : undefined })).join('');
+
+  const GRUPOS = [['linea', 'Por línea de negocio', 'por_linea', null, true],
+                  ['estado', 'Por estado', 'por_estado', k => ESTADO_LBL[k] || k, false],
+                  ['region', 'Por región', 'por_region', null, false]];
+  const vistaGrupo = GRUPOS.find(g => g[0] === _biSegTab);
+  const cuerpoGrupos = GRUPOS.filter(g => _biSegTab === 'resumen' || g === vistaGrupo).map(function(g){
+    const abierto = g === vistaGrupo || !!_biSegAbiertos[g[0]];
+    const n = claves(A[g[2]], N[g[2]]).length;
+    return (g === vistaGrupo ? '' : grupo(g[1], g[0], abierto, n)) + (abierto ? sec(g[2], g[3], g[4]) : '');
+  }).join('');
+
+  const tablaMet =
+    '<div style="overflow-x:auto"><table class="tbl" style="font-size:.66rem">' +
+    '<thead><tr><th style="min-width:180px">Equipos con Potencial ST Sí</th>' +
+    '<th class="num">' + (C.base ? 'Foto base' : 'Anterior') + ' (' + fRef + ')</th>' +
+    '<th class="num" style="color:#FF9B9B">Pasaron a No</th><th class="num">% que pasó a No</th>' +
+    '<th class="num">Potencial ST anual perdido</th>' +
+    '<th class="num">Actual (' + fAct + ')</th><th class="num">Δ Sí</th></tr></thead><tbody>' +
+    fila('Total equipos', A.equipos, C.n_pasaron, N.equipos, { pot: potPerdido }) +
+    fila('Clientes', A.clientes, P.clientes, N.clientes) +
+    cuerpoGrupos +
+    '</tbody></table></div>';
+
+  // ── Detalle ──────────────────────────────────────────────────
+  // Selector de vista de la tabla: se ve una cosa a la vez.
+  const tabs = [['resumen', 'Resumen'], ['linea', 'Por línea'], ['estado', 'Por estado'], ['region', 'Por región'],
+                ['equipos', 'Equipos que pasaron a No', C.n_pasaron], ['clientes', 'Por cliente', (C.por_cliente || []).length]];
+  const tabBtns = '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:.25rem;margin:0 0 .5rem">' +
+    '<span style="font-size:.57rem;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-right:.2rem">Ver</span>' +
+    tabs.map(function(t){
+      return '<button class="btn' + (_biSegTab === t[0] ? ' on' : '') + '" onclick="biSegTab(\'' + t[0] + '\')" style="font-size:.58rem">' +
+        t[1] + (t.length > 2 ? ' <strong>(' + nf(t[2]) + ')</strong>' : '') + '</button>';
+    }).join('') + '</div>';
+  const vacio = n => '<tr><td colspan="' + n + '" style="text-align:center;padding:1rem;color:var(--mut);font-style:italic">' +
+    'No han habido equipos con Potencial ST Sí que pasaran a No respecto al ' + refLbl + (C.base ? '' : ' (' + fRef + ')') + '.</td></tr>';
+
+  let det = '';
+  if(_biSegTab === 'equipos'){
+    const L = C.lista || [];
+    det = '<table class="tbl" style="font-size:.63rem"><thead><tr><th>#</th><th>Cliente</th><th>Línea</th><th>Tipo</th><th>Modelo</th>' +
+      '<th>N° serie</th><th>Estado</th><th>Región</th><th class="num">Potencial ST anual</th><th class="num">Valorización</th></tr></thead><tbody>' +
+      (L.length ? L.map((e, i) => '<tr><td style="color:var(--mut)">' + (i + 1) + '</td><td>' + _biEsc(e.cliente) + '</td><td>' + _biEsc(e.linea) +
+        '</td><td>' + _biEsc(e.tipo) + '</td><td>' + _biEsc(e.modelo) + '</td><td style="font-family:\'Roboto Mono\',monospace;font-size:.58rem">' +
+        _biEsc(e.serie) + '</td><td>' + _biEsc(ESTADO_LBL[e.estado] || e.estado) + '</td><td>' + _biEsc(e.region) +
+        '</td><td class="num" style="color:var(--rd)">' + (_biSegTarifa(e.linea) ? fmtMM(_biSegTarifa(e.linea)) : '—') +
+        '</td><td class="num">' + (e.valor ? fmtMM(e.valor) : '—') + '</td></tr>').join('') : vacio(10)) +
+      '</tbody></table>' +
+      (C.n_pasaron > L.length ? '<p style="font-size:.56rem;color:var(--mut);margin:.3rem 0 0">Se muestran ' + nf(L.length) + ' de ' + nf(C.n_pasaron) + '.</p>' : '');
+  } else {
+    const L = C.por_cliente || [];
+    det = '<table class="tbl" style="font-size:.63rem"><thead><tr><th>#</th><th>Cliente</th><th class="num">Potencial Sí anterior</th>' +
+      '<th class="num">Pasaron a No</th><th class="num">% que pasó a No</th><th class="num">Potencial Sí actual</th></tr></thead><tbody>' +
+      (L.length ? L.map((c, i) => '<tr><td style="color:var(--mut)">' + (i + 1) + '</td><td>' + _biEsc(c.cliente) + '</td><td class="num">' + nf(c.si_antes) +
+        '</td><td class="num" style="font-weight:700;color:var(--rd)">' + nf(c.pasaron) + '</td><td class="num" style="color:var(--rd)">' +
+        (c.si_antes ? pctF(c.pasaron / c.si_antes * 100) : '—') + '</td><td class="num">' + nf(c.si_ahora) + '</td></tr>').join('') : vacio(6)) +
+      '</tbody></table>';
+  }
+
+  const esDet = _biSegTab === 'equipos' || _biSegTab === 'clientes';
+  box.innerHTML = aviso + tabBtns + (esDet ? '<div style="overflow:auto;max-height:420px">' + det + '</div>' : tablaMet) +
+    '<p style="font-size:.56rem;color:var(--mut);margin:.55rem 0 0;line-height:1.5">' +
+    'En cada actualización se guarda una foto de la base instalada equipo por equipo (hoja <strong>BASE INSTALADA</strong>, mismos ' +
+    'filtros de esta hoja: habilitados, no fuera de servicio y sin GEMCO). Cada equipo se reconoce por su id de Fracttal y se cuenta como ' +
+    '<strong>pasado a No</strong> cuando en la foto anterior tenía <strong>Potencial ST = Sí</strong> y en la actual tiene <strong>No</strong> ' +
+    '(marca que se dejó de representar). Los equipos que entran o salen de la base no se cuentan acá. <strong>Vs. reporte anterior</strong> ' +
+    'compara con la última foto guardada antes de este reporte y <strong>Vs. mes anterior</strong>, con la última foto del mes pasado. El ' +
+    '<strong>potencial ST anual perdido</strong> usa las mismas tarifas de la hoja (Esterilización 50 UF, Endoscopía 22 UF, Dental 15 UF; ' +
+    'las demás líneas no valorizan). <strong>Δ Sí</strong> es la variación total de equipos con potencial Sí entre ambas fotos.</p>';
 }

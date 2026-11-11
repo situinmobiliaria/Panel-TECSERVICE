@@ -1775,6 +1775,195 @@ def read_base_instalada(wb, contratos=None):
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SEGUIMIENTO DE LA BASE INSTALADA (equipos con potencial ST Sí que pasan a No)
+#
+# En cada corrida se guarda una «foto» de la base instalada equipo por equipo
+# en data/historial_bi/BI_AAAA-MM-DD.json.gz (fecha del reporte = TODAY, o
+# PANEL_HOY si se reprocesa). La foto del día se sobrescribe si se vuelve a
+# correr el mismo día. Luego se compara la foto actual contra:
+#   · el reporte anterior: la última foto con fecha anterior a la del reporte;
+#   · el mes anterior: la última foto de un mes anterior al del reporte.
+# Si todavía no hay foto anterior, la comparación se hace contra la misma
+# foto actual (todo queda en cero) y se marca como «base», para que la hoja
+# muestre la estructura completa con el aviso de que no hubo cambios.
+# ══════════════════════════════════════════════════════════════════════════════
+BI_HIST_DIR = os.path.join(ROOT, "data", "historial_bi")
+_BI_SEG_COLS = ["id", "cliente", "linea", "tipo", "estado", "pot", "region", "modelo", "serie", "valor"]
+_BI_SEG_ESTADOS = {
+    "CONTRATO": "Contrato", "CONTRATO 24/7": "Contrato",
+    "GARANTÍA": "Garantia", "GARANTIA": "Garantia",
+    "SIN GARANTIA": "Sin garantia",
+}
+_BI_SEG_MAX_LISTA = 1000   # tope de filas por lista que viajan al panel
+
+
+def _bi_seg_foto(wb):
+    """Equipos activos de BASE INSTALADA (mismo filtro que read_base_instalada:
+    Habilitado = Si, Fuera de servicio ≠ Si, sin GEMCO), uno por fila.
+    La llave del equipo es su id de Fracttal (col Y, «…/equipments/16174»);
+    si no viene, se arma con serie + tipo + cliente."""
+    ws = next((wb[n] for n in wb.sheetnames if "base instalada" in n.lower()), None)
+    if ws is None:
+        return []
+    equipos, vistos = [], {}
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or safe_str(row[0]).upper() != "SI" or safe_str(row[1]).upper() == "SI":
+            continue
+        cli = _bi_nombre_cliente(row)
+        if "GEMCO" in cli:
+            continue
+        url = safe_str(row[24]) if len(row) > 24 else ""
+        m = re.search(r"equipments/(\d+)", url)
+        serie = safe_str(row[7]).strip()
+        tipo = safe_str(row[12]).strip().upper() or "SIN TIPO"
+        eid = m.group(1) if m else f"{serie}|{tipo}|{cli}"
+        # Un id repetido (no debería pasar) se desambigua para no perder equipos.
+        if eid in vistos:
+            vistos[eid] += 1
+            eid = f"{eid}#{vistos[eid]}"
+        else:
+            vistos[eid] = 1
+        val = row[31] if len(row) > 31 else None
+        equipos.append([
+            eid, cli,
+            safe_str(row[25]).strip() or "Otra",
+            tipo,
+            _BI_SEG_ESTADOS.get(safe_str(row[14]).strip().upper(), "Sin clasificar"),
+            1 if safe_str(row[27] if len(row) > 27 else "").strip().upper() in ("SI", "SÍ", "S", "1", "TRUE", "VERDADERO") else 0,
+            _norm_region(row[29] if len(row) > 29 else None),
+            safe_str(row[6]).strip() or safe_str(row[4]).strip(),
+            serie,
+            round(float(val)) if isinstance(val, (int, float)) and not isinstance(val, bool) else 0,
+        ])
+    return equipos
+
+
+def _bi_seg_guardar(fecha, equipos):
+    import gzip
+    os.makedirs(BI_HIST_DIR, exist_ok=True)
+    ruta = os.path.join(BI_HIST_DIR, f"BI_{fecha.isoformat()}.json.gz")
+    with gzip.open(ruta, "wt", encoding="utf-8") as f:
+        json.dump({"fecha": fecha.isoformat(), "cols": _BI_SEG_COLS, "equipos": equipos},
+                  f, ensure_ascii=False, separators=(",", ":"))
+    return ruta
+
+
+def _bi_seg_fotos():
+    """Fechas de las fotos guardadas, ordenadas."""
+    if not os.path.isdir(BI_HIST_DIR):
+        return []
+    out = []
+    for n in os.listdir(BI_HIST_DIR):
+        m = re.fullmatch(r"BI_(\d{4}-\d{2}-\d{2})\.json\.gz", n)
+        if m:
+            out.append(date.fromisoformat(m.group(1)))
+    return sorted(out)
+
+
+def _bi_seg_leer(fecha):
+    import gzip
+    with gzip.open(os.path.join(BI_HIST_DIR, f"BI_{fecha.isoformat()}.json.gz"), "rt", encoding="utf-8") as f:
+        d = json.load(f)
+    cols = d.get("cols") or _BI_SEG_COLS
+    return [dict(zip(cols, e)) for e in d.get("equipos", [])]
+
+
+def _bi_seg_metricas(eqs):
+    lin, est, reg = defaultdict(int), defaultdict(int), defaultdict(int)
+    for e in eqs:
+        lin[e["linea"]] += 1
+        est[e["estado"]] += 1
+        reg[e["region"]] += 1
+    return {
+        "equipos":    len(eqs),
+        "clientes":   len({e["cliente"] for e in eqs}),
+        "pot_si":     sum(1 for e in eqs if e["pot"]),
+        "pot_no":     sum(1 for e in eqs if not e["pot"]),
+        "valor":      sum(e.get("valor") or 0 for e in eqs),
+        "por_linea":  dict(lin),
+        "por_estado": dict(est),
+        "por_region": dict(reg),
+    }
+
+
+def _bi_seg_comparar(ant, act):
+    """Equipos con Potencial ST = Sí en la foto anterior que en la actual
+    pasaron a Potencial ST = No (marcas que se dejan de representar).
+    Sólo mira ese paso: los equipos que entran o salen de la base, o que
+    cambian de estado o cliente, no cuentan acá."""
+    ic = {e["id"]: e for e in act}
+    si_ant = [e for e in ant if e["pot"]]
+    si_act = [e for e in act if e["pot"]]
+    pasaron = []
+    for a in si_ant:
+        c = ic.get(a["id"])
+        if c is not None and not c["pot"]:
+            pasaron.append(dict(c, cliente_antes=a["cliente"]))
+    # Por cliente: equipos con potencial Sí antes, cuántos pasaron a No y con
+    # cuántos quedó ahora.
+    pc = defaultdict(lambda: {"si_antes": 0, "pasaron": 0, "si_ahora": 0})
+    for e in si_ant:  pc[e["cliente"]]["si_antes"] += 1
+    for e in si_act:  pc[e["cliente"]]["si_ahora"] += 1
+    for e in pasaron: pc[e["cliente_antes"]]["pasaron"] += 1
+    por_cliente = sorted(({"cliente": n, **v} for n, v in pc.items() if v["pasaron"]),
+                         key=lambda x: (-x["pasaron"], x["cliente"]))
+    _eq = lambda e: {k: e[k] for k in ("id", "cliente", "linea", "tipo", "estado", "region", "modelo", "serie", "valor")}
+    return {
+        "antes":   _bi_seg_metricas(si_ant),     # potencial Sí en la foto anterior
+        "ahora":   _bi_seg_metricas(si_act),     # potencial Sí en la foto actual
+        "pasaron": _bi_seg_metricas(pasaron),    # de Sí a No
+        "n_pasaron": len(pasaron),
+        "lista": [_eq(e) for e in sorted(pasaron, key=lambda e: (e["cliente"], e["linea"], e["tipo"]))[:_BI_SEG_MAX_LISTA]],
+        "por_cliente": por_cliente[:_BI_SEG_MAX_LISTA],
+    }
+
+
+def build_bi_seguimiento(wb, base_instalada=None, fecha=None):
+    fecha = fecha or TODAY
+    act = _bi_seg_foto(wb)
+    # Mismo nombre de cliente que la hoja: las cuentas escritas de dos formas
+    # que read_base_instalada unifica (alias) se guardan con el nombre unificado.
+    canon = {a: c["nombre"] for c in (base_instalada or {}).get("clientes", []) for a in c.get("alias") or []}
+    for e in act:
+        e[1] = canon.get(e[1], e[1])
+    if not act:
+        print("  ADVERTENCIA: sin equipos para la foto de la base instalada; no se guarda.")
+        return {}
+    _bi_seg_guardar(fecha, act)
+    act_d = [dict(zip(_BI_SEG_COLS, e)) for e in act]
+    fotos = _bi_seg_fotos()
+    previas = [f for f in fotos if f < fecha]
+    f_ant = previas[-1] if previas else None
+    mes_ini = fecha.replace(day=1)
+    previas_mes = [f for f in fotos if f < mes_ini]
+    f_mes = previas_mes[-1] if previas_mes else None
+
+    def _comp(f_ref):
+        if f_ref is None:
+            # Sin foto anterior: se compara contra la propia foto (todo en cero)
+            # y se marca como base, para que la hoja muestre la estructura.
+            r = _bi_seg_comparar(act_d, act_d)
+            r.update({"fecha_ref": fotos[0].isoformat() if fotos else fecha.isoformat(), "base": True})
+            return r
+        r = _bi_seg_comparar(_bi_seg_leer(f_ref), act_d)
+        r.update({"fecha_ref": f_ref.isoformat(), "base": False})
+        return r
+
+    out = {
+        "fecha": fecha.isoformat(),
+        "fotos": [f.isoformat() for f in fotos],
+        "vs_anterior": _comp(f_ant),
+        "vs_mes": _comp(f_mes),
+    }
+    for k, lbl in (("vs_anterior", "reporte anterior"), ("vs_mes", "mes anterior")):
+        c = out[k]
+        print(f"       SEGUIMIENTO BI vs {lbl} ({c['fecha_ref']}{' · base' if c['base'] else ''}): "
+              f"{c['antes']['equipos']} con potencial Sí antes | {c['n_pasaron']} pasaron a No | "
+              f"{c['ahora']['equipos']} con potencial Sí ahora")
+    return out
+
+
 def _bi_region_desde_cartera(bi, cartera):
     """Completa la región de los clientes que BASE INSTALADA trae vacía con la que
     la Cartera ST dedujo (mapa de clientes, Direcciones, nombre, establecimiento del
@@ -5331,7 +5520,7 @@ def read_citas_costeo(wb):
     ya no la usa: basta cliente + fecha, sin importar cuántas citas o
     técnicos distintos hubo ese día), O/14=Duración Modificada (minutos),
     P/15=Fecha Modificada (fecha real del viaje, corregida a mano — mismo
-    criterio que read_citas_servicios()).
+    criterio que read_citas_servicios()), G/6=Tipo de trabajo (MC = otros, el resto = contratos).
     """
     ws = None
     for name in wb.sheetnames:
@@ -5363,17 +5552,24 @@ def read_citas_costeo(wb):
             continue
         at = safe_str(row[2]).strip() or "(sin número de cita)"
         dur = to_float(row[14]) if isinstance(row[14], (int, float)) else 0.0
+        # Col G/6 = Tipo de trabajo. Las mantenciones correctivas (prefijo
+        # «MC», p. ej. «MC_LAVADORA_0M_CR») son trabajo fuera de contrato: su
+        # costo horas hombre va a otros en el Margen Neto; todo el resto (MP,
+        # DX, INST, etc.) va a contratos.
+        tipo = safe_str(row[6]).strip().upper()
+        es_ctr = 0 if re.match(r"MC(?![A-Z0-9])", tipo) else 1
         filas_out.append([
             ref(clientes, i_cli, cli),
             f.year, f.month, f.day,
             ref(atenciones, i_at, at),
             round(dur),
+            es_ctr,
         ])
 
     return {
         "clientes":   clientes,
         "atenciones": atenciones,
-        # [cliente, año, mes, día, atención, minutos]
+        # [cliente, año, mes, día, atención, minutos, es_ctr (1 = contrato; 0 = MC, va a otros)]
         "filas":      filas_out,
         "n":          len(filas_out),
     }
@@ -6986,6 +7182,7 @@ def main():
     visitas = read_visitas(wb2, mes_corte)
     analisis_fac = read_analisis_fac(wb2)
     base_instalada = read_base_instalada(wb2, contratos)
+    bi_seguimiento = build_bi_seguimiento(wb2, base_instalada)
     mapa_data  = read_mapa(wb2)
     casos_data = read_casos(wb2)
     ratios2 = read_ratios2(wb2)
@@ -7034,6 +7231,7 @@ def main():
     app_data["eq_fallas"] = eq_fallas
     app_data["citas"] = citas
     app_data["region_clientes"] = region_clientes
+    app_data["bi_seguimiento"] = bi_seguimiento
     app_data["citas_costeo"] = citas_costeo
     app_data["vida_util"] = vida_util
     app_data["prosp_bi"] = prosp_bi
