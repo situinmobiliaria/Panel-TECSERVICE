@@ -665,6 +665,15 @@ def _fecha_visita(v):
         return v
     if isinstance(v, (int, float)) and v > 30000:
         return date(1899, 12, 30) + timedelta(days=int(v))
+    # Desde la base del 13-11-2026 la columna Fecha llega como texto «d/m/aaaa»
+    # («10/11/2025»): sin esto no quedaba ninguna visita programada ni realizada.
+    if isinstance(v, str):
+        m = re.match(r"\s*(\d{1,2})[/-](\d{1,2})[/-](\d{4})", v)
+        if m:
+            try:
+                return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+            except ValueError:
+                return None
     return None
 
 

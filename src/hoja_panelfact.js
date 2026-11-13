@@ -257,6 +257,63 @@ let _pfDetFilt = 'todos';
 let _pfDetSort = 'real', _pfDetAsc = false;
 
 function pfDetFiltro(k){ _pfDetFilt = k; _pfRenderDetalle(); }
+
+// ── Desglose por contrato y línea de negocio ─────────────────────
+// Clic en un cliente abre sus contratos (DATA, hoja CONTRATOS TODOS) con la
+// línea de negocio de cada uno. Si el cliente tiene contratos en más de una
+// línea, todos sus contratos se asignan a Esterilización; así cada cliente
+// queda en una sola línea y el resumen por línea suma la tabla completa.
+const _pfDetOpen = new Set();
+function pfDetTog(k){ _pfDetOpen.has(k) ? _pfDetOpen.delete(k) : _pfDetOpen.add(k); _pfRenderDetalle(); }
+const PF_LIN_ORD = ['Esterilización', 'Dental', 'Endoscopía'];
+const PF_LIN_COL = { 'Esterilización': '#002D73', 'Dental': '#9A7500', 'Endoscopía': '#0A8F84',
+                     'Sin línea': '#8A8A8A', 'Sin contrato': '#D46000' };
+let _pfCtrIdx = null;
+// Contratos por nombre de cliente, sumando los alias de panel_fact
+// (cliente / nombre_analisis), igual que el cruce de _pfFilasDesglose.
+function _pfContratosIdx(){
+  if(_pfCtrIdx) return _pfCtrIdx;
+  const porNom = {};
+  (typeof DATA !== 'undefined' ? DATA : []).forEach(c => {
+    const k = _mgNorm(c.cliente); (porNom[k] = porNom[k] || []).push(c);
+  });
+  const idx = {};
+  const add = (k, cs) => { if(!k) return; const l = idx[k] = idx[k] || []; cs.forEach(c => { if(!l.includes(c)) l.push(c); }); };
+  pfUniverso().forEach(p => {
+    const ks = [...new Set([_mgNorm(p.cliente), _mgNorm(p.nombre_analisis || '')].filter(Boolean))];
+    const cs = [].concat.apply([], ks.map(k => porNom[k] || []));
+    ks.forEach(k => add(k, cs));
+  });
+  Object.keys(porNom).forEach(k => add(k, porNom[k]));
+  return _pfCtrIdx = idx;
+}
+function _pfLineaCliente(x){
+  const cs = x.solo_costo ? [] : (_pfContratosIdx()[_mgNorm(x.cliente)] || []);
+  const ls = [...new Set(cs.map(c => c.linea_negocio).filter(Boolean))];
+  const orig = PF_LIN_ORD.filter(l => ls.includes(l)).concat(ls.filter(l => !PF_LIN_ORD.includes(l)));
+  // Factura contrato sin contratos cruzados en CONTRATOS TODOS (contrato ya
+  // terminado, p. ej. I. Municipalidad de Parral): va a Esterilización.
+  const lin = !cs.length ? ((x.f_ctr || 0) >= 1 ? 'Esterilización' : 'Sin contrato')
+            : orig.length > 1 ? 'Esterilización' : (orig[0] || 'Sin línea');
+  return { cs, orig, lin, multi: orig.length > 1 };
+}
+// Facturación de contratos a la fecha del cliente repartida entre sus
+// contratos según lo que cada uno devenga en el año hasta el mes de corte
+// (valor mensual × meses de vigencia Ene–corte). No hay facturación real por
+// contrato: es una prorrata para leer el peso de cada uno.
+function _pfRepartoContratos(cs, fctr, mesDesde){
+  const anio = window.ANO_ACTUAL || new Date().getFullYear();
+  const ini = new Date(anio, (mesDesde || 1) - 1, 1).getTime(), fin = new Date(anio, (MES_CORTE || 12), 0).getTime();
+  const w = cs.map(c => {
+    const a = Math.max(ini, new Date((c.inicio || '') + 'T00:00:00').getTime());
+    const b = Math.min(fin, new Date((c.fin || '') + 'T00:00:00').getTime());
+    return (b >= a) ? (c.val_mes || 0) * ((b - a) / 86400000 + 1) / 30.4375 : 0;
+  });
+  const W = w.reduce((s, v) => s + v, 0);
+  return cs.map((c, i) => W ? (fctr || 0) * w[i] / W : 0);
+}
+const _pfLinBadge = l => '<span style="font-size:.55rem;font-weight:700;color:' + (PF_LIN_COL[l] || 'var(--mut)') +
+  ';border:1px solid ' + (PF_LIN_COL[l] || 'var(--brd)') + ';border-radius:3px;padding:0 .3rem;white-space:nowrap">' + l + '</span>';
 function pfDetSort(f){ _pfDetAsc = (_pfDetSort === f) ? !_pfDetAsc : false; _pfDetSort = f; _pfRenderDetalle(); }
 
 // Facturación y costo de cada cliente abiertos en «contratos» y «otros».
@@ -333,6 +390,7 @@ function _pfRenderDetalle(){
   else if(_pfDetFilt !== 'todos') filas = filas.filter(x => x.tipo_cli === _pfDetFilt);
   const q = (pfSrch || '').trim().toLowerCase();
   if(q) filas = filas.filter(x => x.cliente.toLowerCase().includes(q));
+  filas.forEach(x => { x._lin = _pfLineaCliente(x); });
 
   // Con el toggle "Margen Neto" activado, la tabla original no se toca: se
   // corta acá y se dibuja la vista de margen ajustado en su lugar, sobre el
@@ -361,7 +419,7 @@ function _pfRenderDetalle(){
   const maxV = Math.max.apply(null, filas.map(x => x.real).concat([1]));
   const SEP  = 'border-right:1px solid var(--brd)';
   // Color de los números por grupo: totales (negro), contratos (verde azulado, como en Facturación), otros (naranja, como Otras Facturaciones)
-  const GC = { t: ['var(--txt)', '', '#fff'], c: ['var(--teal)', '', '#7FE8DF'], o: ['var(--or)', '', '#FFB570'] };
+  const GC = { t: ['var(--txt)', '', '#fff'], c: ['#00796B', '', '#7FE8DF'], o: ['var(--or)', '', '#FFB570'] };
   const th = (t, f, al, g) =>
     '<th onclick="pfDetSort(\'' + f + '\')" style="position:sticky;top:0;z-index:2;background:' + 'var(--az1)' + ';' +
     'color:#fff;padding:.35rem .6rem;font-size:.57rem;letter-spacing:.03em;text-align:' + al +
@@ -379,14 +437,17 @@ function _pfRenderDetalle(){
     const mg  = _mgPct(x);
     const tb2 = x.tipo_cli === 'Público' ? 'pb' : x.tipo_cli === 'Privado' ? 'por' : 'pgr';
     const tl  = x.tipo_cli === 'Público' ? 'PÚB' : x.tipo_cli === 'Privado' ? 'PRIV' : 'N/D';
-    return '<tr style="background:' + (i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)') + '">' +
+    const L = x._lin, kOpen = _mgNorm(x.cliente), abierto = L.cs.length && _pfDetOpen.has(kOpen);
+    const clic = L.cs.length ? ';cursor:pointer" onclick="pfDetTog(' + JSON.stringify(kOpen).replace(/"/g, '&quot;') + ')' : '';
+    return '<tr style="background:' + (i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)') + clic + '">' +
       '<td style="padding:.26rem .6rem;text-align:right;font-family:\'Roboto Mono\',monospace;font-size:.58rem;color:var(--mut);' + SEP + '">' + (i + 1) + '</td>' +
-      '<td style="padding:.26rem .6rem;font-size:.64rem;font-weight:600;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + SEP + '" title="' + _pfTip(x) + '">' + x.cliente +
+      '<td style="padding:.26rem .6rem;font-size:.64rem;font-weight:600;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + SEP + '" title="' + _pfTip(x) + (L.cs.length ? '&#10;Clic para ver sus contratos' : '') + '">' +
+        (L.cs.length ? '<span style="display:inline-block;width:.8rem;font-size:.55rem;color:var(--mut)">' + (abierto ? '▾' : '▸') + '</span>' : '') + x.cliente +
         (x.solo_costo ? '<span style="font-size:.52rem;background:var(--rd2);color:var(--rd);border-radius:3px;padding:.05rem .3rem;margin-left:.3rem;font-weight:700">' + (x.n_sc || 0) + ' CLIENTES</span>' : '') + '</td>' +
       '<td style="padding:.26rem .6rem;' + SEP + '"><span class="pill ' + tb2 + '">' + tl + '</span></td>' +
       '<td style="padding:.26rem .6rem;text-align:center;' + SEP + '"><span class="pill ' + (x.contrato ? 'pg' : 'pgr') + '" style="font-size:.55rem">' + (x.contrato ? 'CON' : 'SIN') + '</span></td>' +
       '<td style="padding:.26rem .6rem;text-align:right;font-size:.65rem;font-weight:700;font-variant-numeric:tabular-nums;color:' + GC.t[0] + ';' + SEP + '">' + fmtMM(x.real) + '</td>' +
-      _pfCel(x.f_ctr, 'var(--teal)', 'c') + _pfCel(x.k_ctr, 'var(--or)', 'c') +
+      _pfCel(x.f_ctr, '#00796B', 'c') + _pfCel(x.k_ctr, 'var(--or)', 'c') +
       _pfCel(x.f_otr, 'var(--az2)', 'o') + _pfCel(x.k_otr, 'var(--or)', 'o') +
       '<td style="padding:.26rem .6rem;text-align:right;font-size:.63rem;color:' + GC.t[0] + ';font-variant-numeric:tabular-nums;' + SEP + '">' + ((x.costo || 0) ? fmtMM(x.costo) : '<span style="color:var(--mut)">—</span>') + '</td>' +
       '<td style="padding:.26rem .6rem;text-align:right;font-size:.64rem;font-weight:700;font-variant-numeric:tabular-nums;color:' +
@@ -398,7 +459,7 @@ function _pfRenderDetalle(){
         '<div style="flex:1;height:5px;background:var(--gy);border-radius:3px;overflow:hidden;min-width:36px">' +
         '<div style="height:100%;width:' + (x.real / maxV * 100) + '%;background:var(--az2)"></div></div>' +
         '<span style="font-size:.55rem;color:var(--mut);min-width:32px;text-align:right">' + (x.real / tot * 100).toFixed(1) + '%</span>' +
-      '</div></td></tr>';
+      '</div></td></tr>' + (abierto ? _pfFilaContratos(x) : '');
   }).join('');
 
   box.innerHTML =
@@ -424,6 +485,7 @@ function _pfRenderDetalle(){
       '<td style="padding:.35rem .6rem;text-align:right;font-size:.62rem;color:' + GC.t[2] + ';' + SEP + '">' + (tot ? ((tot - totK) / tot * 100).toFixed(1).replace('.', ',') : '0') + '%</td>' +
       '<td style="padding:.35rem .6rem;text-align:right;font-size:.6rem">' + (tot / totGeneral * 100).toFixed(1) + '%</td>' +
     '</tr></tfoot></table></div>' +
+    _pfResumenLinea(filas, totGeneral) +
     '<p style="font-size:.55rem;color:var(--mut);margin:.5rem 0 0;line-height:1.45">' +
     'Facturación real Ene–' + MES_CORTE_NOMBRE + ' ' + ANO_ACTUAL + ' desde la hoja «Facturacion a Fecha», con los ' +
     'mismos filtros que usa «Ingresos Totales» de Analisis Facturación: empresa <strong>TS</strong>, tipo de ' +
@@ -450,6 +512,158 @@ function _pfRenderDetalle(){
   const kGeneral = todos.reduce((s, x) => s + (x.costo || 0), 0);
   if(lbl) lbl.textContent = todos.filter(x => !x.extra).length + ' clientes · ' + fmtMM(totGeneral) + ' facturado · ' +
     fmtMM(kGeneral) + ' costo · margen ' + (totGeneral ? ((totGeneral - kGeneral) / totGeneral * 100).toFixed(1).replace('.', ',') : '0') + '%';
+}
+
+// Fila desplegada bajo un cliente: sus contratos con la línea de negocio.
+// Con mg (vista Margen Neto) los montos son desde abril: la facturación de
+// contratos y el margen neto de la visión Contratos del cliente, repartidos
+// con la misma prorrata (lo devengado por cada contrato de abril al corte).
+function _pfFilaContratos(x, mg){
+  const L = x._lin;
+  const vc = mg ? mg.vistas.ctr : null;
+  const rep = _pfRepartoContratos(L.cs, mg ? vc.ing : x.f_ctr, mg ? MG_MES_DESDE : 1);
+  const repMn = mg ? _pfRepartoContratos(L.cs, vc.mn, MG_MES_DESDE) : [];
+  const cs = L.cs.map((c, i) => ({ c, f: rep[i], mn: repMn[i] })).sort((a, b) => (b.f - a.f) || ((b.c.val_mes || 0) - (a.c.val_mes || 0)));
+  const td = (v, st) => '<td style="padding:.16rem .5rem;font-size:.6rem;white-space:nowrap;' + (st || '') + '">' + v + '</td>';
+  const th = (t, al) => '<th style="padding:.18rem .5rem;font-size:.55rem;color:var(--az1);text-align:' + (al || 'left') + ';white-space:nowrap">' + t + '</th>';
+  const mm = v => Math.abs(v || 0) >= 1 ? fmtMM(v) : '<span style="color:var(--mut)">—</span>';
+  return '<tr><td colspan="13" style="padding:.3rem .6rem .55rem 2rem;background:var(--bg)">' +
+    '<div style="font-size:.6rem;margin-bottom:.25rem">Línea de negocio del cliente: ' + _pfLinBadge(L.lin) +
+      (L.multi ? ' <span style="color:#8A6D00">· tiene contratos en ' + L.orig.join(', ') + ': todos se asignan a Esterilización</span>' : '') + '</div>' +
+    '<table style="border-collapse:collapse;border:1px solid var(--brd)"><thead><tr>' +
+      th('N° CONTRATO') + th('TIPO') + th('PROGRAMA') + th('LÍNEA DE NEGOCIO') + th('VIGENCIA') +
+      th('VALOR MENSUAL', 'right') + th(mg ? 'FACT. CONTRATOS DESDE ABRIL (PRORRATA)' : 'FACT. CONTRATOS A LA FECHA (PRORRATA)', 'right') +
+      (mg ? th('MARGEN NETO CONTRATOS (PRORRATA)', 'right') + th('% MARGEN NETO', 'right') : '') + '</tr></thead><tbody>' +
+    cs.map((o, i) => { const c = o.c; return '<tr style="background:' + (i % 2 ? 'var(--bg)' : 'var(--bg2)') + '">' +
+      td('#' + c.n, 'font-weight:600') + td(c.tipo || '—') + td(c.programa || '—') +
+      td(_pfLinBadge(L.lin) + (c.linea_negocio && c.linea_negocio !== L.lin
+        ? ' <span style="font-size:.55rem;color:#8A6D00">(en contrato: ' + c.linea_negocio + ')</span>' : '')) +
+      td((c.inicio_fmt || '—') + ' – ' + (c.fin_fmt || '—')) +
+      td(mm(c.val_mes), 'text-align:right;font-variant-numeric:tabular-nums') +
+      td(mm(o.f), 'text-align:right;font-weight:700;color:#00796B;font-variant-numeric:tabular-nums') +
+      (mg ? td(mm(o.mn), 'text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:' + ((o.mn || 0) >= 0 ? 'var(--gn)' : 'var(--rd)')) +
+            td(Math.abs(o.f || 0) >= 1 ? (o.mn / o.f * 100).toFixed(1).replace('.', ',') + '%' : '<span style="color:var(--mut)">—</span>',
+               'text-align:right;font-variant-numeric:tabular-nums') : '') + '</tr>'; }).join('') +
+    '</tbody></table>' +
+    (mg ? '<div style="font-size:.55rem;color:var(--mut);margin-top:.2rem">Margen neto de la visión Contratos del cliente (' + fmtMM(vc.mn) +
+      ') repartido entre sus contratos con la misma prorrata que la facturación; el % es igual para todos sus contratos.</div>' : '') +
+    '</td></tr>';
+}
+
+// Resumen por línea de negocio de las filas visibles de la tabla (mismos
+// filtros y búsqueda). Cada cliente cae en una sola línea, así que los
+// totales cuadran con el pie de la tabla.
+function _pfResumenLinea(filas, totGeneral){
+  const G = {};
+  filas.forEach(x => {
+    const l = x._lin.lin;
+    const g = G[l] = G[l] || { lin: l, cli: 0, ctr: 0, multi: 0, real: 0, f_ctr: 0, k_ctr: 0, f_otr: 0, k_otr: 0, costo: 0 };
+    g.cli += 1;   // por fila, igual que el pie de la tabla
+    g.ctr += x._lin.cs.length;
+    if(x._lin.multi) g.multi++;
+    ['real', 'f_ctr', 'k_ctr', 'f_otr', 'k_otr', 'costo'].forEach(k => { g[k] += x[k] || 0; });
+  });
+  const ord = PF_LIN_ORD.concat(Object.keys(G).filter(l => !PF_LIN_ORD.includes(l) && l !== 'Sin línea' && l !== 'Sin contrato'), ['Sin línea', 'Sin contrato']);
+  const F = ord.filter(l => G[l]).map(l => G[l]);
+  const T = F.reduce((t, g) => { Object.keys(t).forEach(k => { t[k] += g[k]; }); return t; },
+    { cli: 0, ctr: 0, multi: 0, real: 0, f_ctr: 0, k_ctr: 0, f_otr: 0, k_otr: 0, costo: 0 });
+  const SEP = 'border-right:1px solid var(--brd)';
+  const th = (t, al) => '<th style="background:var(--az1);color:#fff;padding:.35rem .6rem;font-size:.57rem;letter-spacing:.03em;text-align:' + (al || 'right') +
+    ';white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)">' + t + '</th>';
+  const td = (v, st) => '<td style="padding:.28rem .6rem;text-align:right;font-size:.63rem;font-variant-numeric:tabular-nums;' + (st || '') + SEP + '">' + v + '</td>';
+  const mm = v => Math.abs(v || 0) >= 1 ? fmtMM(v) : '—';
+  const pct = (a, b) => b ? (a / b * 100).toFixed(1).replace('.', ',') + '%' : '—';
+  const celdas = (g, tot) => {
+    const mb = g.real - g.costo, mp = g.real ? mb / g.real * 100 : 0;
+    const cm = tot ? 'color:#fff;' : 'color:' + (mp >= 60 ? 'var(--gn)' : mp >= 35 ? 'var(--am)' : 'var(--rd)') + ';';
+    return td(g.cli) + td(g.ctr || '—') +
+      td(mm(g.real), 'font-weight:700;') +
+      td(mm(g.f_ctr), tot ? '' : 'color:#00796B;') + td(mm(g.k_ctr), tot ? '' : 'color:#00796B;') +
+      td(mm(g.f_otr), tot ? '' : 'color:var(--or);') + td(mm(g.k_otr), tot ? '' : 'color:var(--or);') +
+      td(mm(g.costo)) + td(mm(mb), 'font-weight:700;' + (tot ? '' : 'color:' + (mb >= 0 ? 'var(--gn)' : 'var(--rd)') + ';')) +
+      td(g.real ? pct(mb, g.real) : '—', 'font-weight:700;' + cm) + td(pct(g.real, T.real));
+  };
+  const nMulti = T.multi;
+  return '<div style="display:flex;align-items:center;gap:.5rem;margin:1rem 0 .4rem"><span style="font-size:.68rem;font-weight:700;color:var(--az1)">Resumen por Línea de Negocio</span>' +
+    '<button id="pf-lin-pdf-btn" onclick="exportarPanel({ids:[\'pf-lin-res\'],titulo:\'Resumen por Línea de Negocio\',archivo:\'Resumen_Linea_Negocio\',btn:\'pf-lin-pdf-btn\'})" ' +
+    'style="margin-left:auto;font-size:.57rem;padding:.2rem .6rem;background:#002D73;color:#fff;border:none;border-radius:4px;cursor:pointer">Exportar</button></div>' +
+    '<div id="pf-lin-res">' +
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:1000px"><thead><tr>' +
+      th('LÍNEA DE NEGOCIO', 'left') + th('CLIENTES') + th('CONTRATOS') + th('REAL FACTURADO A LA FECHA') +
+      th('FACT. CONTRATOS') + th('COSTO CONTRATOS') + th('FACT. OTROS') + th('COSTO OTROS') +
+      th('COSTO DE VENTA DIRECTO') + th('MARGEN BRUTO') + th('% MARGEN') + th('% DEL TOTAL') + '</tr></thead><tbody>' +
+    F.map((g, i) => '<tr style="background:' + (i % 2 ? 'var(--bg)' : 'var(--bg2)') + '">' +
+      '<td style="padding:.28rem .6rem;font-size:.65rem;font-weight:700;white-space:nowrap;border-left:3px solid ' + (PF_LIN_COL[g.lin] || 'var(--brd)') + ';' + SEP + '">' + g.lin +
+        '</td>' +
+      celdas(g) + '</tr>').join('') +
+    '<tr style="background:var(--az3);color:#fff;font-weight:700"><td style="padding:.35rem .6rem;font-size:.65rem;' + SEP + '">TOTAL</td>' + celdas(T, true) + '</tr>' +
+    '</tbody></table></div>' +
+    '<p style="font-size:.55rem;color:var(--mut);margin:.4rem 0 0;line-height:1.45">' +
+    'La línea de negocio de cada contrato es la de la hoja <strong>CONTRATOS TODOS</strong>. Cuando un cliente tiene contratos en más de una línea, ' +
+    'todos sus contratos —y toda su facturación— se asignan a <strong>Esterilización</strong>' + (nMulti ? ' (' + nMulti + ' cliente' + (nMulti > 1 ? 's' : '') + ' en esta vista)' : '') +
+    '; así cada cliente queda en una sola línea y el total cuadra con la tabla de arriba. <strong>Sin contrato</strong> agrupa a los clientes sin contratos ' +
+    '(incluida la fila Clientes sin Facturación). Los que facturan contrato sin tener contratos en esa hoja (contratos ya terminados) van a <strong>Esterilización</strong>. ' +
+    'En el desglose de cada cliente, la <strong>facturación de contratos a la fecha</strong> se reparte entre sus contratos en proporción a lo que cada uno ' +
+    'devenga en el año hasta el corte (valor mensual × meses de vigencia); no hay facturación real por contrato. Respeta los filtros y la búsqueda de la tabla.</p>' + '</div>';
+}
+
+// Resumen por línea en la vista Margen Neto: mismas filas y montos de esa
+// vista (desde abril, visión elegida), agrupados con la misma línea por cliente.
+function _pfResumenLineaMN(filas, VIS){
+  const K = ['ing', 'fCtr', 'fOtr', 'costoGd', 'mb', 'horas', 'viajes', 'mn'];
+  const nuevo = l => ({ lin: l, cli: 0, ctr: 0, multi: 0, ing: 0, fCtr: 0, fOtr: 0, costoGd: 0, mb: 0, horas: 0, viajes: 0, mn: 0 });
+  const G = {};
+  filas.forEach(x => {
+    const L = x._lin || { lin: 'Sin contrato', cs: [] };
+    const g = G[L.lin] = G[L.lin] || nuevo(L.lin);
+    // En la visión Otros no hay contratos asociados: la columna va en 0.
+    g.cli++; if(VIS !== 'otr') g.ctr += L.cs.length; if(L.multi) g.multi++;
+    const vs = (x._mg || {}).vistas || {};
+    const v = Object.assign({}, x._v, { fCtr: (vs.ctr || {}).ing || 0, fOtr: (vs.otr || {}).ing || 0 });
+    K.forEach(k => { g[k] += v[k] || 0; });
+  });
+  const ord = PF_LIN_ORD.concat(Object.keys(G).filter(l => !PF_LIN_ORD.includes(l) && l !== 'Sin contrato'), ['Sin contrato']);
+  const F = ord.filter(l => G[l]).map(l => G[l]);
+  const T = F.reduce((t, g) => { ['cli', 'ctr', 'multi'].concat(K).forEach(k => { t[k] += g[k]; }); return t; }, nuevo('TOTAL'));
+  const SEP = 'border-right:1px solid var(--brd)';
+  const th = (t, al) => '<th style="background:var(--az1);color:#fff;padding:.35rem .6rem;font-size:.57rem;letter-spacing:.03em;text-align:' + (al || 'right') +
+    ';white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)">' + t + '</th>';
+  const td = (v, st) => '<td style="padding:.28rem .6rem;text-align:right;font-size:.63rem;font-variant-numeric:tabular-nums;' + (st || '') + SEP + '">' + v + '</td>';
+  const mm = v => Math.abs(v || 0) >= 1 ? fmtMM(v) : '—';
+  const pct = (a, b) => b ? (a / b * 100).toFixed(1).replace('.', ',') + '%' : '—';
+  const semaf = p => 'color:' + (p >= 60 ? 'var(--gn)' : p >= 35 ? 'var(--am)' : 'var(--rd)') + ';';
+  const celdas = (g, tot) => {
+    const pb = g.ing ? g.mb / g.ing * 100 : 0, pn = g.ing ? g.mn / g.ing * 100 : 0;
+    return td(g.cli) + td(g.ctr || 0) + td(mm(g.ing), 'font-weight:700;') +
+      (VIS === 'total' ? td(mm(g.fCtr), tot ? '' : 'color:#00796B;') + td(mm(g.fOtr), tot ? '' : 'color:var(--or);') : '') +
+      td(mm(g.costoGd), tot ? '' : 'color:var(--or);') +
+      td(mm(g.mb), 'font-weight:700;' + (tot ? '' : 'color:' + (g.mb >= 0 ? 'var(--gn)' : 'var(--rd)') + ';')) +
+      td(pct(g.mb, g.ing), 'font-weight:700;' + (tot ? '' : semaf(pb))) +
+      td(mm(g.horas), tot ? '' : 'color:var(--or);') + td(mm(g.viajes), tot ? '' : 'color:var(--or);') +
+      td(mm(g.mn), 'font-weight:700;' + (tot ? '' : 'color:' + (g.mn >= 0 ? 'var(--gn)' : 'var(--rd)') + ';')) +
+      td(pct(g.mn, g.ing), 'font-weight:700;' + (tot ? '' : semaf(pn))) + td(pct(g.ing, T.ing));
+  };
+  const lblIng = VIS === 'ctr' ? 'FACT. CONTRATOS DESDE ABRIL' : VIS === 'otr' ? 'FACT. OTROS DESDE ABRIL' : 'REAL FACTURADO DESDE ABRIL';
+  return '<div style="display:flex;align-items:center;gap:.5rem;margin:1rem 0 .4rem"><span style="font-size:.68rem;font-weight:700;color:var(--az1)">Resumen por Línea de Negocio · Margen Neto</span>' +
+    '<button id="pf-lin-pdf-btn" onclick="exportarPanel({ids:[\'pf-lin-res\'],titulo:\'Resumen por Línea de Negocio · Margen Neto\',archivo:\'Resumen_Linea_Negocio_Margen_Neto\',btn:\'pf-lin-pdf-btn\'})" ' +
+    'style="margin-left:auto;font-size:.57rem;padding:.2rem .6rem;background:#002D73;color:#fff;border:none;border-radius:4px;cursor:pointer">Exportar</button></div>' +
+    '<div id="pf-lin-res">' +
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:1000px"><thead><tr>' +
+      th('LÍNEA DE NEGOCIO', 'left') + th('CLIENTES') + th('CONTRATOS') + th(lblIng) +
+      (VIS === 'total' ? th('FACT. CONTRATOS') + th('FACT. OTROS') : '') + th('COSTO DE VENTA DIRECTO') +
+      th('MARGEN BRUTO') + th('% MARGEN BRUTO') + th('COSTO HORAS HOMBRE') + th('COSTO VIAJES') +
+      th('MARGEN NETO') + th('% MARGEN NETO') + th('% DEL TOTAL') + '</tr></thead><tbody>' +
+    F.map((g, i) => '<tr style="background:' + (i % 2 ? 'var(--bg)' : 'var(--bg2)') + '">' +
+      '<td style="padding:.28rem .6rem;font-size:.65rem;font-weight:700;white-space:nowrap;border-left:3px solid ' + (PF_LIN_COL[g.lin] || 'var(--brd)') + ';' + SEP + '">' + g.lin +
+        '</td>' +
+      celdas(g) + '</tr>').join('') +
+    '<tr style="background:var(--az3);color:#fff;font-weight:700"><td style="padding:.35rem .6rem;font-size:.65rem;' + SEP + '">TOTAL</td>' + celdas(T, true) + '</tr>' +
+    '</tbody></table></div>' +
+    '<p style="font-size:.55rem;color:var(--mut);margin:.4rem 0 0;line-height:1.45">Mismos clientes, visión y montos desde abril de la tabla de arriba, ' +
+    'agrupados por línea de negocio con la misma regla: un cliente con contratos en más de una línea va completo a <strong>Esterilización</strong>, ' +
+    'igual que los que facturan contrato sin contratos vigentes. El total cuadra con el pie de la tabla.' +
+    (VIS === 'total' ? ' En la visión Total, lo facturado desde abril se abre en <strong>contratos</strong> y <strong>otros</strong>.' : '') +
+    (VIS === 'otr' ? ' En la visión Otros no hay contratos asociados, por eso la columna Contratos va en 0.' : '') + '</p>' + '</div>';
 }
 
 // Vista "Margen Neto" de la tabla "Facturación del Año por Cliente": mismo
@@ -527,9 +741,13 @@ function _pfRenderMargenNeto(filasFiltradas, todos, totGeneral){
       ? '<span title="Sin región asignada en la hoja Región Clientes: el costo de viaje no se puede calcular y no se asume $0." ' +
         'style="font-size:.52rem;background:var(--rd2);color:var(--rd);border-radius:3px;padding:.05rem .3rem;margin-left:.3rem;font-weight:700">⚠ SIN REGIÓN</span>'
       : '';
-    return '<tr style="background:' + (i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)') + '" title="' + _tip(x) + '">' +
+    const L0 = x._lin || { cs: [] }, L = VIS === 'otr' ? Object.assign({}, L0, { cs: [] }) : L0;
+    const kOpen = _mgNorm(x.cliente), abierto = L.cs.length && _pfDetOpen.has(kOpen);
+    const clic = L.cs.length ? ';cursor:pointer" onclick="pfDetTog(' + JSON.stringify(kOpen).replace(/"/g, '&quot;') + ')' : '';
+    return '<tr style="background:' + (i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)') + clic + '" title="' + _tip(x) + (L.cs.length ? '&#10;&#10;Clic para ver sus contratos' : '') + '">' +
       '<td style="padding:.26rem .6rem;text-align:right;font-family:\'Roboto Mono\',monospace;font-size:.58rem;color:var(--mut);' + SEP + '">' + (i + 1) + '</td>' +
-      '<td style="padding:.26rem .6rem;font-size:.64rem;font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + SEP + '">' + x.cliente + warn + '</td>' +
+      '<td style="padding:.26rem .6rem;font-size:.64rem;font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + SEP + '">' +
+        (L.cs.length ? '<span style="display:inline-block;width:.8rem;font-size:.55rem;color:var(--mut)">' + (abierto ? '▾' : '▸') + '</span>' : '') + x.cliente + warn + '</td>' +
       '<td style="padding:.26rem .6rem;' + SEP + '"><span class="pill ' + tb2 + '">' + tl + '</span></td>' +
       '<td style="padding:.26rem .6rem;text-align:center;' + SEP + '"><span class="pill ' + (x.contrato ? 'pg' : 'pgr') + '" style="font-size:.55rem">' + (x.contrato ? 'CON' : 'SIN') + '</span></td>' +
       '<td style="padding:.26rem .6rem;text-align:right;font-size:.65rem;font-weight:700;font-variant-numeric:tabular-nums;' + SEP + '">' + fmtMM(v.ing) + '</td>' +
@@ -546,7 +764,7 @@ function _pfRenderMargenNeto(filasFiltradas, todos, totGeneral){
         '<div style="height:100%;width:' + (Math.max(0, v.ing) / maxIng * 100) + '%;background:var(--az2)"></div></div>' +
         '<span style="font-size:.55rem;color:var(--mut);min-width:32px;text-align:right">' + (totIng ? (v.ing / totIng * 100) : 0).toFixed(1) + '%</span>' +
       '</div></td>' +
-    '</tr>';
+    '</tr>' + (abierto ? _pfFilaContratos(x, m) : '');
   }).join('');
 
   // Selector de visión: total / contratos / otros
@@ -579,6 +797,7 @@ function _pfRenderMargenNeto(filasFiltradas, todos, totGeneral){
       footTd(fmtMM(totMN), '.65rem') + footTd(pctF(totMNP), '.62rem') +
       '<td style="padding:.35rem .6rem;text-align:right;font-size:.6rem">' + (totIngGeneral ? (totIng / totIngGeneral * 100) : 0).toFixed(1) + '%</td>' +
     '</tr></tfoot></table></div>' +
+    _pfResumenLineaMN(filas, VIS) +
     '<p style="font-size:.55rem;color:var(--mut);margin:.5rem 0 0;line-height:1.45">' +
     '<strong>Margen Neto</strong>: la misma tabla de arriba, pero desde <strong>abril</strong> en adelante —enero a marzo ' +
     'quedan fuera de ingresos, costo y margen bruto—, porque el costo de terreno recién está cargado desde ahí. El ' +

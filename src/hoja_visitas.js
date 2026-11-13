@@ -2633,19 +2633,33 @@ function vhRender(){
   });
   const totUF = oport.reduce((s, x) => s + x.uf, 0);
 
-  // ── Hallazgos en una línea cada uno ─────────────────────────
+  // ── 3 indicadores clave ───────────────────────────────────
+  // Cada uno agrupa temas y campos de ficha y cuenta clientes y visitas
+  // distintos (una visita cuenta una vez aunque caiga en varios temas).
   const per = B.desde ? 'del ' + _vhFecha(B.desde) + ' al ' + _vhFecha(B.ult) : '';
-  const bullets = temas.slice(0, 5).map(function(T){
-    const ej = Object.keys(T.porEje).map(e => e + ' ' + T.porEje[e]).join(' · ');
-    return '<li><strong>' + T.ico + ' ' + T.t + '</strong>: aparece en <strong>' + nf(T.hits.length) + '</strong> de ' + nf(conTxt.length) +
-      ' visitas con comentario (' + pct(T.hits.length, conTxt.length) + '), en ' + nf(T.nCli) + ' clientes <span style="color:var(--mut)">(' + ej + ')</span>.</li>';
-  });
-  if(oport.length) bullets.push('<li><strong>💰 Oportunidades registradas en fichas</strong>: ' + nf(oport.length) + ' oportunidades' +
-    (totUF ? ' por un total estimado de <strong>' + nf(totUF) + ' UF</strong>' : '') + ' (detalle abajo).</li>');
+  const tema = k => (temas.find(T => T.k === k) || { hits: [] }).hits;
+  const unir = listas => Array.from(new Set([].concat.apply([], listas)));
+  const topCli = vs => {
+    const c = {}; vs.forEach(v => { c[v.r.c] = (c[v.r.c] || 0) + 1; });
+    return Object.keys(c).sort((a, b) => c[b] - c[a] || a.localeCompare(b, 'es')).slice(0, 3)
+      .map(k => _vhEsc(k) + (c[k] > 1 ? ' (' + c[k] + ')' : '')).join(' · ');
+  };
+  const nCli = vs => new Set(vs.map(v => v.r.c)).size;
+  const vOport = unir([tema('oport'), tema('licit'), tema('equipo'), oport.map(x => x.v)]);
+  const vRecl = tema('recl'), vFalla = tema('falla'), vRiesgo = unir([vRecl, vFalla]);
+  const vComp = unir([tema('comp'), fichas.filter(v => v.ficha['Competencia'])]);
+  const kpi = (col, ico, lbl, vs, extra) => '<div class="kpi" style="--kc:' + col + ';flex:1;min-width:210px">' +
+    '<div class="kpi-lbl">' + ico + ' ' + lbl + '</div>' +
+    '<div class="kpi-val">' + nf(nCli(vs)) + ' <span style="font-size:.6rem;font-weight:600;color:var(--mut)">clientes</span></div>' +
+    '<div class="kpi-sub">' + nf(vs.length) + ' visitas · ' + pct(vs.length, conTxt.length) + ' de las con comentario' + (extra ? ' · ' + extra : '') + '</div>' +
+    '<div style="font-size:.56rem;color:var(--mut);margin-top:.3rem;line-height:1.4">' + (vs.length ? 'Más mencionados: ' + topCli(vs) : 'Sin menciones en el período') + '</div></div>';
+  const kpis = '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:0 0 .7rem">' +
+    kpi('var(--teal)', '💼', 'Oportunidades comerciales', vOport, totUF ? '<strong>' + nf(totUF) + ' UF</strong> estimadas' : (oport.length ? nf(oport.length) + ' en fichas' : '')) +
+    kpi('var(--am)', '⚠️', 'Clientes que requieren atención', vRiesgo, nf(vRecl.length) + ' con reclamo · ' + nf(vFalla.length) + ' con equipos con falla') +
+    kpi('var(--or)', '⚔️', 'Presencia de competencia', vComp, '') + '</div>';
   const sinCom = V.filter(v => v.vacia);
-  if(sinCom.length) bullets.push('<li style="color:var(--mut)"><strong>📝 Registro</strong>: ' + nf(sinCom.length) + ' de ' + nf(V.length) +
-    ' visitas no tienen comentario útil' + (fichasVacias.length ? ' (' + nf(fichasVacias.length) + ' son fichas con la plantilla sin completar)' : '') +
-    ' y no entran en los hallazgos.</li>');
+  const registro = sinCom.length ? '<div style="font-size:.58rem;color:var(--mut);margin:-.3rem 0 .6rem">📝 ' + nf(sinCom.length) + ' de ' + nf(V.length) +
+    ' visitas sin comentario útil' + (fichasVacias.length ? ' (' + nf(fichasVacias.length) + ' fichas con la plantilla sin completar)' : '') + '; no entran en los indicadores.</div>' : '';
 
   // ── Tarjetas por tema (desplegables) ───────────────────────
   const det = (titulo, filas, abierto) => '<details' + (abierto ? ' open' : '') + ' style="border:1px solid var(--brd);border-radius:6px;margin-bottom:.4rem;background:var(--bg2)">' +
@@ -2673,18 +2687,44 @@ function vhRender(){
       L.map(v => filaVis(v, v.ficha[campo])).join('')) : '';
   };
 
+  // Detalle compacto de cada indicador: una fila por cliente (su mención más
+  // reciente), máximo 10, con la frase recortada; el texto completo va en el tooltip.
+  const ufDe = new Map(oport.map(x => [x.v, x.uf]));
+  const detIndicador = (tit, vs, ks, campo) => {
+    if(!vs.length) return '';
+    const w = [].concat.apply([], VH_TEMAS.filter(T => ks.indexOf(T.k) >= 0).map(T => T.w));
+    const porCli = {};
+    vs.forEach(v => { const c = v.r.c; if(!porCli[c] || v.r.f > porCli[c].r.f) porCli[c] = v; });
+    const cnt = {}; vs.forEach(v => { cnt[v.r.c] = (cnt[v.r.c] || 0) + 1; });
+    const L = Object.keys(porCli).map(c => porCli[c]).sort((a, b) => (cnt[b.r.c] - cnt[a.r.c]) || (a.r.f < b.r.f ? 1 : -1));
+    const MAX = 10;
+    const filas = L.slice(0, MAX).map(v => {
+      const full = (campo && v.ficha && v.ficha[campo]) || _vhFrase(v.txt, w);
+      const corto = full.length > 110 ? full.slice(0, 107).trim() + '…' : full;
+      const uf = ufDe.get(v) || 0;
+      return '<tr><td style="font-weight:600;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + _vhEsc(v.r.c) + '">' + _vhEsc(v.r.c) +
+        (cnt[v.r.c] > 1 ? ' <span style="color:var(--mut);font-weight:400">(' + cnt[v.r.c] + ')</span>' : '') + '</td>' +
+        '<td style="white-space:nowrap;color:var(--mut)">' + _vhFecha(v.r.f) + ' · ' + _vhEjeCorto(v.r.e) + '</td>' +
+        '<td title="' + _vhEsc(full) + '">' + _vhEsc(corto) + (uf ? ' <strong>· ' + nf(uf) + ' UF</strong>' : '') + '</td></tr>';
+    }).join('');
+    return det(tit + ' <span style="font-weight:400;color:var(--mut)">· ' + nf(L.length) + ' clientes</span>',
+      '<table class="tbl" style="font-size:.6rem;width:100%"><thead><tr><th>Cliente</th><th>Última mención</th><th>Qué se dijo</th></tr></thead><tbody>' + filas + '</tbody></table>' +
+      (L.length > MAX ? '<div style="font-size:.56rem;color:var(--mut);margin-top:.3rem">…y ' + nf(L.length - MAX) + ' clientes más. Pasa el mouse sobre una frase para ver el texto completo.</div>' : ''));
+  };
+
   box.innerHTML =
     '<div style="font-size:.6rem;color:var(--mut);margin-bottom:.45rem">' + nf(V.length) + ' visitas ' + per + ' · ' + nf(conTxt.length) +
       ' con comentario · ' + nf(fichas.length) + ' fichas completadas</div>' +
-    (bullets.length ? '<ul style="margin:0 0 .7rem;padding-left:1.1rem;font-size:.68rem;line-height:1.7">' + bullets.join('') + '</ul>'
-                    : '<p style="font-size:.66rem;color:var(--mut)">No se encontraron hallazgos en los comentarios del período.</p>') +
-    '<div style="font-size:.58rem;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:.2rem 0 .35rem">Detalle por tema · clic para desplegar</div>' +
-    temasHtml + oportHtml +
-    listaCampo('Dolor principal', '🩹', 'Dolores principales del cliente') +
-    listaCampo('Competencia', '⚔️', 'Competencia registrada en fichas') +
+    kpis + registro +
+    '<div style="font-size:.58rem;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:.2rem 0 .35rem">Detalle por indicador · clic para desplegar</div>' +
+    detIndicador('💼 Oportunidades comerciales', vOport, ['oport', 'licit', 'equipo'], 'Oportunidad') +
+    detIndicador('⚠️ Clientes que requieren atención', vRiesgo, ['recl', 'falla'], '') +
+    detIndicador('⚔️ Presencia de competencia', vComp, ['comp'], 'Competencia') +
     '<p style="font-size:.56rem;color:var(--mut);margin:.55rem 0 0;line-height:1.5">Los hallazgos se arman solos con los comentarios de ' +
     'las visitas de Eglys y Cristián (hoja <strong>VISITAS</strong>): cada comentario se clasifica por temas según sus palabras clave y se ' +
-    'cuentan las visitas y clientes de cada tema. En las fichas de visita sólo se leen los campos completados; el texto de la plantilla ' +
+    'cuentan las visitas y clientes de cada tema. Los 3 indicadores agrupan temas: <strong>Oportunidades</strong> = cotizaciones/contratos, ' +
+    'licitaciones, venta de equipos y oportunidades de fichas; <strong>Requieren atención</strong> = reclamos y equipos con fallas; <strong>Competencia</strong> = ' +
+    'competencia o servicio de terceros y el campo Competencia de las fichas. En las fichas de visita sólo se leen los campos completados; el texto de la plantilla ' +
     'que quedó sin llenar no cuenta. Una visita puede caer en más de un tema. El monto en UF de las oportunidades se lee del campo ' +
     '«Oportunidad» (o «Presupuesto») cuando trae un número seguido de «UF».</p>';
 }
